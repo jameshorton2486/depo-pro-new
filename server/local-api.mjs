@@ -11,6 +11,7 @@ import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
 import { AUDIO_TOOL_PROFILES, publicAudioTools } from "./rx-profiles.mjs";
 import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
+import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
 import { fileURLToPath } from "node:url";
@@ -142,6 +143,15 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/audio/promote" && req.method === "POST") {
       const input=await body(req,64*1024);const profile=AUDIO_TOOL_PROFILES[input.profileId];if(!profile||profile.asrSafe)throw new Error("Only a review-marked tool result can be promoted.");
       const updated=await mutateAudioAudit(root,input.uploadId,current=>{const derivative=current.storage.derivatives.find(item=>item.operationId===input.operationId);if(!derivative||derivative.kind!==DERIVATIVE_KINDS.RX_REVIEW)throw new Error("Review derivative was not found.");derivative.kind=DERIVATIVE_KINDS.RX_ASR;derivative.selectableForTranscription=true;current.history.push({event:"rx-review-derivative-promoted",at:new Date().toISOString(),operationId:derivative.operationId,profileId:profile.id,riskLevel:profile.riskLevel,caution:profile.caution});});
+      return json(res,200,updated,origin);
+    }
+    if (req.url === "/api/audio/detect-speech-segments" && req.method === "POST") {
+      const input=await body(req,64*1024),audit=readAudioAudit(root,input.uploadId),operationId=input.artifactOperationId||null;
+      const artifact=operationId?audit.storage.derivatives.find(item=>item.operationId===operationId):audit.storage.original;if(!artifact)throw new Error("Audio artifact was not found.");
+      if(operationId&&(artifact.kind===DERIVATIVE_KINDS.PLAYBACK_PROXY||artifact.timelinePreserved===false||artifact.sampleAligned===false))throw new Error("Speech segments require an original or frame-aligned derivative.");
+      const source=operationId?"processed":"original",file=resolveAudioPath(root,audit,source,operationId),detected=await detectSpeechSegments(file);
+      const speechSegments={artifactOperationId:operationId,detectedAt:new Date().toISOString(),...detected};
+      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.speechSegments=speechSegments;current.history.push({event:"speech-segments-detected",at:speechSegments.detectedAt,artifactOperationId:operationId,parameters:speechSegments.parameters,totalDurationSec:speechSegments.totalDurationSec,speechDurationSec:speechSegments.speechDurationSec})});
       return json(res,200,updated,origin);
     }
     if (req.url?.startsWith("/api/audio/original?") && req.method === "GET") {
