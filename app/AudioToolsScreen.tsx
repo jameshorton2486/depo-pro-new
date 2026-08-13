@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import type { AudioProfile } from "./IntakeScreen";
 
 const API = "http://127.0.0.1:4317";
 const TOOLS = [
@@ -12,10 +13,7 @@ const TOOLS = [
   { id:"rx12-repair-assistant-voice-light-v1", name:"Repair Assistant", description:"Apply light, general-purpose voice cleanup." },
 ] as const;
 
-type Audit = {
-  uploadId: string;
-  storage: { original: { sha256: string; immutable: boolean }; derivatives: Derivative[] };
-};
+type Audit = AudioProfile;
 type MeasurementDelta = {id:string;label:string;unit:string;before:number|null;after:number|null;status:"resolved"|"improved"|"unchanged"|"worsened"|"concealed"|"unavailable";note?:string};
 type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; manufacturer: string; product: string; toolVersion: string; module: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
 type PickerWindow = Window & {
@@ -28,7 +26,7 @@ function outputName(name: string) {
   return `${dot > 0 ? name.slice(0, dot) : name}.IXZ.flac`;
 }
 
-export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesChange }: { onBack: () => void; initialFiles?: File[]; onFilesChange?: (files: File[], replacedFile?: File, replacedSource?: File) => void }) {
+export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesChange }: { onBack: () => void; initialFiles?: File[]; onFilesChange?: (files: File[], replacedFile?: File, replacedSource?: File, processedAudit?: AudioProfile) => void }) {
   const fallbackInput = useRef<HTMLInputElement>(null);
   const [availableFiles, setAvailableFiles] = useState<File[]>(initialFiles);
   const [file, setFile] = useState<File | null>(initialFiles[0] ?? null);
@@ -85,7 +83,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
   function returnToDeposition() {
     if(processedFile&&processedSource&&onFilesChange){
       const updated=availableFiles.map(item=>item===processedSource?processedFile:item);
-      onFilesChange(updated,processedFile,processedSource);
+      onFilesChange(updated,processedFile,processedSource,audit??undefined);
     }
     onBack();
   }

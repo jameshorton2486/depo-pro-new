@@ -124,7 +124,7 @@ const server = http.createServer(async (req,res) => {
       const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original");
       const recordAuditEvent=async event=>{audit.history.push(event);writeAudioAudit(root,audit)};
       const derivative=await createRxDerivative(root,audit,{originalPath,profileId:input.profileId,recordAuditEvent});
-      audit.storage.derivatives.push(derivative); audit.history.push({event:"rx-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId}); writeAudioAudit(root,audit);
+      audit.storage.derivatives.push(derivative); audit.selectedSource="processed"; audit.selectedDerivativeOperationId=derivative.operationId; audit.selectedAudioSha256=derivative.sha256; audit.selectionBasis="manual-rx-processing"; audit.history.push({event:"rx-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId}); audit.history.push({event:"source-selected",at:new Date().toISOString(),source:"processed",reason:"manual-rx-processing",derivativeOperationId:derivative.operationId,audioSha256:derivative.sha256}); writeAudioAudit(root,audit);
       return json(res,200,{derivative,audit:publicAudit(audit)},origin);
     }
     if (req.url?.startsWith("/api/audio/derivative?") && req.method === "GET") {
