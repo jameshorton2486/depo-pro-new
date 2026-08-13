@@ -5,13 +5,13 @@ import { inspectRx, RX12_DEFAULT_EXECUTABLES, RX12_EXECUTABLE_NAME } from "../se
 
 const verified = "C:\\Program Files\\iZotope\\RX 12 Audio Editor\\win64\\iZotope RX 12 Audio Editor.exe";
 const fakeFiles = (...files) => ({
-  statSync(value) { return { isFile:() => files.some(file => path.resolve(file).toLowerCase() === path.resolve(value).toLowerCase()) }; },
-  realpathSync(value) { return path.resolve(value); },
+  statSync(value) { return { isFile:() => files.some(file => path.win32.resolve(file).toLowerCase() === path.win32.resolve(value).toLowerCase()) }; },
+  realpathSync(value) { return path.win32.resolve(value); },
 });
 
 test("configured full RX 12 executable path is accepted, including spaces", () => {
   const result = inspectRx({ environment:{RX_EXECUTABLE_PATH:verified}, candidates:[], ...fakeFiles(verified), includeExecutable:true });
-  assert.equal(result.available,true); assert.equal(result.version,"12"); assert.equal(result.detectionMethod,"RX_EXECUTABLE_PATH"); assert.equal(result.executable,path.resolve(verified));
+  assert.equal(result.available,true); assert.equal(result.version,"12"); assert.equal(result.detectionMethod,"RX_EXECUTABLE_PATH"); assert.equal(result.executable,path.win32.resolve(verified));
 });
 
 test("directory-only RX path is rejected", () => {

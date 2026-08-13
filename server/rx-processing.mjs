@@ -133,6 +133,7 @@ export async function createRxDerivative(root, audit, {
   currentTimeMs = () => Date.now(),
   staleLockMs = 35 * 60 * 1000,
   randomId = () => crypto.randomUUID(),
+  inspectRxStatus = inspectRx,
 } = {}) {
   if (!audit?.storage?.original?.immutable || !audit.storage.original.sha256) throw new Error("RX processing requires a hashed immutable original.");
   if (typeof recordAuditEvent !== "function") throw new RxProcessingError("RX processing requires an audit-backed event recorder.", "RX_AUDIT_RECORDER_REQUIRED");
@@ -143,7 +144,7 @@ export async function createRxDerivative(root, audit, {
   const expectedOriginalPath = path.resolve(root, "data", audit.storage.original.key);
   if (path.resolve(originalPath) !== expectedOriginalPath) throw new Error("RX source path does not match the audited original.");
 
-  const rx = inspectRx({ includeExecutable:true });
+  const rx = inspectRxStatus({ includeExecutable:true });
   if (!rx.available || !rx.executable) throw new Error(rx.fallback || "iZotope RX 12 is unavailable.");
   const profile = getRxProfile(profileId);
   const resolvedPluginPath = pluginPath || path.join(process.env.RX_VST3_ROOT || DEFAULT_PLUGIN_ROOT, profile.pluginFile);

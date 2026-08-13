@@ -10,6 +10,7 @@ import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { chooseAsrSource } from "./asr-selection.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
+import { systemPreflight } from "./preflight.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -111,8 +112,9 @@ const server = http.createServer(async (req,res) => {
       return json(res,200,profile,origin);
     }
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
+    if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
     if (req.url === "/api/audio/select" && req.method === "POST") {
-      const input=await body(req,64*1024); return json(res,200,selectAudioSource(root,input.uploadId,input.source,"user-override"),origin);
+      const input=await body(req,64*1024); return json(res,200,selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
     }
     if (req.url === "/api/audio/tools/upload" && req.method === "POST") {
       const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "audio.bin"));
@@ -146,7 +148,7 @@ const server = http.createServer(async (req,res) => {
         const selection=chooseAsrSource(original,processed,terms); winner=selection.winner; reason=selection.reason;
         audit.automaticSelection={status:"complete",method:"asr-estimate-v1",winner,measuredWer:false,reason,metrics:selection.metrics};
       } else audit.automaticSelection={status:"complete",method:"original-only-v1",winner,measuredWer:false,reason};
-      writeAudioAudit(root,audit); selectAudioSource(root,input.uploadId,winner,"automatic-asr-estimate"); return json(res,200,publicAudit(readAudioAudit(root,input.uploadId)),origin);
+      writeAudioAudit(root,audit); const candidate=audit.storage.derivatives.findLast(item=>item.kind!=="deepgram-compatibility"); selectAudioSource(root,input.uploadId,winner,"automatic-asr-estimate",winner==="processed"?candidate?.operationId:null); return json(res,200,publicAudit(readAudioAudit(root,input.uploadId)),origin);
     }    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource;
       const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[]});

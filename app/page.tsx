@@ -100,6 +100,7 @@ export default function Home() {
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved) setDepositions(JSON.parse(saved));
     const savedReporters = localStorage.getItem(REPORTERS_STORAGE_KEY);
     if (savedReporters) setReporters(JSON.parse(savedReporters));
@@ -198,7 +199,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#" aria-label="Depo Pro home"><span className="brand-mark">DP</span><span>DEPO<span className="brand-accent">PRO</span></span></a>
+        <button type="button" className="brand" aria-label="Depo Pro home"><span className="brand-mark">DP</span><span>DEPO<span className="brand-accent">PRO</span></span></button>
         <div className="topbar-actions"><button type="button" className="audio-tools-nav" onClick={openAudioTools}>♫ Audio Tools</button><div className="local-status"><span className="status-dot" /> Saved locally on this PC</div><button className="settings-button" onClick={() => setShowAdmin(true)} aria-label="Administrator Settings">⚙</button></div>
       </header>
 
@@ -246,7 +247,7 @@ export default function Home() {
             <button className="close-button" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
             <span className="eyebrow">NEW DEPOSITION</span><h2 id="modal-title">Set up the deposition</h2><p>Review the intake details, select the Court Reporter, and create the deposition workspace.</p>
             <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Claude extraction ready for review</strong><small>{intakeDraft.keyterms.length} Deepgram keyterms and UFM data will be saved with this deposition.</small></div></div>}
-              <label>Case style<input name="caseStyle" required autoFocus defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
+              <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={intakeDraft?.deponentType || "Fact witness"}><option>Fact witness</option><option>Expert witness</option><option>Corporate representative</option><option>Party</option><option>Other</option></select></label></div>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || new Date().toISOString().slice(0, 10)} /></label><label>Court Reporter <small>Optional</small><select name="courtReporterId" value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Not assigned</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
@@ -263,7 +264,7 @@ export default function Home() {
             <button className="close-button" aria-label="Close" onClick={() => setShowReporterModal(false)}>×</button>
             <span className="eyebrow">COURT REPORTER DIRECTORY</span><h2 id="reporter-modal-title">Add a Court Reporter</h2><p>Save the reporter once, then select them for future depositions.</p>
             <form onSubmit={createReporter}>
-              <div className="form-row"><label>Full name<input name="name" required autoFocus placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
+              <div className="form-row"><label>Full name<input name="name" required placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
               <div className="form-row"><label>Email address<input name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
               <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
               <label>Mailing address<textarea name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>

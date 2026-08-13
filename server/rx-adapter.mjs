@@ -8,8 +8,9 @@ export const RX12_DEFAULT_EXECUTABLES = Object.freeze([
 
 function validateExecutable(candidate, { statSync, realpathSync }) {
   if (!candidate) return { valid:false, reason:"No RX executable path was configured." };
-  const resolved = path.resolve(String(candidate));
-  if (path.basename(resolved).toLowerCase() !== RX12_EXECUTABLE_NAME.toLowerCase()) {
+  const value=String(candidate), semantics=/^[a-z]:[\\/]/i.test(value)?path.win32:path;
+  const resolved = semantics.resolve(value);
+  if (semantics.basename(resolved).toLowerCase() !== RX12_EXECUTABLE_NAME.toLowerCase()) {
     return { valid:false, reason:`RX path must identify ${RX12_EXECUTABLE_NAME}, not a directory or another RX version.` };
   }
   try {

@@ -1,111 +1,60 @@
-# vinext-starter
+# Depo-Pro New
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Depo-Pro New is a local-first Windows application for deposition intake, audited audio analysis and RX 12 processing, Claude-assisted case-term extraction, and Deepgram Nova-3 transcription.
+
+## Architecture
+
+- React 19 UI served locally at `http://localhost:3000`
+- Node local service bound to `127.0.0.1:4317`
+- Immutable audio originals and audited derivatives under the ignored `data/` directory
+- Windows DPAPI-protected Claude and Deepgram credentials
+- FFmpeg/FFprobe analysis and compatibility conversion
+- iZotope RX 12 VST3 processing through a pinned Python/Pedalboard worker
+
+This application currently requires Windows and local native dependencies. The Cloudflare/Vinext scaffolding remains transitional and is not a production deployment target for workflows that depend on RX, FFmpeg, DPAPI, or localhost.
 
 ## Prerequisites
 
+- Windows 11
 - Node.js `>=22.13.0`
+- FFmpeg and FFprobe on `PATH`
+- Python worker environment created from `requirements-pedalboard.txt`
+- iZotope RX 12 Audio Editor and the allow-listed RX 12 VST3 modules
+- Claude and Deepgram credentials configured in Administrator Settings
 
-## Quick Start
+## Local setup
 
-```bash
+```powershell
+cd "C:\Users\james\Projects\depo-pro-new"
 npm install
+python -m venv .venv-pedalboard
+.\.venv-pedalboard\Scripts\python.exe -m pip install -r requirements-pedalboard.txt
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Open [http://localhost:3000](http://localhost:3000). Administrator Settings shows readiness for Node, FFmpeg, FFprobe, RX, Python, Pedalboard, RX modules, Claude, and Deepgram.
 
-## Included Shape
+## RX configuration
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+Discovery precedence is explicit `RX_EXECUTABLE_PATH`, the standard RX 12 installation location, then a safe unavailable state. The value must be the full executable path:
 
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+RX_EXECUTABLE_PATH=C:\Program Files\iZotope\RX 12 Audio Editor\win64\iZotope RX 12 Audio Editor.exe
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+The Audio Tools screen exposes allow-listed profiles for Voice De-noise, De-click, De-hum, De-reverb, Dialogue Isolate, and Repair Assistant. The browser sends profile IDs only; the server controls plug-in paths and parameters. Machine-specific paths are omitted from durable audit records.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## Validation
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+- `npm test` — deterministic application, audio, Deepgram, RX adapter, and integrity tests
+- `npm run test:integration` — disposable audio through installed RX modules
+- `npm run typecheck` — TypeScript validation
+- `npm run lint` — ESLint validation
+- `npm run build` — production build
+- `npm run verify` — deterministic release gate
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## Current limits
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
-# Local RX 12 configuration
-
-Depo-Pro discovers the RX 12 Audio Editor executable in this order:
-
-1. `RX_EXECUTABLE_PATH`, when explicitly configured.
-2. The standard Windows RX 12 installation location.
-3. A safe unavailable result.
-
-`RX_EXECUTABLE_PATH` must be the full path to `iZotope RX 12 Audio Editor.exe`, not its containing `win64` directory. Local machine configuration belongs in the ignored `.env.local` file. The executable path is used for machine capability detection and is omitted from durable deposition audio audit records. Automated audio rendering uses the separately validated RX 12 Voice De-noise VST3 worker; Depo-Pro does not launch the interactive editor for unattended processing.
-
-The Audio Tools screen exposes six manually selected, allow-listed RX 12 profiles: Voice De-noise, De-click, De-hum, De-reverb, Dialogue Isolate, and Repair Assistant. The client sends only a profile ID; plug-in paths and raw parameters remain controlled by the local server. Every derivative retains the immutable-original hash, selected profile identity, actual plug-in identity/version, effective parameters, and sample-alignment verification.
+- Deposition metadata remains browser-managed; SQLite migration requires a separately reviewed data model.
+- Deepgram transcription remains synchronous. Durable asynchronous jobs, callback recovery, and immutable raw response storage require a separate design.
+- Canonical transcript graph, correction decisions, workspace, UFM, and certification are not yet implemented.

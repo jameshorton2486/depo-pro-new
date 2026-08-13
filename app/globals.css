@@ -166,6 +166,9 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .config-status { justify-self:start; margin-left:7px; padding:3px 7px; border-radius:99px; background:#f1f3f7; color:#7b8698; font-size:9px; }
 .config-status.ready { background:#e6f7ef; color:#27805c; }
 .admin-message { padding:11px; background:#f4f7fc; border-radius:9px; color:#4d5d75; font-size:12px; }
+.preflight { margin:0 0 28px; padding:18px; border:1px solid #dce3ed; border-radius:12px; background:#fafbfd; }
+.preflight h2 { margin:0 0 5px; font-size:17px; }.preflight>p { color:#8b5a22; font-size:11px; }.preflight>p.ready { color:#247653; }
+.preflight ul { list-style:none; margin:15px 0 0; padding:0; display:grid; gap:7px; }.preflight li { display:grid; grid-template-columns:24px 125px 1fr; align-items:center; gap:8px; font-size:11px; }.preflight li>span { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; }.preflight li>span.ready { background:#def4e9; color:#187653; }.preflight li>span.missing { background:#fff0df; color:#a55d1a; }.preflight li small { color:#758197; overflow-wrap:anywhere; }
 .secret-rules { margin-top:28px; padding-top:22px; border-top:1px solid #edf0f4; color:#69768c; }
 .secret-rules h3 { color:#34425a; font-size:13px; }
 .secret-rules ul { padding-left:18px; font-size:11px; line-height:1.7; }
