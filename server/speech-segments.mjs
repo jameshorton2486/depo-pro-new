@@ -27,3 +27,5 @@ export async function detectSpeechSegments(file,parameters=SPEECH_DETECTION_PARA
   const segments=parseSilenceDetect(output,totalDurationSec,parameters),speechDurationSec=segments.filter(item=>item.kind==="speech").reduce((sum,item)=>sum+item.endSec-item.startSec,0);
   return {parameters:{...parameters},totalDurationSec,speechDurationSec,segments};
 }
+
+export function skipSilenceTarget(currentTime,segments=[]){const silence=segments.find(item=>item.kind==="silence"&&currentTime>=item.startSec&&currentTime<item.endSec);return silence?silence.endSec:currentTime}
