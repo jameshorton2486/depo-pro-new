@@ -14,6 +14,8 @@ test("Windows directory commit retries transient file locks",()=>{let calls=0,wa
 
 test("directory commit does not retry non-transient failures",()=>{let calls=0;assert.throws(()=>_testing.commitDirectory("staging","final",{rename:()=>{calls++;throw Object.assign(new Error("exists"),{code:"EEXIST"})},wait:()=>{},attempts:20}),/exists/);assert.equal(calls,1)});
 
+test("exhausted Windows rename has a distinguishable error",()=>{const waits=[];assert.throws(()=>_testing.commitDirectory("staging","final",{rename:()=>{throw Object.assign(new Error("locked"),{code:"EBUSY"})},wait:value=>waits.push(value),attempts:3,delayBaseMs:10}),error=>error.code==="DEPOSITION_COMMIT_BLOCKED"&&/after 3 attempts/.test(error.message));assert.deepEqual(waits,[10,20])});
+
 test("scanner reports orphaned and malformed deposition folders",t=>{const value=fixture();t.after(()=>fs.rmSync(value.root,{recursive:true,force:true}));const root=path.join(value.root,"data","depositions");fs.mkdirSync(path.join(root,"DEP-20260813-AAAAA"),{recursive:true});fs.mkdirSync(path.join(root,"DEP-20260813-BBBBB"),{recursive:true});fs.writeFileSync(path.join(root,"DEP-20260813-BBBBB","deposition.json"),"not json");const issues=scanDepositions(value.root).issues;assert.equal(issues.find(item=>item.folder.endsWith("AAAAA")).code,"ORPHANED_FOLDER");assert.equal(issues.find(item=>item.folder.endsWith("BBBBB")).code,"MALFORMED_DEPOSITION")});
 
 test("invalid IDs and traversal are rejected before filesystem access",()=>{assert.throws(()=>depositionDirectory("C:/safe","../outside"),/Invalid deposition ID/);assert.throws(()=>depositionDirectory("C:/safe","DEP-20260813-AAAAA/../../x"),/Invalid deposition ID/)});
