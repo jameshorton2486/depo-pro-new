@@ -9,6 +9,8 @@ const MAX_AUDIO_BYTES = Number(process.env.MAX_AUDIO_BYTES) || 12 * 1024 ** 3;
 const SCHEMA_VERSION = "3.0.0";
 const ANALYSIS_VERSION = "audio-quality-v2.0.0";
 const ROUTING_VERSION = "audio-routing-v2.0.0";
+const auditLocks=new Map();
+export async function withAuditLock(uploadId,fn){const previous=auditLocks.get(uploadId)??Promise.resolve();const next=previous.then(fn,fn);auditLocks.set(uploadId,next.catch(()=>{}));try{return await next}finally{if(auditLocks.get(uploadId)===next)auditLocks.delete(uploadId)}}
 
 async function run(command, args, { binary = false } = {}) {
   return await new Promise((resolve, reject) => {
@@ -57,6 +59,7 @@ export function readAudioAudit(root, uploadId) {
   return validateAudit(JSON.parse(fs.readFileSync(target, "utf8")));
 }
 export function writeAudioAudit(root, audit) { validateAudit(audit); atomicWrite(auditFile(root, audit.uploadId), audit); }
+export async function mutateAudioAudit(root,uploadId,mutator){return withAuditLock(uploadId,async()=>{const audit=readAudioAudit(root,uploadId),result=await mutator(audit);writeAudioAudit(root,audit);return result??publicAudit(audit)})}
 
 export async function saveAudioForTools(req, { root, originalName, contentType }) {
   const uploadId = crypto.randomUUID();
@@ -161,8 +164,7 @@ export async function createDeepgramCompatibilityDerivative(root, audit, source 
   if (!sourceItem) throw new Error("The requested audio source is unavailable for conversion.");
   const existing = audit.storage.derivatives.find(item => item.kind === "deepgram-compatibility" && item.sourceSha256 === sourceItem.sha256);
   if (existing) {
-    appendHistory(audit, "deepgram-compatibility-derivative-reused", { source, key: existing.key, sha256: existing.sha256 });
-    writeAudioAudit(root, audit);
+    await mutateAudioAudit(root,audit.uploadId,current=>appendHistory(current,"deepgram-compatibility-derivative-reused",{source,key:existing.key,sha256:existing.sha256}));
     return { path: resolveKey(root, existing.key), derivative: existing };
   }
   const sourcePath = resolveKey(root, sourceItem.key);
@@ -180,9 +182,7 @@ export async function createDeepgramCompatibilityDerivative(root, audit, source 
     media: { codec: stream.codec_name || "pcm_s16le", sampleRate: Number(stream.sample_rate || 0), channels: Number(stream.channels || 0) },
     sourcePcmPrecision:"selected source precision",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt: new Date().toISOString(), purpose: "Deepgram media-decoding fallback only",
   };
-  audit.storage.derivatives.push(derivative);
-  appendHistory(audit, "deepgram-compatibility-derivative-created", { source, key: derivative.key, sha256: derivative.sha256, sourceSha256: derivative.sourceSha256, profileId: derivative.profileId });
-  writeAudioAudit(root, audit);
+  await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);appendHistory(current,"deepgram-compatibility-derivative-created",{source,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
   return { path: target, derivative };
 }
 export async function saveAndAnalyzeAudio(req, { root, originalName, contentType }) {
@@ -208,7 +208,7 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
     audit.status="ready"; appendHistory(audit,"routing-recommendation-created",{routingPolicyVersion:ROUTING_VERSION,route:audit.recommendation.route}); writeAudioAudit(root,audit); return publicAudit(audit);
   } catch(error) { audit.status="analysis-failed"; audit.analysisError=error instanceof Error?error.message:"Audio analysis failed."; appendHistory(audit,"analysis-failed",{error:audit.analysisError}); writeAudioAudit(root,audit); return publicAudit(audit); }
 }
-export function selectAudioSource(root,uploadId,source,reason="user-override",derivativeOperationId=null) { const audit=readAudioAudit(root,uploadId); const item=resolveAudioItem(audit,source,derivativeOperationId); audit.selectedSource=source; audit.selectedDerivativeOperationId=source==="processed"?item.operationId:null; audit.selectedAudioSha256=item.sha256; audit.selectionBasis=reason;appendHistory(audit,"source-selected",{source,reason,derivativeOperationId:audit.selectedDerivativeOperationId,audioSha256:item.sha256});writeAudioAudit(root,audit);return publicAudit(audit); }
+export async function selectAudioSource(root,uploadId,source,reason="user-override",derivativeOperationId=null) {return mutateAudioAudit(root,uploadId,audit=>{const item=resolveAudioItem(audit,source,derivativeOperationId);audit.selectedSource=source;audit.selectedDerivativeOperationId=source==="processed"?item.operationId:null;audit.selectedAudioSha256=item.sha256;audit.selectionBasis=reason;appendHistory(audit,"source-selected",{source,reason,derivativeOperationId:audit.selectedDerivativeOperationId,audioSha256:item.sha256})})}
 export function resolveAudioPath(root,audit,source=audit.selectedSource,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){return resolveKey(root,resolveAudioItem(audit,source,derivativeOperationId).key);}
-export function recordTranscription(root,audit,source,transcript,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){const item=resolveAudioItem(audit,source,derivativeOperationId); audit.transcripts[source]={...transcript,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null};appendHistory(audit,"deepgram-transcription-completed",{source,requestId:transcript.requestId,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null});writeAudioAudit(root,audit);return publicAudit(audit);}
-export function recordComparison(root,audit,comparison){audit.comparisons.push(comparison);appendHistory(audit,"transcript-quality-compared",{source:comparison.source,wer:comparison.wer,criticalLegalErrorRate:comparison.criticalLegalErrorRate});writeAudioAudit(root,audit);return publicAudit(audit);}
+export async function recordTranscription(root,audit,source,transcript,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){return mutateAudioAudit(root,audit.uploadId,current=>{const item=resolveAudioItem(current,source,derivativeOperationId);current.transcripts[source]={...transcript,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null};appendHistory(current,"deepgram-transcription-completed",{source,requestId:transcript.requestId,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null})})}
+export async function recordComparison(root,audit,comparison){return mutateAudioAudit(root,audit.uploadId,current=>{current.comparisons.push(comparison);appendHistory(current,"transcript-quality-compared",{source:comparison.source,wer:comparison.wer,criticalLegalErrorRate:comparison.criticalLegalErrorRate})})}

@@ -4,7 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, recordTranscription, recordComparison, writeAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, recordTranscription, recordComparison, mutateAudioAudit } from "./audio-pipeline.mjs";
 import { transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
@@ -122,7 +122,7 @@ const server = http.createServer(async (req,res) => {
       res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
     }
     if (req.url === "/api/audio/select" && req.method === "POST") {
-      const input=await body(req,64*1024); return json(res,200,selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
+      const input=await body(req,64*1024); return json(res,200,await selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
     }
     if (req.url === "/api/audio/tools/upload" && req.method === "POST") {
       const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "audio.bin"));
@@ -130,10 +130,10 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url === "/api/audio/rx-process" && req.method === "POST") {
       const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original");
-      const recordAuditEvent=async event=>{audit.history.push(event);writeAudioAudit(root,audit)};
+      const recordAuditEvent=async event=>mutateAudioAudit(root,audit.uploadId,current=>current.history.push(event));
       const derivative=await createRxDerivative(root,audit,{originalPath,profileId:input.profileId,recordAuditEvent});
-      audit.storage.derivatives.push(derivative); audit.selectedSource="processed"; audit.selectedDerivativeOperationId=derivative.operationId; audit.selectedAudioSha256=derivative.sha256; audit.selectionBasis="manual-rx-processing"; audit.history.push({event:"rx-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId}); audit.history.push({event:"source-selected",at:new Date().toISOString(),source:"processed",reason:"manual-rx-processing",derivativeOperationId:derivative.operationId,audioSha256:derivative.sha256}); writeAudioAudit(root,audit);
-      return json(res,200,{derivative,audit:publicAudit(audit)},origin);
+      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"rx-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
+      return json(res,200,{derivative,audit:updated},origin);
     }
     if (req.url?.startsWith("/api/audio/derivative?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),audit=readAudioAudit(root,url.searchParams.get("uploadId"));
@@ -146,15 +146,15 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/audio/auto-select" && req.method === "POST") {
       const input=await body(req,2*1024*1024),audit=readAudioAudit(root,input.uploadId);
       audit.automaticSelection={status:"not-run",method:"user-triggered-sampled-comparison",winner:"original",measuredWer:false,reason:"No full-file comparison was run during intake. The original remains selected until the user requests a sampled comparison."};
-      writeAudioAudit(root,audit);return json(res,200,publicAudit(audit),origin);
+      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.automaticSelection=audit.automaticSelection});return json(res,200,updated,origin);
     }    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource;
       const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[]});
-      recordTranscription(root,audit,source,transcript); return json(res,200,{source,...transcript},origin);
+      await recordTranscription(root,audit,source,transcript); return json(res,200,{source,...transcript},origin);
     }
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
       const input=await body(req,10*1024*1024); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource; const hypothesis=input.hypothesis||audit.transcripts?.[source]?.transcript||"";
-      const comparison={source,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[])}; recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
+      const comparison={source,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[])}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
     }
     if (req.url?.startsWith("/api/audio/audit?") && req.method === "GET") {
       const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"); return json(res,200,publicAudit(readAudioAudit(root,uploadId)),origin);
