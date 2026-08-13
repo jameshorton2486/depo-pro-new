@@ -8,7 +8,6 @@ import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, se
 import { transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
-import { chooseAsrSource } from "./asr-selection.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
@@ -145,19 +144,9 @@ const server = http.createServer(async (req,res) => {
       res.writeHead(200,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
     }
     if (req.url === "/api/audio/auto-select" && req.method === "POST") {
-      const input=await body(req,2*1024*1024); const config=loadSecrets(); let audit=readAudioAudit(root,input.uploadId);
-      if(audit.automaticSelection?.status==="complete") return json(res,200,publicAudit(audit),origin);
-      const terms=input.keyterms||[];
-      const original=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source:"original",keyterms:terms});
-      recordTranscription(root,audit,"original",original); audit=readAudioAudit(root,input.uploadId);
-      let winner="original",processed=null,reason="No candidate derivative was created; the original remains selected.";
-      if(audit.storage.derivatives.length){
-        processed=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source:"processed",keyterms:terms});
-        recordTranscription(root,audit,"processed",processed); audit=readAudioAudit(root,input.uploadId);
-        const selection=chooseAsrSource(original,processed,terms); winner=selection.winner; reason=selection.reason;
-        audit.automaticSelection={status:"complete",method:"asr-estimate-v1",winner,measuredWer:false,reason,metrics:selection.metrics};
-      } else audit.automaticSelection={status:"complete",method:"original-only-v1",winner,measuredWer:false,reason};
-      writeAudioAudit(root,audit); const candidate=audit.storage.derivatives.findLast(item=>item.kind!=="deepgram-compatibility"); selectAudioSource(root,input.uploadId,winner,"automatic-asr-estimate",winner==="processed"?candidate?.operationId:null); return json(res,200,publicAudit(readAudioAudit(root,input.uploadId)),origin);
+      const input=await body(req,2*1024*1024),audit=readAudioAudit(root,input.uploadId);
+      audit.automaticSelection={status:"not-run",method:"user-triggered-sampled-comparison",winner:"original",measuredWer:false,reason:"No full-file comparison was run during intake. The original remains selected until the user requests a sampled comparison."};
+      writeAudioAudit(root,audit);return json(res,200,publicAudit(audit),origin);
     }    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource;
       const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[]});
