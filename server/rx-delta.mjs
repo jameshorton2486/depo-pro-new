@@ -12,13 +12,13 @@ export function compareRxMeasurements(before = {}, after = {}) {
   const afterLowFrequency = number(after.lowFrequencyMeanDb) !== null && number(after.meanVolumeDb) !== null ? after.lowFrequencyMeanDb - after.meanVolumeDb : null;
   const beforeClipping = number(before.clippedSampleCount), afterClipping = number(after.clippedSampleCount);
   const clippingPresent = beforeClipping !== null && beforeClipping > 8;
-  const beforeHum=number(before.humHarmonicMeanDb),afterHum=number(after.humHarmonicMeanDb);
+  const beforeHum=number(before.humHarmonicMeanDb)===null||number(before.meanVolumeDb)===null?null:before.humHarmonicMeanDb-before.meanVolumeDb,afterHum=number(after.humHarmonicMeanDb)===null||number(after.meanVolumeDb)===null?null:after.humHarmonicMeanDb-after.meanVolumeDb;
   const beforeImpulses=number(before.impulseCount),afterImpulses=number(after.impulseCount);
   const beforeFricatives=number(before.fricativeBandMeanDb),afterFricatives=number(after.fricativeBandMeanDb);
   const fricativeRetention=beforeFricatives === null || afterFricatives === null ? null : 10 ** ((afterFricatives-beforeFricatives)/20);
   return [
     {
-      id:"humHarmonics",label:"Hum harmonic energy",unit:"dBFS",before:beforeHum,after:afterHum,
+      id:"humHarmonics",label:"Hum harmonic energy",unit:"dB relative to full band",before:beforeHum,after:afterHum,
       status:beforeHum === null || afterHum === null ? "unavailable" : beforeHum-afterHum > 1 ? "improved" : afterHum-beforeHum > 1 ? "worsened" : "unchanged",
       note:`Measured at the stronger ${before.humLineFrequencyHz ?? after.humLineFrequencyHz ?? 50}/60 Hz harmonic family.`,
     },

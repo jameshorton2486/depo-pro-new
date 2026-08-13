@@ -141,13 +141,17 @@ function classifyAudio(measurements, durationSeconds) {
   const clippingDetected = measurements.clippingMeasured && measurements.clippedSampleCount !== null ? measurements.clippedSampleCount > 8 : null;
   const lowFrequencyDetected = measurements.lowFrequencyMeanDb !== null && measurements.meanVolumeDb !== null ? measurements.lowFrequencyMeanDb - measurements.meanVolumeDb > -13 : null;
   const unevenDetected = measurements.dynamicRangeDb !== null ? measurements.dynamicRangeDb > 35 : null;
+  const humRelativeDb=measurements.humHarmonicMeanDb !== null&&measurements.meanVolumeDb !== null?measurements.humHarmonicMeanDb-measurements.meanVolumeDb:null;
+  const lineHumDetected=humRelativeDb!==null?humRelativeDb>-24:null,impulsesDetected=measurements.impulseCount!==null?measurements.impulseCount>8:null;
   return {
     lowLevel: { measured: measurements.meanVolumeDb !== null, detected: lowLevelDetected, confidence: lowLevelDetected === null ? null : .9, evidence: { meanVolumeDb: measurements.meanVolumeDb, thresholdDb: -32 } },
     clipping: { measured: measurements.clippingMeasured, detected: clippingDetected, confidence: clippingDetected === null ? null : .82, evidence: { clippedSampleCount: measurements.clippedSampleCount, peakDbfs: measurements.peakDbfs } },
     lowFrequencyEnergy: { measured: measurements.lowFrequencyMeanDb !== null, detected: lowFrequencyDetected, confidence: lowFrequencyDetected === null ? null : .6, evidence: { lowFrequencyMeanDb: measurements.lowFrequencyMeanDb, fullBandMeanDb: measurements.meanVolumeDb }, note: "May be HVAC rumble, handling noise, traffic, or speech; it is not labeled electrical hum." },
     unevenLevels: { measured: measurements.dynamicRangeDb !== null, detected: unevenDetected, confidence: unevenDetected === null ? null : .72, evidence: { dynamicRangeDb: measurements.dynamicRangeDb } },
+    lineHum: { measured:humRelativeDb!==null,detected:lineHumDetected,confidence:lineHumDetected===null?null:.7,evidence:{lineFrequencyHz:measurements.humLineFrequencyHz,harmonicEnergyRelativeDb:humRelativeDb} },
+    impulses: { measured:measurements.impulseCount!==null,detected:impulsesDetected,confidence:impulsesDetected===null?null:.7,evidence:{impulseCount:measurements.impulseCount} },
     echo: { measured: false, detected: null, confidence: null, evidence: null, note: "Echo is not automatically evaluated by the current validated analyzer." },
-    clean: { measured: true, detected: ![lowLevelDetected, clippingDetected, lowFrequencyDetected, unevenDetected].includes(true) && durationSeconds >= 3, confidence: durationSeconds >= 3 ? .75 : .35 },
+    clean: { measured: true, detected: ![lowLevelDetected, clippingDetected, lowFrequencyDetected, unevenDetected,lineHumDetected,impulsesDetected].includes(true) && durationSeconds >= 3, confidence: durationSeconds >= 3 ? .75 : .35 },
     uncertain: { measured: true, detected: durationSeconds < 3 || [lowLevelDetected, clippingDetected].includes(null), confidence: 1 },
   };
 }
