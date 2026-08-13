@@ -11,7 +11,7 @@ from pedalboard import load_plugin
 from pedalboard.io import AudioFile
 
 PARAMETER_TOLERANCE = 1e-6
-OUTPUT_BIT_DEPTH = 24
+OUTPUT_BIT_DEPTH = 16
 EXPECTED_MANUFACTURER = "iZotope"
 EXPECTED_MAJOR_VERSION = "12"
 
@@ -139,7 +139,7 @@ def main() -> None:
             "channels": channels,
             "sourceFrames": source_frames,
             "framesProcessed": frames_processed,
-            "outputEncoding": {"container": "wav", "sampleFormat": "pcm_s24le", "bitDepth": OUTPUT_BIT_DEPTH},
+            "outputEncoding": {"container": "wav", "sampleFormat": "pcm_s16le", "bitDepth": OUTPUT_BIT_DEPTH},
             "requestedRawParameters": requested_parameters,
             "appliedRawParameters": applied_parameters,
             "effectiveRawParameters": effective_parameters,

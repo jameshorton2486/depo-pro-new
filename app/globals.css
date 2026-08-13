@@ -268,4 +268,15 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .audio-tools-replacement { margin:14px 0 0; padding:12px 14px; border:1px solid #b8dfcf; border-radius:10px; background:#eef9f4; color:#28634d; font-size:12px; }
 .audio-tools-record { grid-template-columns:180px 1fr; gap:12px 18px; }
 .audio-tools-record dd { overflow-wrap:anywhere; font-family:Consolas,monospace; font-size:11px; }
+.rx-delta-report { margin-top:24px; }
+.rx-delta-report>p { color:#61738f; }
+.rx-delta-report ul { display:grid; gap:10px; padding:0; list-style:none; }
+.rx-delta-report li { display:grid; grid-template-columns:minmax(180px,1fr) auto; gap:4px 16px; padding:12px 14px; border:1px solid #d7e0ee; border-radius:10px; }
+.rx-delta-report li>span:not(.rx-delta-status),.rx-delta-report small { grid-column:1/-1; color:#61738f; }
+.rx-delta-status { text-transform:capitalize; font-weight:800; }
+.rx-delta-worsened { border-color:#d9363e!important; background:#fff5f5; }
+.rx-delta-worsened .rx-delta-status { color:#b4232b; }
+.rx-delta-resolved .rx-delta-status,.rx-delta-improved .rx-delta-status { color:#15805f; }
+.rx-delta-concealed { border-color:#e5a742!important; background:#fff9ed; }
+.rx-delta-concealed .rx-delta-status { color:#935e08; }
 @media(max-width:700px){.audio-tools-layout{width:calc(100% - 24px);padding-top:28px}.audio-tools-heading h1{font-size:30px}.audio-tools-actions{flex-direction:column}.audio-tools-record{grid-template-columns:1fr;gap:5px}.audio-tools-record dd{margin-bottom:10px}.audio-tools-nav{padding:8px;font-size:0}.audio-tools-nav:first-letter{font-size:16px}}

@@ -9,7 +9,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "node --test tests/asr-selection.test.mjs tests/audio-quality.test.mjs tests/audio-source-selection.test.mjs tests/deepgram-compatibility.test.mjs tests/preflight.test.mjs tests/rx-adapter.test.mjs tests/rx-processing-safeguards.test.mjs",
+    "test": "node --test tests/asr-selection.test.mjs tests/audio-quality.test.mjs tests/audio-source-selection.test.mjs tests/deepgram-compatibility.test.mjs tests/preflight.test.mjs tests/rx-adapter.test.mjs tests/rx-delta.test.mjs tests/rx-processing-safeguards.test.mjs",
     "test:integration": "node scripts/test-rx-integration.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "verify": "npm test && npm run typecheck && npm run lint && npm run build",

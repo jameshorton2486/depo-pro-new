@@ -44,6 +44,8 @@ RX_EXECUTABLE_PATH=C:\Program Files\iZotope\RX 12 Audio Editor\win64\iZotope RX 
 
 The Audio Tools screen exposes allow-listed profiles for Voice De-noise, De-click, De-hum, De-reverb, Dialogue Isolate, and Repair Assistant. The browser sends profile IDs only; the server controls plug-in paths and parameters. Machine-specific paths are omitted from durable audit records.
 
+Canonical RX derivatives are 16-bit lossless FLAC files with the source sample rate and channel count preserved. Depo-Pro validates sample/frame alignment after both RX rendering and FLAC encoding, records the exact operation ID and SHA-256, and displays a before/after measurement delta. Original clipping remains an evidentiary defect even when processing conceals it.
+
 ## Validation
 
 - `npm test` — deterministic application, audio, Deepgram, RX adapter, and integrity tests

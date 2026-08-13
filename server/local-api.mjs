@@ -133,7 +133,7 @@ const server = http.createServer(async (req,res) => {
       if(!derivative) throw new Error("Processed audio was not found.");
       const file=path.resolve(root,"data",derivative.key),directory=path.resolve(root,"data","audio-intake",audit.uploadId)+path.sep;
       if(!file.startsWith(directory)) throw new Error("Processed audio path is invalid.");
-      res.writeHead(200,{"content-type":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
+      res.writeHead(200,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
     }
     if (req.url === "/api/audio/auto-select" && req.method === "POST") {
       const input=await body(req,2*1024*1024); const config=loadSecrets(); let audit=readAudioAudit(root,input.uploadId);

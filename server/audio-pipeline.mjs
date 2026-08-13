@@ -106,6 +106,11 @@ async function measureLowFrequencyEnergy(file) {
   const text = await run("ffmpeg", ["-hide_banner", "-nostats", "-t", "90", "-i", file, "-af", "lowpass=f=130,highpass=f=40,volumedetect", "-f", "null", "-"]);
   return metric(text, /mean_volume:\s*(-?[\d.]+) dB/i);
 }
+export async function measureAudioQuality(file) {
+  const measurements = await measureAudio(file);
+  measurements.lowFrequencyMeanDb = await measureLowFrequencyEnergy(file);
+  return measurements;
+}
 function classifyAudio(measurements, durationSeconds) {
   const lowLevelDetected = measurements.meanVolumeDb !== null ? measurements.meanVolumeDb < -32 : null;
   const clippingDetected = measurements.clippingMeasured && measurements.clippedSampleCount !== null ? measurements.clippedSampleCount > 8 : null;
@@ -197,7 +202,7 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
   try {
     audit.tools.ffmpeg=await ffmpegVersion(); const probe=await probeAudio(originalPath), stream=probe.streams?.find(item=>item.codec_type==="audio"); if(!stream) throw new Error("The selected file does not contain a readable audio stream.");
     audit.media={durationSeconds:Number(probe.format?.duration||0),codec:stream.codec_name||"unknown",sampleRate:Number(stream.sample_rate||0),channels:Number(stream.channels||0)};
-    const measurements=await measureAudio(originalPath); measurements.lowFrequencyMeanDb=await measureLowFrequencyEnergy(originalPath); audit.measurements=measurements;
+    const measurements=await measureAudioQuality(originalPath); audit.measurements=measurements;
     audit.findings=classifyAudio(measurements,audit.media.durationSeconds); audit.recommendation=recommendProcessing(audit.findings); appendHistory(audit,"technical-analysis-completed",{analysisVersion:ANALYSIS_VERSION});
     if(audit.recommendation.candidateProfile){const derivative=await createDerivative(root,audit,originalPath,audit.recommendation.candidateProfile,measurements);audit.storage.derivatives.push(derivative);appendHistory(audit,"candidate-derivative-created",{key:derivative.key,sha256:derivative.sha256,profileId:derivative.profileId});}
     audit.status="ready"; appendHistory(audit,"routing-recommendation-created",{routingPolicyVersion:ROUTING_VERSION,route:audit.recommendation.route}); writeAudioAudit(root,audit); return publicAudit(audit);

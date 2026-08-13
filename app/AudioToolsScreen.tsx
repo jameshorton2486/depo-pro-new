@@ -16,7 +16,8 @@ type Audit = {
   uploadId: string;
   storage: { original: { sha256: string; immutable: boolean }; derivatives: Derivative[] };
 };
-type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; manufacturer: string; product: string; toolVersion: string; module: string };
+type MeasurementDelta = {id:string;label:string;unit:string;before:number|null;after:number|null;status:"resolved"|"improved"|"unchanged"|"worsened"|"concealed"|"unavailable";note?:string};
+type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; manufacturer: string; product: string; toolVersion: string; module: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
 type PickerWindow = Window & {
   showOpenFilePicker?: (options: object) => Promise<FileSystemFileHandle[]>;
   showSaveFilePicker?: (options: object) => Promise<FileSystemFileHandle>;
@@ -24,7 +25,7 @@ type PickerWindow = Window & {
 
 function outputName(name: string) {
   const dot = name.lastIndexOf(".");
-  return `${dot > 0 ? name.slice(0, dot) : name}.IXZ.wav`;
+  return `${dot > 0 ? name.slice(0, dot) : name}.IXZ.flac`;
 }
 
 export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesChange }: { onBack: () => void; initialFiles?: File[]; onFilesChange?: (files: File[], replacedFile?: File, replacedSource?: File) => void }) {
@@ -74,7 +75,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
       setAudit(body.audit); setDerivative(body.derivative);
       const audioResponse=await fetch(`${API}/api/audio/derivative?uploadId=${encodeURIComponent(body.audit.uploadId)}&operationId=${encodeURIComponent(body.derivative.operationId)}`);
       if(!audioResponse.ok)throw new Error((await audioResponse.json()).error);
-      const replacement=new File([await audioResponse.blob()],outputName(file.name),{type:"audio/wav",lastModified:Date.now()});
+      const replacement=new File([await audioResponse.blob()],outputName(file.name),{type:"audio/flac",lastModified:Date.now()});
       setProcessedFile(replacement); setProcessedSource(file);
       setMessage(`Processing complete. Back to deposition will replace ${file.name} with ${replacement.name}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Audio processing failed."); }
@@ -97,7 +98,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
       if (!response.ok) throw new Error((await response.json()).error);
       const blob = await response.blob(), name = outputName(file.name), picker = window as PickerWindow;
       if (picker.showSaveFilePicker) {
-        const options: { suggestedName: string; types: object[]; startIn?: FileSystemFileHandle } = { suggestedName: name, types: [{ description: "Processed WAV audio", accept: { "audio/wav": [".wav"] } }] };
+        const options: { suggestedName: string; types: object[]; startIn?: FileSystemFileHandle } = { suggestedName: name, types: [{ description: "Lossless processed FLAC audio", accept: { "audio/flac": [".flac"] } }] };
         if (sourceHandle) options.startIn = sourceHandle;
         const handle = await picker.showSaveFilePicker(options), writable = await handle.createWritable();
         await writable.write(blob); await writable.close(); setMessage(`Saved ${handle.name}.`);
@@ -113,7 +114,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
   return <main className="audio-tools-shell">
     <header className="intake-topbar"><button className="back-button" onClick={returnToDeposition}>← Back to deposition</button><div className="brand"><span className="brand-mark">DP</span><span>DEPO<span className="brand-accent">PRO</span></span></div><span>Audio Tools</span></header>
     <section className="audio-tools-layout">
-      <div className="audio-tools-heading"><span className="eyebrow">AUDIO TOOLS</span><h1>Process an audio file</h1><p>Select a recording already loaded for this deposition or choose another file, apply an audited RX module, then save an IXZ WAV copy.</p></div>
+      <div className="audio-tools-heading"><span className="eyebrow">AUDIO TOOLS</span><h1>Process an audio file</h1><p>Select a recording already loaded for this deposition or choose another file, apply an audited RX module, then save a lossless IXZ FLAC copy.</p></div>
       <section className="audio-tools-card">
         {availableFiles.length > 0 && <label className="audio-tool-picker">Loaded deposition audio<select value={file ? `${file.name}:${file.lastModified}:${file.size}` : ""} onChange={event => { const next=availableFiles.find(item => `${item.name}:${item.lastModified}:${item.size}` === event.target.value); if(next) selectLoadedFile(next); }} disabled={busy}>{availableFiles.map((item,index) => <option key={`${item.name}-${item.lastModified}-${index}`} value={`${item.name}:${item.lastModified}:${item.size}`}>{index + 1}. {item.name}</option>)}</select><small>{availableFiles.length} file{availableFiles.length === 1 ? "" : "s"} carried over from the current deposition intake.</small></label>}
         <button className="secondary-button audio-tools-choose" onClick={chooseFile} disabled={busy}>{availableFiles.length ? "Choose a different audio file" : "Choose audio file"}</button>
@@ -124,7 +125,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
         <p className="audio-tools-message" role="status">{message}</p>
         {processedFile&&<p className="audio-tools-replacement"><strong>Ready to replace intake audio:</strong> {processedSource?.name} → {processedFile.name}</p>}
       </section>
-      {audit && <section className="audio-tools-card"><h2>Processing record</h2><dl className="audio-tools-record"><dt>Upload ID</dt><dd>{audit.uploadId}</dd><dt>Original SHA-256</dt><dd>{audit.storage.original.sha256}</dd><dt>Processed SHA-256</dt><dd>{derivative?.sha256 || "Pending"}</dd><dt>Source immutable</dt><dd>{String(audit.storage.original.immutable)}</dd><dt>Sample aligned</dt><dd>{derivative ? String(derivative.sampleAligned) : "Pending"}</dd><dt>Processing identity</dt><dd>{derivative ? `${derivative.manufacturer} ${derivative.product} ${derivative.toolVersion} · ${derivative.module}` : "Pending"}</dd></dl></section>}
+      {audit && <section className="audio-tools-card"><h2>Processing record</h2><dl className="audio-tools-record"><dt>Upload ID</dt><dd>{audit.uploadId}</dd><dt>Original SHA-256</dt><dd>{audit.storage.original.sha256}</dd><dt>Processed SHA-256</dt><dd>{derivative?.sha256 || "Pending"}</dd><dt>Source immutable</dt><dd>{String(audit.storage.original.immutable)}</dd><dt>Sample aligned</dt><dd>{derivative ? String(derivative.sampleAligned) : "Pending"}</dd><dt>Output</dt><dd>{derivative ? `${derivative.outputEncoding.container.toUpperCase()} · lossless` : "Pending"}</dd><dt>Processing identity</dt><dd>{derivative ? `${derivative.manufacturer} ${derivative.product} ${derivative.toolVersion} · ${derivative.module}` : "Pending"}</dd></dl>{derivative?.measurementDelta&&<div className="rx-delta-report"><h3>Before/after measurement report</h3><p>Original defects remain part of the evidence. This report describes measurable change, not a new classification of the original.</p><ul>{derivative.measurementDelta.map(item=><li key={item.id} className={`rx-delta-${item.status}`}><strong>{item.label}</strong><span className="rx-delta-status">{item.status}</span><span>{item.before===null||item.after===null?"Measurement unavailable":`${item.before.toFixed(1)} → ${item.after.toFixed(1)} ${item.unit}`}</span>{item.note&&<small>{item.note}</small>}</li>)}</ul></div>}</section>}
     </section>
   </main>;
 }

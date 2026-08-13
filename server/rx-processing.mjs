@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { inspectRx } from "./rx-adapter.mjs";
 import { getRxProfile } from "./rx-profiles.mjs";
+import { measureAudioQuality } from "./audio-pipeline.mjs";
+import { compareRxMeasurements } from "./rx-delta.mjs";
 
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PYTHON = process.env.DEPO_PRO_RX_PYTHON || path.join(MODULE_DIRECTORY, "..", ".venv-pedalboard", "Scripts", "python.exe");
@@ -126,7 +128,9 @@ export async function createRxDerivative(root, audit, {
   pluginPath,
   runWorker = runProcess,
   runDecoder = runProcess,
+  runEncoder = runProcess,
   validateAudio = validateReadableAudio,
+  measureQuality = measureAudioQuality,
   hashFile = sha256,
   recordAuditEvent,
   now = () => new Date().toISOString(),
@@ -155,13 +159,15 @@ export async function createRxDerivative(root, audit, {
   const workRoot = path.join(path.resolve(root), "data", "rx-work");
   const lockDirectory = path.join(workRoot, "locks");
   const operationDirectory = path.join(workRoot, audit.uploadId, operationId);
-  const finalPath = path.join(directory, `candidate.${profile.id}.${operationId}.wav`);
+  const finalPath = path.join(directory, `candidate.${profile.id}.${operationId}.flac`);
   const temporaryPath = path.join(operationDirectory, "derivative.partial.wav");
+  const encodedPath = path.join(operationDirectory, "derivative.partial.flac");
   const processingSourcePath = path.join(operationDirectory, "processing-source.wav");
   const profilePath = path.join(operationDirectory, "profile.json");
   const resultPath = path.join(operationDirectory, "result.json");
   assertWithin(finalPath, directory);
   assertWithin(temporaryPath, workRoot);
+  assertWithin(encodedPath, workRoot);
   const key = path.relative(path.join(path.resolve(root), "data"), finalPath).replaceAll("\\", "/");
   if (!/^audio-intake\/[a-f0-9-]+\//i.test(key)) throw new RxProcessingError("RX derivative is outside audited audio storage.", "RX_STORAGE_PATH_INVALID");
   fs.mkdirSync(lockDirectory, { recursive: true });
@@ -199,18 +205,25 @@ export async function createRxDerivative(root, audit, {
     if (!worker.manufacturer || !worker.pluginVersion || worker.manufacturer !== "iZotope" || worker.plugin !== profile.expectedPlugin || String(worker.pluginVersion).split(".", 1)[0] !== "12") throw new RxProcessingError("RX worker did not report a valid plug-in identity.", "RX_PROVENANCE_INCOMPLETE");
     if (worker.profileId !== profile.id || worker.profileVersion !== profile.version) throw new RxProcessingError("RX worker profile identity does not match the requested profile.", "RX_PROVENANCE_INCOMPLETE");
     if (!Number.isInteger(worker.sourceFrames) || !Number.isInteger(worker.framesProcessed) || worker.sourceFrames <= 0 || worker.framesProcessed !== worker.sourceFrames) throw new RxProcessingError("RX worker did not prove exact frame parity.", "RX_PROVENANCE_INCOMPLETE");
-    const media = await validateAudio(temporaryPath);
+    const workerMedia = await validateAudio(temporaryPath);
+    assertSampleAligned(sourceMedia, workerMedia, worker.framesProcessed);
+    const measurementsBefore = await measureQuality(originalPath);
+    await runEncoder("ffmpeg", ["-v", "error", "-nostdin", "-i", temporaryPath, "-map", "0:a:0", "-vn", "-c:a", "flac", "-sample_fmt", "s16", encodedPath], 30 * 60 * 1000);
+    if (!fs.existsSync(encodedPath)) throw new Error("Lossless FLAC encoding reported success without producing output.");
+    const media = await validateAudio(encodedPath);
     assertSampleAligned(sourceMedia, media, worker.framesProcessed);
+    const measurementsAfter = await measureQuality(encodedPath);
+    const measurementDelta = compareRxMeasurements(measurementsBefore, measurementsAfter);
     const afterHash = await hashFile(originalPath);
     if (afterHash !== beforeHash) {
       await recordViolation(recordAuditEvent, { event: "rx-integrity-violation", code: "SOURCE_CHANGED_DURING_PROCESSING", operationId, at: now(), expectedSha256: beforeHash, observedSha256: afterHash });
     }
-    const derivativeHash = await hashFile(temporaryPath);
-    fs.renameSync(temporaryPath, finalPath);
+    const derivativeHash = await hashFile(encodedPath);
+    fs.renameSync(encodedPath, finalPath);
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      sampleAligned: true, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, outputEncoding: worker.outputEncoding, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
+      sampleAligned: true, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
       manufacturer: worker.manufacturer, product: profile.product, edition: profile.edition, module: profile.module,
       pluginIdentifier: profile.pluginIdentifier, host: worker.worker, hostVersion: worker.workerVersion, profileId: profile.id,
       profileVersion: profile.version, presetIdentity: profile.presetIdentity, requestedProcessingParameters: worker.requestedRawParameters, appliedProcessingParameters: worker.appliedRawParameters, effectiveProcessingParameters: worker.effectiveRawParameters, effectiveDisplayValues: worker.effectiveDisplayValues, processingParameters: worker.appliedRawParameters, createdAt: now(), media,
@@ -218,6 +231,7 @@ export async function createRxDerivative(root, audit, {
   } catch (error) {
     if (renamed && fs.existsSync(finalPath)) fs.rmSync(finalPath, { force: true });
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
+    if (fs.existsSync(encodedPath)) fs.rmSync(encodedPath, { force: true });
     if (error instanceof RxProcessingError) throw error;
     throw new RxProcessingError(error instanceof Error ? error.message : "RX processing failed.", "RX_PROCESSING_FAILED", { cause: error });
   } finally {
