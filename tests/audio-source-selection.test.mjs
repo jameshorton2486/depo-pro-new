@@ -11,6 +11,7 @@ const audit = {
       { kind: "processing", operationId: "operation-a", key: "audio-intake/id/a.wav", sha256: "hash-a" },
       { kind: "processing", operationId: "operation-b", key: "audio-intake/id/b.wav", sha256: "hash-b" },
       { kind: "deepgram-compatibility", operationId: "compat", key: "audio-intake/id/compat.wav", sha256: "compat" },
+      { kind: "playback-proxy", operationId: "proxy", key: "audio-intake/id/proxy.opus", sha256: "proxy", timelinePreserved:false, selectableForTranscription:false },
     ],
   },
 };
@@ -27,4 +28,8 @@ test("ambiguous or missing processed identity fails closed", () => {
 
 test("original source always resolves to the immutable original", () => {
   assert.equal(resolveAudioItem(audit, "original").sha256, "original");
+});
+
+test("frame-changing playback proxies are structurally barred from transcription selection", () => {
+  assert.throws(() => resolveAudioItem(audit,"processed","proxy"),/operation is unavailable/);
 });

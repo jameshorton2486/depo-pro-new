@@ -47,6 +47,8 @@ The Audio Tools screen exposes allow-listed profiles for Voice De-noise, De-clic
 
 Canonical RX derivatives are 16-bit lossless FLAC files with the source sample rate and channel count preserved. Depo-Pro validates sample/frame alignment after both RX rendering and FLAC encoding, records the exact operation ID and SHA-256, and displays a before/after measurement delta. Original clipping remains an evidentiary defect even when processing conceals it.
 
+The canonical transcription derivative never removes leading, trailing, or internal silence and never changes frame count. Its FLAC metadata embeds the upload ID, RX operation ID, source SHA-256, profile identity, and `frame-aligned-no-cuts` timeline policy. Any future shortened listening file must be marked as a non-evidentiary proxy and is structurally ineligible for transcription selection.
+
 ## Validation
 
 - `npm test` — deterministic application, audio, Deepgram, RX adapter, and integrity tests

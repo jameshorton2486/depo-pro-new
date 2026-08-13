@@ -15,7 +15,7 @@ const TOOLS = [
 
 type Audit = AudioProfile;
 type MeasurementDelta = {id:string;label:string;unit:string;before:number|null;after:number|null;status:"resolved"|"improved"|"unchanged"|"worsened"|"concealed"|"unavailable";note?:string};
-type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; manufacturer: string; product: string; toolVersion: string; module: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
+type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; timelinePreserved:boolean; timelinePolicy:string; manufacturer: string; product: string; toolVersion: string; module: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
 type PickerWindow = Window & {
   showOpenFilePicker?: (options: object) => Promise<FileSystemFileHandle[]>;
   showSaveFilePicker?: (options: object) => Promise<FileSystemFileHandle>;

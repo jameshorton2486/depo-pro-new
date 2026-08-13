@@ -144,7 +144,7 @@ async function createDerivative(root, audit, originalPath, profile, measurements
   return { kind:"processing", operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-ar", "48000", "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
 }
 
-function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => item.kind !== "deepgram-compatibility"); }
+function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => item.kind !== "deepgram-compatibility" && !String(item.kind||"").endsWith("-proxy") && item.timelinePreserved !== false && item.selectableForTranscription !== false); }
 export function resolveAudioItem(audit, source = audit.selectedSource, derivativeOperationId = source === "processed" ? audit.selectedDerivativeOperationId : null) {
   if (source === "original") return audit.storage.original;
   if (source !== "processed") throw new Error("Select original or processed audio.");

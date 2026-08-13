@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { createRxDerivative } from "../server/rx-processing.mjs";
 import { RX_PROFILES } from "../server/rx-profiles.mjs";
 
@@ -15,5 +16,6 @@ for(const profile of Object.values(RX_PROFILES)) test(`installed ${profile.modul
   const uploadId=crypto.randomUUID(),directory=path.join(root,"data","audio-intake",uploadId),originalPath=path.join(directory,"original.wav"); fs.mkdirSync(directory,{recursive:true}); fs.copyFileSync(sample,originalPath);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(originalPath)).digest("hex"),audit={uploadId,storage:{original:{key:`audio-intake/${uploadId}/original.wav`,immutable:true,sha256},derivatives:[]}};
   const result=await createRxDerivative(root,audit,{originalPath,profileId:profile.id,recordAuditEvent:async()=>{}});
-  assert.equal(result.profileId,profile.id); assert.equal(result.module,profile.module); assert.equal(result.sampleAligned,true); assert.equal(result.sourceSha256,sha256); assert.match(result.key,/\.flac$/); assert.equal(result.outputEncoding.container,"flac"); assert.equal(result.outputEncoding.lossless,true); assert.equal(result.media.sampleFrames,result.sourceMedia.sampleFrames); assert.ok(result.measurementDelta.some(item=>item.status!=="unavailable")); assert.ok(fs.existsSync(path.join(root,"data",...result.key.split("/"))));
+  const derivativePath=path.join(root,"data",...result.key.split("/"));assert.equal(result.profileId,profile.id); assert.equal(result.module,profile.module); assert.equal(result.sampleAligned,true); assert.equal(result.sourceSha256,sha256); assert.match(result.key,/\.flac$/); assert.equal(result.outputEncoding.container,"flac"); assert.equal(result.outputEncoding.lossless,true); assert.equal(result.media.sampleFrames,result.sourceMedia.sampleFrames); assert.ok(result.measurementDelta.some(item=>item.status!=="unavailable")); assert.ok(fs.existsSync(derivativePath));
+  const probe=spawnSync("ffprobe",["-v","error","-show_entries","format_tags","-of","json",derivativePath],{encoding:"utf8",windowsHide:true});assert.equal(probe.status,0,probe.stderr);const tags=JSON.parse(probe.stdout).format.tags;assert.equal(tags.DEPO_PRO_OPERATION_ID,result.operationId);assert.equal(tags.DEPO_PRO_SOURCE_SHA256,sha256);assert.equal(tags.DEPO_PRO_TIMELINE_POLICY,"frame-aligned-no-cuts");
 });

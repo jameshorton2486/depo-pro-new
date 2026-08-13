@@ -208,7 +208,9 @@ export async function createRxDerivative(root, audit, {
     const workerMedia = await validateAudio(temporaryPath);
     assertSampleAligned(sourceMedia, workerMedia, worker.framesProcessed);
     const measurementsBefore = await measureQuality(originalPath);
-    await runEncoder("ffmpeg", ["-v", "error", "-nostdin", "-i", temporaryPath, "-map", "0:a:0", "-vn", "-c:a", "flac", "-sample_fmt", "s16", encodedPath], 30 * 60 * 1000);
+    const provenanceTags={DEPO_PRO_UPLOAD_ID:audit.uploadId,DEPO_PRO_OPERATION_ID:operationId,DEPO_PRO_SOURCE_SHA256:beforeHash,DEPO_PRO_PROFILE_ID:profile.id,DEPO_PRO_PROFILE_VERSION:profile.version,DEPO_PRO_TIMELINE_POLICY:"frame-aligned-no-cuts"};
+    const metadataArguments=Object.entries(provenanceTags).flatMap(([name,value])=>["-metadata",`${name}=${value}`]);
+    await runEncoder("ffmpeg", ["-v", "error", "-nostdin", "-i", temporaryPath, "-map", "0:a:0", "-vn", "-c:a", "flac", "-sample_fmt", "s16", ...metadataArguments, encodedPath], 30 * 60 * 1000);
     if (!fs.existsSync(encodedPath)) throw new Error("Lossless FLAC encoding reported success without producing output.");
     const media = await validateAudio(encodedPath);
     assertSampleAligned(sourceMedia, media, worker.framesProcessed);
@@ -223,7 +225,7 @@ export async function createRxDerivative(root, audit, {
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      sampleAligned: true, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
+      kind:"processing", sampleAligned: true, timelinePreserved:true, timelinePolicy:"frame-aligned-no-cuts", selectableForTranscription:true, provenanceTags, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
       manufacturer: worker.manufacturer, product: profile.product, edition: profile.edition, module: profile.module,
       pluginIdentifier: profile.pluginIdentifier, host: worker.worker, hostVersion: worker.workerVersion, profileId: profile.id,
       profileVersion: profile.version, presetIdentity: profile.presetIdentity, requestedProcessingParameters: worker.requestedRawParameters, appliedProcessingParameters: worker.appliedRawParameters, effectiveProcessingParameters: worker.effectiveRawParameters, effectiveDisplayValues: worker.effectiveDisplayValues, processingParameters: worker.appliedRawParameters, createdAt: now(), media,
