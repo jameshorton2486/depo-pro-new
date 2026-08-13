@@ -4,11 +4,13 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, recordTranscription, recordComparison, mutateAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, recordTranscription, recordComparison, mutateAudioAudit, createHighpassDerivative } from "./audio-pipeline.mjs";
 import { transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
+import { AUDIO_TOOL_PROFILES, publicAudioTools } from "./rx-profiles.mjs";
+import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
 import { fileURLToPath } from "node:url";
@@ -112,6 +114,7 @@ const server = http.createServer(async (req,res) => {
       return json(res,200,profile,origin);
     }
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
+    if (req.url === "/api/audio/tools" && req.method === "GET") return json(res,200,publicAudioTools(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
@@ -130,10 +133,20 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url === "/api/audio/rx-process" && req.method === "POST") {
       const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original");
+      const selectedProfile=AUDIO_TOOL_PROFILES[input.profileId];if(!selectedProfile)throw new Error("Unsupported audio tool.");
       const recordAuditEvent=async event=>mutateAudioAudit(root,audit.uploadId,current=>current.history.push(event));
-      const derivative=await createRxDerivative(root,audit,{originalPath,profileId:input.profileId,recordAuditEvent});
-      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"rx-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
+      const derivative=selectedProfile.engine==="ffmpeg"?await createHighpassDerivative(root,audit):await createRxDerivative(root,audit,{originalPath,profileId:input.profileId,recordAuditEvent});
+      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"audio-tool-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,kind:derivative.kind,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
       return json(res,200,{derivative,audit:updated},origin);
+    }
+    if (req.url === "/api/audio/promote" && req.method === "POST") {
+      const input=await body(req,64*1024);const profile=AUDIO_TOOL_PROFILES[input.profileId];if(!profile||profile.asrSafe)throw new Error("Only a review-marked tool result can be promoted.");
+      const updated=await mutateAudioAudit(root,input.uploadId,current=>{const derivative=current.storage.derivatives.find(item=>item.operationId===input.operationId);if(!derivative||derivative.kind!==DERIVATIVE_KINDS.RX_REVIEW)throw new Error("Review derivative was not found.");derivative.kind=DERIVATIVE_KINDS.RX_ASR;derivative.selectableForTranscription=true;current.history.push({event:"rx-review-derivative-promoted",at:new Date().toISOString(),operationId:derivative.operationId,profileId:profile.id,riskLevel:profile.riskLevel,caution:profile.caution});});
+      return json(res,200,updated,origin);
+    }
+    if (req.url?.startsWith("/api/audio/original?") && req.method === "GET") {
+      const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"),audit=readAudioAudit(root,uploadId),file=resolveAudioPath(root,audit,"original");
+      res.writeHead(200,{"content-type":audit.contentType||"application/octet-stream","content-length":audit.storage.original.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(file).pipe(res);
     }
     if (req.url?.startsWith("/api/audio/derivative?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),audit=readAudioAudit(root,url.searchParams.get("uploadId"));

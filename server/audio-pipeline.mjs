@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { inspectRx } from "./rx-adapter.mjs";
 import { ASR_ELIGIBLE_KINDS, CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
+import { compareRxMeasurements } from "./rx-delta.mjs";
 
 const MAX_AUDIO_BYTES = Number(process.env.MAX_AUDIO_BYTES) || 12 * 1024 ** 3;
 const SCHEMA_VERSION = "3.0.0";
@@ -165,6 +166,12 @@ async function createDerivative(root, audit, originalPath, profile, measurements
   await run("ffmpeg", args);
   const after = await measureAudio(target);
   return { kind:DERIVATIVE_KINDS.FFMPEG_CANDIDATE, operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", sourcePcmPrecision:"decoded source; lossy inputs have no source PCM bit depth",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
+}
+export async function createHighpassDerivative(root,audit){
+  const originalPath=resolveKey(root,audit.storage.original.key),operationId=crypto.randomUUID(),name=`candidate.low-frequency-rolloff-v2.${operationId}.flac`,target=path.join(storageDirectory(root,audit.uploadId),name),measurementsBefore=await measureAudioQuality(originalPath);
+  await run("ffmpeg",["-y","-hide_banner","-loglevel","error","-i",originalPath,"-af","highpass=f=70","-c:a","flac",target]);
+  const measurementsAfter=await measureAudioQuality(target);
+  return {kind:DERIVATIVE_KINDS.RX_ASR,operationId,key:`audio-intake/${audit.uploadId}/${name}`,bytes:fs.statSync(target).size,sha256:sha256(target),sourceSha256:audit.storage.original.sha256,sourceImmutable:true,tool:"ffmpeg",toolVersion:audit.tools.ffmpeg,profileId:"low-frequency-rolloff-v2",profileVersion:"2.0.0",sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:true,outputEncoding:{container:"flac",lossless:true},measurementsBefore,measurementsAfter,measurementDelta:compareRxMeasurements(measurementsBefore,measurementsAfter),createdAt:new Date().toISOString()};
 }
 
 function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => ASR_ELIGIBLE_KINDS.has(item.kind) && item.timelinePreserved !== false && item.selectableForTranscription !== false); }

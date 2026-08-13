@@ -1,21 +1,14 @@
 "use client";
+/* eslint-disable jsx-a11y/media-has-caption, jsx-a11y/label-has-associated-control */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AudioProfile } from "./IntakeScreen";
 
 const API = "http://127.0.0.1:4317";
-const TOOLS = [
-  { id:"rx12-voice-denoise-factory-adaptive-v1", name:"Voice De-noise", description:"Adaptive dialogue noise reduction." },
-  { id:"rx12-de-click-conservative-v1", name:"De-click", description:"Remove isolated clicks with conservative sensitivity." },
-  { id:"rx12-de-hum-dynamic-v1", name:"De-hum", description:"Reduce steady 60 Hz hum and harmonics." },
-  { id:"rx12-de-reverb-conservative-v1", name:"De-reverb", description:"Reduce room echo and reverberation." },
-  { id:"rx12-dialogue-isolate-conservative-v1", name:"Dialogue Isolate", description:"Reduce noise and reverb while preserving speech." },
-  { id:"rx12-repair-assistant-voice-light-v1", name:"Repair Assistant", description:"Apply light, general-purpose voice cleanup." },
-] as const;
-
 type Audit = AudioProfile;
+type Tool={id:string;version:string;engine:string;displayName:string;plainPurpose:string;riskLevel:"low"|"moderate"|"high";asrSafe:boolean;chainOrder:number|null;recommendFor:string[];excludes:string[];caution:string|null};
 type MeasurementDelta = {id:string;label:string;unit:string;before:number|null;after:number|null;status:"resolved"|"improved"|"unchanged"|"worsened"|"concealed"|"unavailable";note?:string};
-type Derivative = { operationId: string; sha256: string; sampleAligned: boolean; timelinePreserved:boolean; timelinePolicy:string; manufacturer: string; product: string; toolVersion: string; module: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
+type Derivative = { operationId: string; kind:string; profileId:string; sha256: string; sampleAligned: boolean; timelinePreserved:boolean; timelinePolicy:string; manufacturer?: string; product?: string; toolVersion?: string; module?: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
 type PickerWindow = Window & {
   showOpenFilePicker?: (options: object) => Promise<FileSystemFileHandle[]>;
   showSaveFilePicker?: (options: object) => Promise<FileSystemFileHandle>;
@@ -36,8 +29,14 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
   const [processedFile, setProcessedFile] = useState<File | null>(null);
   const [processedSource, setProcessedSource] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [profileId, setProfileId] = useState(TOOLS[0].id);
+  const [tools,setTools]=useState<Tool[]>([]);
+  const [profileId, setProfileId] = useState("");
   const [message, setMessage] = useState(initialFiles.length ? `${initialFiles.length} intake audio file${initialFiles.length === 1 ? "" : "s"} loaded.` : "Choose one audio file to begin.");
+  useEffect(()=>{void fetch(`${API}/api/audio/tools`).then(response=>response.json()).then((items:Tool[])=>{setTools(items);setProfileId(current=>current||items[0]?.id||"")}).catch(()=>setMessage("Audio tool definitions could not be loaded."))},[]);
+  const selectedTool=tools.find(tool=>tool.id===profileId);
+  const activeFindings=audit?.findings?Object.entries(audit.findings).filter(([,finding])=>finding.detected).map(([id])=>id):[];
+  const recommended=tools.filter(tool=>tool.recommendFor.some(code=>activeFindings.includes(code)));
+  const others=tools.filter(tool=>!recommended.includes(tool));
 
   function selectFile(next: File, handle: FileSystemFileHandle | null = null) {
     setAvailableFiles(current => current.some(item => item === next) ? current : [...current, next]);
@@ -63,10 +62,10 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
     if (!file) return;
     setBusy(true); setMessage("Uploading the immutable original…");
     try {
-      let response = await fetch(`${API}/api/audio/tools/upload`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-file-name": encodeURIComponent(file.name) }, body: file });
+      let response = await fetch(`${API}/api/audio/analyze`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-file-name": encodeURIComponent(file.name) }, body: file });
       let body = await response.json();
       if (!response.ok) throw new Error(body.error);
-      setAudit(body); setMessage(`Processing through RX 12 ${TOOLS.find(tool => tool.id === profileId)?.name ?? "module"}…`);
+      setAudit(body); setMessage(`Processing with ${selectedTool?.displayName ?? "selected tool"}…`);
       response = await fetch(`${API}/api/audio/rx-process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadId: body.uploadId, profileId }) });
       body = await response.json();
       if (!response.ok) throw new Error(`${body.code}: ${body.error}`);
@@ -78,6 +77,12 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
       setMessage(`Processing complete. Back to deposition will replace ${file.name} with ${replacement.name}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Audio processing failed."); }
     finally { setBusy(false); }
+  }
+
+  async function promoteForTranscription(){
+    if(!audit||!derivative||!selectedTool?.caution)return;
+    if(!window.confirm(`${selectedTool.displayName} is marked ${selectedTool.riskLevel} risk. ${selectedTool.caution} Promote this result for transcription anyway?`))return;
+    setBusy(true);try{const response=await fetch(`${API}/api/audio/promote`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({uploadId:audit.uploadId,operationId:derivative.operationId,profileId:derivative.profileId})}),body=await response.json();if(!response.ok)throw new Error(body.error);setAudit(body);setDerivative(current=>current?{...current,kind:"rx-asr"}:current);setMessage("Review derivative promoted for transcription. The decision was recorded in the audit.")}catch(error){setMessage(error instanceof Error?error.message:"Promotion failed.")}finally{setBusy(false)}
   }
 
   function returnToDeposition() {
@@ -117,13 +122,16 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
         {availableFiles.length > 0 && <label className="audio-tool-picker">Loaded deposition audio<select value={file ? `${file.name}:${file.lastModified}:${file.size}` : ""} onChange={event => { const next=availableFiles.find(item => `${item.name}:${item.lastModified}:${item.size}` === event.target.value); if(next) selectLoadedFile(next); }} disabled={busy}>{availableFiles.map((item,index) => <option key={`${item.name}-${item.lastModified}-${index}`} value={`${item.name}:${item.lastModified}:${item.size}`}>{index + 1}. {item.name}</option>)}</select><small>{availableFiles.length} file{availableFiles.length === 1 ? "" : "s"} carried over from the current deposition intake.</small></label>}
         <button className="secondary-button audio-tools-choose" onClick={chooseFile} disabled={busy}>{availableFiles.length ? "Choose a different audio file" : "Choose audio file"}</button>
         <input ref={fallbackInput} className="audio-tools-hidden-input" type="file" accept="audio/*,.wav" onChange={event => event.target.files?.[0] && selectFile(event.target.files[0])} />
-        <label className="audio-tool-picker">iZotope module<select value={profileId} onChange={event => setProfileId(event.target.value as typeof profileId)} disabled={busy}>{TOOLS.map(tool => <option key={tool.id} value={tool.id}>{tool.name}</option>)}</select><small>{TOOLS.find(tool => tool.id === profileId)?.description}</small></label>
+        {audit&&<section className="audio-original-summary"><h2>Original recording</h2><strong>Original recording — preserved and never modified.</strong><dl><dt>File</dt><dd>{audit.originalName}</dd><dt>Duration</dt><dd>{audit.media?.durationSeconds?.toFixed(1)??"—"} seconds</dd><dt>Format</dt><dd>{audit.media?.codec??"—"}</dd><dt>Sample rate</dt><dd>{audit.media?.sampleRate?.toLocaleString()??"—"} Hz</dd><dt>Channels</dt><dd>{audit.media?.channels??"—"}</dd><dt>Size</dt><dd>{audit.storage.original.bytes.toLocaleString()} bytes</dd><dt>SHA-256</dt><dd>{audit.storage.original.sha256?"Verified":"Pending"}</dd></dl><p>Findings: {activeFindings.length?activeFindings.join(", "):"No validated concern detected."}</p></section>}
+        <section className="audio-tool-menu"><h2>Recommended for this recording</h2>{recommended.length?<div className="audio-tool-grid">{recommended.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileId===tool.id} onSelect={()=>setProfileId(tool.id)} trigger={tool.recommendFor.filter(code=>activeFindings.includes(code)).join(", ")}/>)}</div>:<p>No tool is automatically recommended. The original remains the default.</p>}<h2>Other tools</h2><div className="audio-tool-grid">{others.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileId===tool.id} onSelect={()=>setProfileId(tool.id)}/>)}</div>{selectedTool&&<p className="audio-tool-order">Selected execution order: {selectedTool.displayName} (step {selectedTool.chainOrder??"standalone"}).</p>}</section>
         <div className="audio-tools-file"><strong>{file ? `${file.name} · ${file.size.toLocaleString()} bytes` : "No audio file selected"}</strong><span>{file ? `Processed copy: ${outputName(file.name)}` : "Select WAV, MP3, M4A, FLAC, OGG, AAC, or WMA."}</span></div>
-        <div className="audio-tools-actions"><button className="primary-button" disabled={!file || busy} onClick={processAudio}>{busy && !derivative ? "Processing…" : "Process audio"}</button><button className="audio-save-button" disabled={!derivative || busy} onClick={saveAudio}>Save processed audio</button></div>
+        <div className="audio-tools-actions"><button className="primary-button" disabled={!file || !profileId || busy} onClick={processAudio}>{busy && !derivative ? "Processing…" : "Process audio"}</button><button className="audio-save-button" disabled={!derivative || busy} onClick={saveAudio}>Save processed audio</button>{derivative?.kind==="rx-review"&&<button className="secondary-button" disabled={busy} onClick={promoteForTranscription}>Promote for transcription</button>}</div>
         <p className="audio-tools-message" role="status">{message}</p>
         {processedFile&&<p className="audio-tools-replacement"><strong>Ready to replace intake audio:</strong> {processedSource?.name} → {processedFile.name}</p>}
       </section>
-      {audit && <section className="audio-tools-card"><h2>Processing record</h2><dl className="audio-tools-record"><dt>Upload ID</dt><dd>{audit.uploadId}</dd><dt>Original SHA-256</dt><dd>{audit.storage.original.sha256}</dd><dt>Processed SHA-256</dt><dd>{derivative?.sha256 || "Pending"}</dd><dt>Source immutable</dt><dd>{String(audit.storage.original.immutable)}</dd><dt>Sample aligned</dt><dd>{derivative ? String(derivative.sampleAligned) : "Pending"}</dd><dt>Output</dt><dd>{derivative ? `${derivative.outputEncoding.container.toUpperCase()} · lossless` : "Pending"}</dd><dt>Processing identity</dt><dd>{derivative ? `${derivative.manufacturer} ${derivative.product} ${derivative.toolVersion} · ${derivative.module}` : "Pending"}</dd></dl>{derivative?.measurementDelta&&<div className="rx-delta-report"><h3>Before/after measurement report</h3><p>Original defects remain part of the evidence. This report describes measurable change, not a new classification of the original.</p><ul>{derivative.measurementDelta.map(item=><li key={item.id} className={`rx-delta-${item.status}`}><strong>{item.label}</strong><span className="rx-delta-status">{item.status}</span><span>{item.before===null||item.after===null?"Measurement unavailable":`${item.before.toFixed(1)} → ${item.after.toFixed(1)} ${item.unit}`}</span>{item.note&&<small>{item.note}</small>}</li>)}</ul></div>}</section>}
+      {audit && <section className="audio-tools-card"><h2>Processing result</h2>{derivative&&<div className="audio-playback-pair"><label>Original recording<audio controls src={`${API}/api/audio/original?uploadId=${encodeURIComponent(audit.uploadId)}`}/></label><label>Processed result<audio controls src={`${API}/api/audio/derivative?uploadId=${encodeURIComponent(audit.uploadId)}&operationId=${encodeURIComponent(derivative.operationId)}`}/></label></div>}<dl className="audio-tools-record"><dt>Upload ID</dt><dd>{audit.uploadId}</dd><dt>Original SHA-256</dt><dd>{audit.storage.original.sha256}</dd><dt>Processed SHA-256</dt><dd>{derivative?.sha256 || "Pending"}</dd><dt>Derivative kind</dt><dd>{derivative?.kind||"Pending"}</dd><dt>Source immutable</dt><dd>{String(audit.storage.original.immutable)}</dd><dt>Sample aligned</dt><dd>{derivative ? String(derivative.sampleAligned) : "Pending"}</dd><dt>Output</dt><dd>{derivative ? `${derivative.outputEncoding.container.toUpperCase()} · lossless` : "Pending"}</dd><dt>Processing identity</dt><dd>{derivative ? `${derivative.manufacturer??"FFmpeg"} ${derivative.product??""} ${derivative.toolVersion??""} · ${derivative.module??selectedTool?.displayName??""}` : "Pending"}</dd></dl>{derivative?.measurementDelta&&<div className="rx-delta-report"><h3>Before/after measurement report</h3><p>The original was measured before processing and the final output afterward. Intermediates are not measured. Original defects remain part of the evidence.</p><ul>{derivative.measurementDelta.map(item=><li key={item.id} className={`rx-delta-${item.status}`}><strong>{item.label}</strong><span className="rx-delta-status">{item.status}</span><span>{item.before===null||item.after===null?"Measurement unavailable":`${item.before.toFixed(1)} → ${item.after.toFixed(1)} ${item.unit}`}</span>{item.status==="concealed"&&item.id==="clipping"&&<small>Clipping present in original — concealed by processing.</small>}{item.note&&<small>{item.note}</small>}</li>)}</ul></div>}</section>}
     </section>
   </main>;
 }
+
+function ToolButton({tool,selected,onSelect,trigger}:{tool:Tool;selected:boolean;onSelect:()=>void;trigger?:string}){return <button type="button" className={`audio-tool-button ${selected?"selected":""}`} onClick={onSelect}><span><strong>{tool.displayName}</strong><em>{tool.riskLevel} risk</em></span><p>{tool.plainPurpose}</p>{trigger&&<small>Recommended for: {trigger}</small>}{tool.caution&&<small>{tool.caution}</small>}</button>}

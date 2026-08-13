@@ -251,6 +251,21 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .audio-tools-heading p { max-width:720px; color:var(--muted); line-height:1.6; }
 .audio-tools-card { padding:28px; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:0 7px 22px rgba(25,43,78,.05); }
 .audio-tools-card h2 { font-size:21px; }
+.audio-original-summary { margin:20px 0; padding:20px; border:1px solid #dce3ed; border-radius:12px; background:#fafbfd; }
+.audio-original-summary dl { display:grid; grid-template-columns:120px 1fr; gap:6px 14px; }
+.audio-original-summary dd { margin:0; overflow-wrap:anywhere; }
+.audio-tool-menu { margin:22px 0; }
+.audio-tool-menu h2 { margin:22px 0 10px; }
+.audio-tool-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.audio-tool-button { padding:16px; border:1px solid #cfd9e9; border-radius:12px; background:#fff; color:inherit; text-align:left; cursor:pointer; }
+.audio-tool-button.selected { border:2px solid #315fce; background:#f2f6ff; }
+.audio-tool-button>span { display:flex; justify-content:space-between; gap:10px; }
+.audio-tool-button em { color:#61738f; font-size:11px; text-transform:uppercase; font-style:normal; }
+.audio-tool-button p,.audio-tool-button small { display:block; margin:8px 0 0; color:#61738f; line-height:1.4; }
+.audio-tool-order { padding:12px; border-radius:9px; background:#eef4ff; color:#294d9d; }
+.audio-playback-pair { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:18px 0; }
+.audio-playback-pair label { display:grid; gap:8px; font-weight:750; }
+.audio-playback-pair audio { width:100%; }
 .audio-tool-picker { display:grid; gap:7px; margin-top:18px; color:#46536a; font-size:12px; font-weight:750; }
 .audio-tool-picker select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fafbfd; padding:12px 13px; color:var(--ink); }
 .audio-tool-picker small { color:var(--muted); font-weight:400; }
@@ -281,4 +296,4 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .rx-delta-concealed .rx-delta-status { color:#935e08; }
 .store-issues { margin-top:16px; padding:14px 18px; border:1px solid #e5a742; border-radius:12px; background:#fff9ed; color:#704b0b; }
 .store-issues ul { margin:8px 0 0; padding-left:20px; }
-@media(max-width:700px){.audio-tools-layout{width:calc(100% - 24px);padding-top:28px}.audio-tools-heading h1{font-size:30px}.audio-tools-actions{flex-direction:column}.audio-tools-record{grid-template-columns:1fr;gap:5px}.audio-tools-record dd{margin-bottom:10px}.audio-tools-nav{padding:8px;font-size:0}.audio-tools-nav:first-letter{font-size:16px}}
+@media(max-width:700px){.audio-tools-layout{width:calc(100% - 24px);padding-top:28px}.audio-tools-heading h1{font-size:30px}.audio-tools-actions{flex-direction:column}.audio-tools-record{grid-template-columns:1fr;gap:5px}.audio-tools-record dd{margin-bottom:10px}.audio-tools-nav{padding:8px;font-size:0}.audio-tools-nav:first-letter{font-size:16px}.audio-tool-grid,.audio-playback-pair{grid-template-columns:1fr}}
