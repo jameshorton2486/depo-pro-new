@@ -110,9 +110,29 @@ async function measureLowFrequencyEnergy(file) {
   const text = await run("ffmpeg", ["-hide_banner", "-nostats", "-t", "90", "-i", file, "-af", "lowpass=f=130,highpass=f=40,volumedetect", "-f", "null", "-"]);
   return metric(text, /mean_volume:\s*(-?[\d.]+) dB/i);
 }
+async function measureBandEnergy(file, filter) {
+  const text = await run("ffmpeg", ["-hide_banner", "-nostats", "-t", "90", "-i", file, "-af", `${filter},volumedetect`, "-f", "null", "-"]);
+  return metric(text, /mean_volume:\s*(-?[\d.]+) dB/i);
+}
+async function measureHumHarmonics(file) {
+  const fundamentals=await Promise.all([50,60].map(async lineFrequencyHz=>({lineFrequencyHz,level:await measureBandEnergy(file,`bandpass=f=${lineFrequencyHz}:width_type=h:width=4`)})));
+  const selected=fundamentals.reduce((stronger,candidate)=>candidate.level !== null && (stronger.level === null || candidate.level>stronger.level) ? candidate : stronger);
+  const levels=await Promise.all([1,2,3,4,5].map(harmonic=>measureBandEnergy(file,`bandpass=f=${selected.lineFrequencyHz*harmonic}:width_type=h:width=4`)));
+  const available=levels.filter(Number.isFinite);
+  return {lineFrequencyHz:selected.lineFrequencyHz,meanDb:available.length ? available.reduce((sum,value)=>sum+value,0)/available.length : null};
+}
+async function measureImpulseCount(file) {
+  const pcm = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-t", "90", "-i", file, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"], { binary:true });
+  let previous=0, count=0, cooldown=0;
+  for(let offset=0;offset+4<=pcm.length;offset+=4){const sample=pcm.readFloatLE(offset),jump=Math.abs(sample-previous);if(cooldown>0)cooldown-=1;else if(jump>=0.35){count+=1;cooldown=80}previous=sample}
+  return count;
+}
 export async function measureAudioQuality(file) {
   const measurements = await measureAudio(file);
-  measurements.lowFrequencyMeanDb = await measureLowFrequencyEnergy(file);
+  const [lowFrequencyMeanDb,hum,fricativeBandMeanDb,impulseCount]=await Promise.all([
+    measureLowFrequencyEnergy(file), measureHumHarmonics(file), measureBandEnergy(file,"highpass=f=4000,lowpass=f=7900"), measureImpulseCount(file),
+  ]);
+  Object.assign(measurements,{lowFrequencyMeanDb,humLineFrequencyHz:hum.lineFrequencyHz,humHarmonicMeanDb:hum.meanDb,fricativeBandMeanDb,impulseCount});
   return measurements;
 }
 function classifyAudio(measurements, durationSeconds) {
