@@ -31,7 +31,11 @@ type CourtReporter = {
 
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
+const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
+type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin";
+type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
+function readWorkflowSession():WorkflowSession{if(typeof window==="undefined")return{view:"library",activeDepositionId:null};try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:{view:"library",activeDepositionId:null}}catch{return{view:"library",activeDepositionId:null}}}
 
 function makeId() {
   const date = new Date();
@@ -57,14 +61,15 @@ async function loadSavedAudioFiles(deposition:Deposition){return Promise.all(dep
 function legacyFiles(depositionId:string){return new Promise<Array<{category:string;order:number;name:string;type:string;blob:Blob}>>((resolve,reject)=>{const request=indexedDB.open("depo-pro-local-files",1);request.onerror=()=>reject(request.error);request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files",{keyPath:"id"})};request.onsuccess=()=>{const db=request.result,transaction=db.transaction("files","readonly"),all=transaction.objectStore("files").getAll();all.onerror=()=>reject(all.error);all.onsuccess=()=>resolve(all.result.filter(item=>item.depositionId===depositionId));transaction.oncomplete=()=>db.close()}})}
 async function migrateLegacyDepositions(existing:Deposition[]){const raw=localStorage.getItem(LEGACY_DEPOSITIONS_KEY);if(!raw)return null;const legacy:Deposition[]=JSON.parse(raw),known=new Set(existing.map(item=>item.id)),migrated=[...existing];for(const deposition of legacy){if(known.has(deposition.id))continue;const records=await legacyFiles(deposition.id),notice=records.find(item=>item.category==="notice"),courtOrder=records.find(item=>item.category==="court-order"),supporting=records.filter(item=>item.category==="supporting-document").sort((a,b)=>a.order-b.order);const convert=async(item:typeof notice)=>item?{name:item.name,type:item.type,base64:await toBase64(new File([item.blob],item.name,{type:item.type}))}:null;const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition,artifacts:{notice:await convert(notice),courtOrder:await convert(courtOrder),supportingFiles:await Promise.all(supporting.map(convert))}})}),saved=await response.json();if(!response.ok)throw new Error(`Legacy migration stopped at ${deposition.id}: ${saved.error||"unknown error"}`);migrated.push(saved);known.add(saved.id)}localStorage.removeItem(LEGACY_DEPOSITIONS_KEY);indexedDB.deleteDatabase("depo-pro-local-files");return migrated}
 export default function Home() {
+  const [resumeSession] = useState(readWorkflowSession);
   const [depositions, setDepositions] = useState<Deposition[]>([]);
   const [reporters, setReporters] = useState<CourtReporter[]>(()=>{if(typeof window==="undefined")return[];const saved=localStorage.getItem(REPORTERS_STORAGE_KEY);return saved?JSON.parse(saved):[]});
   const [query, setQuery] = useState("");
   const [caseId, setCaseId] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const [showIntake, setShowIntake] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [showAudioTools, setShowAudioTools] = useState(false);
+  const [showModal, setShowModal] = useState(resumeSession.view==="setup");
+  const [showIntake, setShowIntake] = useState(resumeSession.view==="intake");
+  const [showAdmin, setShowAdmin] = useState(resumeSession.view==="admin");
+  const [showAudioTools, setShowAudioTools] = useState(resumeSession.view==="audio-tools");
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -73,10 +78,13 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [storeIssues,setStoreIssues]=useState<Array<{folder:string;code:string;message:string}>>([]);
   const [creating,setCreating]=useState(false);
+  const [libraryLoaded,setLibraryLoaded]=useState(false);
 
   useEffect(() => {
-    fetch(`${API}/api/depositions`).then(response=>response.json()).then(async result=>{const disk=result.depositions||[];const migrated=await migrateLegacyDepositions(disk);setDepositions((migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt)));setStoreIssues(result.issues||[])}).catch(error=>setNotice(error instanceof Error?error.message:"Could not load depositions from disk."));
-  }, []);
+    fetch(`${API}/api/depositions`).then(response=>response.json()).then(async result=>{const disk=result.depositions||[];const migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}).catch(error=>setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")).finally(()=>setLibraryLoaded(true));
+  }, [resumeSession]);
+
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showIntake,showModal]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -141,6 +149,7 @@ export default function Home() {
   if (showAdmin) {
     return <AdminSettings onClose={() => setShowAdmin(false)} />;
   }
+  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowIntake(true)}
   async function openAudioTools() {
     if (intakeDraft?.audioFiles.length) setAudioToolFiles(intakeDraft.audioFiles);
     else if (depositions[0]) {
@@ -173,7 +182,7 @@ export default function Home() {
           <h1>Open a saved deposition<br />or start a new one.</h1>
           <p>Create, find, and continue your deposition work from one place. Your records stay on this computer.</p>
         </div>
-        <button type="button" className="primary-button" onClick={() => setShowIntake(true)}><span>＋</span> New Deposition</button>
+        <button type="button" className="primary-button" onClick={startNewDeposition}><span>＋</span> New Deposition</button>
         <div className="search-row">
           <label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by case style, witness, or deposition ID" /></label>
           <form className="id-search" onSubmit={openById}>
@@ -202,7 +211,7 @@ export default function Home() {
             ))}
           </div>
         ) : (
-          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={() => setShowIntake(true)}>Create a deposition</button>}</div>
+          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>Create a deposition</button>}</div>
         )}
       </section>
 
