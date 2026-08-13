@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { inspectRx } from "./rx-adapter.mjs";
+import { ASR_ELIGIBLE_KINDS, CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 
 const MAX_AUDIO_BYTES = Number(process.env.MAX_AUDIO_BYTES) || 12 * 1024 ** 3;
 const SCHEMA_VERSION = "3.0.0";
@@ -128,9 +129,8 @@ function classifyAudio(measurements, durationSeconds) {
 }
 function recommendProcessing(findings) {
   if (findings.uncertain.detected || findings.clipping.detected) return { route: "review", candidateProfile: null, reason: "Insufficient certainty or possible clipping; preserve original for review." };
-  if (findings.lowFrequencyEnergy.detected && findings.lowLevel.detected) return { route: "candidate", candidateProfile: "low-frequency-normalize-v2", reason: "Create a conservative candidate; compare ASR results before selection." };
   if (findings.lowFrequencyEnergy.detected) return { route: "candidate", candidateProfile: "low-frequency-rolloff-v2", reason: "Create a conservative candidate; do not assume the low-frequency energy is hum." };
-  if (findings.lowLevel.detected || findings.unevenLevels.detected) return { route: "candidate", candidateProfile: "gentle-normalization-v2", reason: "Create a conservative candidate; compare ASR results before selection." };
+  if (findings.lowLevel.detected || findings.unevenLevels.detected) return { route: "review", candidateProfile: null, reason: "Level concerns require listening review; automatic gain is not applied to transcription evidence." };
   return { route: "original", candidateProfile: null, reason: "No validated quality concern requires processing." };
 }
 function profileFilter(profile) {
@@ -138,13 +138,13 @@ function profileFilter(profile) {
 }
 async function createDerivative(root, audit, originalPath, profile, measurementsBefore) {
   const filter = profileFilter(profile), directory = storageDirectory(root, audit.uploadId), name = `candidate.${profile}.wav`, target = path.join(directory, name);
-  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", originalPath, "-af", filter, "-ar", "48000", "-c:a", "pcm_s16le", target];
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", originalPath, "-af", filter, "-c:a", "pcm_s16le", target];
   await run("ffmpeg", args);
   const after = await measureAudio(target);
-  return { kind:"processing", operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-ar", "48000", "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
+  return { kind:DERIVATIVE_KINDS.FFMPEG_CANDIDATE, operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", sourcePcmPrecision:"decoded source; lossy inputs have no source PCM bit depth",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
 }
 
-function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => item.kind !== "deepgram-compatibility" && !String(item.kind||"").endsWith("-proxy") && item.timelinePreserved !== false && item.selectableForTranscription !== false); }
+function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => ASR_ELIGIBLE_KINDS.has(item.kind) && item.timelinePreserved !== false && item.selectableForTranscription !== false); }
 export function resolveAudioItem(audit, source = audit.selectedSource, derivativeOperationId = source === "processed" ? audit.selectedDerivativeOperationId : null) {
   if (source === "original") return audit.storage.original;
   if (source !== "processed") throw new Error("Select original or processed audio.");
@@ -173,12 +173,12 @@ export async function createDeepgramCompatibilityDerivative(root, audit, source 
   const probe = await probeAudio(target), stream = probe.streams?.find(item => item.codec_type === "audio");
   if (!stream) throw new Error("The compatibility conversion did not produce readable audio.");
   const derivative = {
-    kind: "deepgram-compatibility", key: `audio-intake/${audit.uploadId}/${name}`,
+    kind: DERIVATIVE_KINDS.DEEPGRAM_COMPATIBILITY, key: `audio-intake/${audit.uploadId}/${name}`,
     bytes: fs.statSync(target).size, sha256: sha256(target), sourceSha256: sourceItem.sha256,
     tool: "ffmpeg", toolVersion: audit.tools.ffmpeg, profileId: "deepgram-pcm-wav-v1", profileVersion: "1.0.0",
     commandArguments: ["-i", sourceItem.key, "-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", "OUTPUT_KEY"],
     media: { codec: stream.codec_name || "pcm_s16le", sampleRate: Number(stream.sample_rate || 0), channels: Number(stream.channels || 0) },
-    createdAt: new Date().toISOString(), purpose: "Deepgram media-decoding fallback only",
+    sourcePcmPrecision:"selected source precision",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt: new Date().toISOString(), purpose: "Deepgram media-decoding fallback only",
   };
   audit.storage.derivatives.push(derivative);
   appendHistory(audit, "deepgram-compatibility-derivative-created", { source, key: derivative.key, sha256: derivative.sha256, sourceSha256: derivative.sourceSha256, profileId: derivative.profileId });

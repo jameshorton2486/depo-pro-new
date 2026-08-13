@@ -7,6 +7,7 @@ import { inspectRx } from "./rx-adapter.mjs";
 import { getRxProfile } from "./rx-profiles.mjs";
 import { measureAudioQuality } from "./audio-pipeline.mjs";
 import { compareRxMeasurements } from "./rx-delta.mjs";
+import { CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PYTHON = process.env.DEPO_PRO_RX_PYTHON || path.join(MODULE_DIRECTORY, "..", ".venv-pedalboard", "Scripts", "python.exe");
@@ -225,7 +226,7 @@ export async function createRxDerivative(root, audit, {
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      kind:"processing", sampleAligned: true, timelinePreserved:true, timelinePolicy:"frame-aligned-no-cuts", selectableForTranscription:true, provenanceTags, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
+      kind:DERIVATIVE_KINDS.RX_ASR, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sampleAligned: true, timelinePreserved:true, timelinePolicy:"frame-aligned-no-cuts", selectableForTranscription:true, provenanceTags, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
       manufacturer: worker.manufacturer, product: profile.product, edition: profile.edition, module: profile.module,
       pluginIdentifier: profile.pluginIdentifier, host: worker.worker, hostVersion: worker.workerVersion, profileId: profile.id,
       profileVersion: profile.version, presetIdentity: profile.presetIdentity, requestedProcessingParameters: worker.requestedRawParameters, appliedProcessingParameters: worker.appliedRawParameters, effectiveProcessingParameters: worker.effectiveRawParameters, effectiveDisplayValues: worker.effectiveDisplayValues, processingParameters: worker.appliedRawParameters, createdAt: now(), media,
