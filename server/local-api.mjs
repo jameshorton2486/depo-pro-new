@@ -11,6 +11,7 @@ import { inspectRx } from "./rx-adapter.mjs";
 import { chooseAsrSource } from "./asr-selection.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
 import { systemPreflight } from "./preflight.mjs";
+import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -113,6 +114,14 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
+    if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root),origin);
+    if (req.url === "/api/depositions" && req.method === "POST") {
+      const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input),origin);
+    }
+    if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
+      const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"));
+      res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
+    }
     if (req.url === "/api/audio/select" && req.method === "POST") {
       const input=await body(req,64*1024); return json(res,200,selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
     }

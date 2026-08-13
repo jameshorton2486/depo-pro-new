@@ -29,8 +29,9 @@ type CourtReporter = {
   licenseNumber: string; taxId: string; address: string;
 };
 
-const STORAGE_KEY = "depo-pro-depositions";
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
+const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
+const API = "http://127.0.0.1:4317";
 
 function makeId() {
   const date = new Date();
@@ -49,42 +50,15 @@ function formatPhoneNumber(value: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
-function saveIntakeFiles(depositionId: string, draft: IntakeDraft) {
-  const request = indexedDB.open("depo-pro-local-files", 1);
-  request.onupgradeneeded = () => {
-    const db = request.result;
-    if (!db.objectStoreNames.contains("files")) db.createObjectStore("files", { keyPath: "id" });
-  };
-  request.onsuccess = () => {
-    const db = request.result;
-    const transaction = db.transaction("files", "readwrite");
-    const store = transaction.objectStore("files");
-    if (draft.notice) store.put({ id: `${depositionId}:notice`, depositionId, category: "notice", order: 0, name: draft.notice.name, type: draft.notice.type, blob: draft.notice });
-    if (draft.courtOrder) store.put({ id: `${depositionId}:court-order`, depositionId, category: "court-order", order: 0, name: draft.courtOrder.name, type: draft.courtOrder.type, blob: draft.courtOrder });
-    draft.supportingFiles.forEach((file, index) => store.put({ id: `${depositionId}:supporting:${index}`, depositionId, category: "supporting-document", order: index, name: file.name, type: file.type, blob: file }));
-    draft.audioFiles.forEach((file, index) => store.put({ id: `${depositionId}:audio:${index}`, depositionId, category: "audio", order: index, name: file.name, type: file.type, blob: file }));
-    store.put({ id: `${depositionId}:deepgram-keyterms`, depositionId, category: "generated", order: 0, name: "deepgram-keyterms.json", type: "application/json", blob: new Blob([JSON.stringify(draft.deepgramArtifact, null, 2)], { type: "application/json" }) });
-    store.put({ id: `${depositionId}:ufm-data`, depositionId, category: "generated", order: 1, name: "ufm-data.json", type: "application/json", blob: new Blob([JSON.stringify(draft.ufmData, null, 2)], { type: "application/json" }) });
-    store.put({ id: `${depositionId}:audio-processing-audit`, depositionId, category: "generated", order: 2, name: "audio-processing-audit.json", type: "application/json", blob: new Blob([JSON.stringify({ schemaVersion: 1, profiles: draft.audioProfiles }, null, 2)], { type: "application/json" }) });
-    transaction.oncomplete = () => db.close();
-  };
-}
-function loadSavedAudioFiles(depositionId: string) {
-  return new Promise<File[]>((resolve, reject) => {
-    const request = indexedDB.open("depo-pro-local-files", 1);
-    request.onerror = () => reject(request.error);
-    request.onupgradeneeded = () => { const db=request.result; if(!db.objectStoreNames.contains("files")) db.createObjectStore("files",{keyPath:"id"}); };
-    request.onsuccess = () => {
-      const db=request.result, transaction=db.transaction("files","readonly"), all=transaction.objectStore("files").getAll();
-      all.onerror=()=>reject(all.error);
-      all.onsuccess=()=>{ const records=all.result.filter(item=>item.depositionId===depositionId&&item.category==="audio").sort((a,b)=>a.order-b.order); resolve(records.map(item=>new File([item.blob],item.name,{type:item.type,lastModified:item.blob?.lastModified||Date.now()}))); };
-      transaction.oncomplete=()=>db.close();
-    };
-  });
-}
+function toBase64(file:File){return new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file)})}
+function audioProfileKey(file:File){return `${file.name}-${file.size}-${file.lastModified}`}
+async function artifact(file:File|null){return file?{name:file.name,type:file.type,base64:await toBase64(file)}:null}
+async function loadSavedAudioFiles(deposition:Deposition){return Promise.all(deposition.audioFiles.map(async(name,index)=>{const response=await fetch(`${API}/api/depositions/audio?id=${encodeURIComponent(deposition.id)}&index=${index}`);if(!response.ok)throw new Error((await response.json()).error);return new File([await response.blob()],name,{lastModified:Date.now()})}))}
+function legacyFiles(depositionId:string){return new Promise<Array<{category:string;order:number;name:string;type:string;blob:Blob}>>((resolve,reject)=>{const request=indexedDB.open("depo-pro-local-files",1);request.onerror=()=>reject(request.error);request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files",{keyPath:"id"})};request.onsuccess=()=>{const db=request.result,transaction=db.transaction("files","readonly"),all=transaction.objectStore("files").getAll();all.onerror=()=>reject(all.error);all.onsuccess=()=>resolve(all.result.filter(item=>item.depositionId===depositionId));transaction.oncomplete=()=>db.close()}})}
+async function migrateLegacyDepositions(existing:Deposition[]){const raw=localStorage.getItem(LEGACY_DEPOSITIONS_KEY);if(!raw)return null;const legacy:Deposition[]=JSON.parse(raw),known=new Set(existing.map(item=>item.id)),migrated=[...existing];for(const deposition of legacy){if(known.has(deposition.id))continue;const records=await legacyFiles(deposition.id),notice=records.find(item=>item.category==="notice"),courtOrder=records.find(item=>item.category==="court-order"),supporting=records.filter(item=>item.category==="supporting-document").sort((a,b)=>a.order-b.order);const convert=async(item:typeof notice)=>item?{name:item.name,type:item.type,base64:await toBase64(new File([item.blob],item.name,{type:item.type}))}:null;const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition,artifacts:{notice:await convert(notice),courtOrder:await convert(courtOrder),supportingFiles:await Promise.all(supporting.map(convert))}})}),saved=await response.json();if(!response.ok)throw new Error(`Legacy migration stopped at ${deposition.id}: ${saved.error||"unknown error"}`);migrated.push(saved);known.add(saved.id)}localStorage.removeItem(LEGACY_DEPOSITIONS_KEY);indexedDB.deleteDatabase("depo-pro-local-files");return migrated}
 export default function Home() {
   const [depositions, setDepositions] = useState<Deposition[]>([]);
-  const [reporters, setReporters] = useState<CourtReporter[]>([]);
+  const [reporters, setReporters] = useState<CourtReporter[]>(()=>{if(typeof window==="undefined")return[];const saved=localStorage.getItem(REPORTERS_STORAGE_KEY);return saved?JSON.parse(saved):[]});
   const [query, setQuery] = useState("");
   const [caseId, setCaseId] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -97,19 +71,12 @@ export default function Home() {
   const [selectedReporterId, setSelectedReporterId] = useState("");
   const [active, setActive] = useState<Deposition | null>(null);
   const [notice, setNotice] = useState("");
+  const [storeIssues,setStoreIssues]=useState<Array<{folder:string;code:string;message:string}>>([]);
+  const [creating,setCreating]=useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved) setDepositions(JSON.parse(saved));
-    const savedReporters = localStorage.getItem(REPORTERS_STORAGE_KEY);
-    if (savedReporters) setReporters(JSON.parse(savedReporters));
+    fetch(`${API}/api/depositions`).then(response=>response.json()).then(async result=>{const disk=result.depositions||[];const migrated=await migrateLegacyDepositions(disk);setDepositions((migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt)));setStoreIssues(result.issues||[])}).catch(error=>setNotice(error instanceof Error?error.message:"Could not load depositions from disk."));
   }, []);
-
-  function persist(items: Deposition[]) {
-    setDepositions(items);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -119,7 +86,7 @@ export default function Home() {
     );
   }, [depositions, query]);
 
-  function createDeposition(event: FormEvent<HTMLFormElement>) {
+  async function createDeposition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const reporter = reporters.find((item) => item.id === selectedReporterId);
@@ -137,14 +104,11 @@ export default function Home() {
       audioFiles: intakeDraft?.audioFiles.map((file) => file.name) ?? [],
       keytermCount: intakeDraft?.keyterms.length ?? 0,
       keyterms: intakeDraft?.keyterms ?? [],
-      audioIntakeIds: intakeDraft ? Object.values(intakeDraft.audioProfiles).map(profile => profile.uploadId) : [],
+      audioIntakeIds: intakeDraft ? intakeDraft.audioFiles.map(file=>intakeDraft.audioProfiles[audioProfileKey(file)]?.uploadId).filter((value):value is string=>Boolean(value)) : [],
       createdAt: new Date().toISOString(),
     };
-    persist([item, ...depositions]);
-    if (intakeDraft) saveIntakeFiles(item.id, intakeDraft);
-    setShowModal(false);
-    setIntakeDraft(null);
-    setActive(item);
+    if(!intakeDraft)return;setCreating(true);setNotice("");
+    try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,deepgramArtifact:intakeDraft.deepgramArtifact,ufmData:intakeDraft.ufmData,warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved)}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
   }
 
 
@@ -180,7 +144,7 @@ export default function Home() {
   async function openAudioTools() {
     if (intakeDraft?.audioFiles.length) setAudioToolFiles(intakeDraft.audioFiles);
     else if (depositions[0]) {
-      try { setAudioToolFiles(await loadSavedAudioFiles(depositions[0].id)); }
+      try { setAudioToolFiles(await loadSavedAudioFiles(depositions[0])); }
       catch { setAudioToolFiles([]); }
     } else setAudioToolFiles([]);
     setShowAudioTools(true);
@@ -218,6 +182,7 @@ export default function Home() {
           </form>
         </div>
         {notice && <p className="notice" role="alert">{notice}</p>}
+        {storeIssues.length>0&&<div className="store-issues" role="alert"><strong>Deposition folders need attention</strong><ul>{storeIssues.map(issue=><li key={`${issue.folder}-${issue.code}`}><code>{issue.folder}</code>: {issue.message}</li>)}</ul></div>}
       </section>
 
       <section className="library-section">
@@ -252,7 +217,7 @@ export default function Home() {
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || new Date().toISOString().slice(0, 10)} /></label><label>Court Reporter <small>Optional</small><select name="courtReporterId" value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Not assigned</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
-              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)}>Cancel</button><button className="primary-button" type="submit">Create Deposition</button></div>
+              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":"Create Deposition"}</button></div>
             </form>
           </section>
         </div>

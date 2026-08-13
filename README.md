@@ -6,6 +6,7 @@ Depo-Pro New is a local-first Windows application for deposition intake, audited
 
 - React 19 UI served locally at `http://localhost:3000`
 - Node local service bound to `127.0.0.1:4317`
+- Filesystem-authoritative deposition folders under the ignored `data/depositions/` directory
 - Immutable audio originals and audited derivatives under the ignored `data/` directory
 - Windows DPAPI-protected Claude and Deepgram credentials
 - FFmpeg/FFprobe analysis and compatibility conversion
@@ -57,6 +58,7 @@ Canonical RX derivatives are 16-bit lossless FLAC files with the source sample r
 
 ## Current limits
 
-- Deposition metadata remains browser-managed; SQLite migration requires a separately reviewed data model.
+- Deposition metadata, intake artifacts, and selected audited audio are persisted under `data/depositions/<deposition-id>/`. JSON writes and directory publication are atomic, and startup reports malformed or orphaned folders.
+- The Court Reporter directory remains browser-managed and should move into the same filesystem store in a later contained slice.
 - Deepgram transcription remains synchronous. Durable asynchronous jobs, callback recovery, and immutable raw response storage require a separate design.
 - Canonical transcript graph, correction decisions, workspace, UFM, and certification are not yet implemented.
