@@ -31,10 +31,10 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
   const [busy, setBusy] = useState(false);
   const [skipSilence,setSkipSilence]=useState(false);
   const [tools,setTools]=useState<Tool[]>([]);
-  const [profileId, setProfileId] = useState("");
+  const [profileIds, setProfileIds] = useState<string[]>([]);
   const [message, setMessage] = useState(initialFiles.length ? `${initialFiles.length} intake audio file${initialFiles.length === 1 ? "" : "s"} loaded.` : "Choose one audio file to begin.");
-  useEffect(()=>{void fetch(`${API}/api/audio/tools`).then(response=>response.json()).then((items:Tool[])=>{setTools(items);setProfileId(current=>current||items[0]?.id||"")}).catch(()=>setMessage("Audio tool definitions could not be loaded."))},[]);
-  const selectedTool=tools.find(tool=>tool.id===profileId);
+  useEffect(()=>{void fetch(`${API}/api/audio/tools`).then(response=>response.json()).then((items:Tool[])=>setTools(items)).catch(()=>setMessage("Audio tool definitions could not be loaded."))},[]);
+  const selectedTools=tools.filter(tool=>profileIds.includes(tool.id)).sort((a,b)=>(a.chainOrder??999)-(b.chainOrder??999)),selectedTool=selectedTools[0];
   const activeFindings=audit?.findings?Object.entries(audit.findings).filter(([,finding])=>finding.detected).map(([id])=>id):[];
   const recommended=tools.filter(tool=>tool.recommendFor.some(code=>activeFindings.includes(code)));
   const others=tools.filter(tool=>!recommended.includes(tool));
@@ -66,24 +66,25 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
       let response = await fetch(`${API}/api/audio/analyze`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-file-name": encodeURIComponent(file.name) }, body: file });
       let body = await response.json();
       if (!response.ok) throw new Error(body.error);
-      setAudit(body); setMessage(`Processing with ${selectedTool?.displayName ?? "selected tool"}…`);
-      response = await fetch(`${API}/api/audio/rx-process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadId: body.uploadId, profileId }) });
+      setAudit(body); setMessage(`Processing with ${selectedTools.map(tool=>tool.displayName).join(" → ")}…`);
+      response = await fetch(`${API}/api/audio/rx-process`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadId: body.uploadId, profileIds }) });
       body = await response.json();
       if (!response.ok) throw new Error(`${body.code}: ${body.error}`);
       setAudit(body.audit); setDerivative(body.derivative);
       const audioResponse=await fetch(`${API}/api/audio/derivative?uploadId=${encodeURIComponent(body.audit.uploadId)}&operationId=${encodeURIComponent(body.derivative.operationId)}`);
       if(!audioResponse.ok)throw new Error((await audioResponse.json()).error);
-      const replacement=new File([await audioResponse.blob()],outputName(file.name),{type:"audio/flac",lastModified:Date.now()});
+      const replacement=new File([await audioResponse.blob()],outputName(file.name),{type:"audio/flac",lastModified:file.lastModified});
       setProcessedFile(replacement); setProcessedSource(file);
       setMessage(`Processing complete. Back to deposition will replace ${file.name} with ${replacement.name}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Audio processing failed."); }
     finally { setBusy(false); }
   }
+  function toggleTool(tool:Tool){setProfileIds(current=>{if(current.includes(tool.id))return current.filter(id=>id!==tool.id);if(tool.chainOrder===null)return[tool.id];const next=current.filter(id=>tools.find(item=>item.id===id)?.chainOrder!==null);if(tool.excludes.some(id=>next.includes(id))){setMessage(`${tool.displayName} cannot be combined with ${tools.find(item=>tool.excludes.includes(item.id))?.displayName}.`);return next}return[...next,tool.id]})}
 
   async function promoteForTranscription(){
-    if(!audit||!derivative||!selectedTool?.caution)return;
-    if(!window.confirm(`${selectedTool.displayName} is marked ${selectedTool.riskLevel} risk. ${selectedTool.caution} Promote this result for transcription anyway?`))return;
-    setBusy(true);try{const response=await fetch(`${API}/api/audio/promote`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({uploadId:audit.uploadId,operationId:derivative.operationId,profileId:derivative.profileId})}),body=await response.json();if(!response.ok)throw new Error(body.error);setAudit(body);setDerivative(current=>current?{...current,kind:"rx-asr"}:current);setMessage("Review derivative promoted for transcription. The decision was recorded in the audit.")}catch(error){setMessage(error instanceof Error?error.message:"Promotion failed.")}finally{setBusy(false)}
+    if(!audit||!derivative)return;const unsafe=selectedTools.filter(tool=>!tool.asrSafe);
+    if(!window.confirm(`${unsafe.map(tool=>tool.displayName).join(", ")} produced a review-only result. ${unsafe.map(tool=>tool.caution).filter(Boolean).join(" ")} Promote this result for transcription anyway?`))return;
+    setBusy(true);try{const response=await fetch(`${API}/api/audio/promote`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({uploadId:audit.uploadId,operationId:derivative.operationId})}),body=await response.json();if(!response.ok)throw new Error(body.error);setAudit(body);setDerivative(current=>current?{...current,kind:"rx-asr"}:current);setMessage("Review derivative promoted for transcription. The decision was recorded in the audit.")}catch(error){setMessage(error instanceof Error?error.message:"Promotion failed.")}finally{setBusy(false)}
   }
   async function detectSegments(){if(!audit)return;setBusy(true);setMessage("Detecting speech and silence without modifying audio…");try{const response=await fetch(`${API}/api/audio/detect-speech-segments`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({uploadId:audit.uploadId,artifactOperationId:derivative?.operationId??null})}),body=await response.json();if(!response.ok)throw new Error(body.error);setAudit(body);setMessage("Speech map ready. Skip silence remains off until you enable it.")}catch(error){setMessage(error instanceof Error?error.message:"Speech detection failed.")}finally{setBusy(false)}}
   function handleTimeUpdate(event:React.SyntheticEvent<HTMLAudioElement>){if(!skipSilence||!audit?.speechSegments)return;const player=event.currentTarget,silence=audit.speechSegments.segments.find(item=>item.kind==="silence"&&player.currentTime>=item.startSec&&player.currentTime<item.endSec);if(silence)player.currentTime=silence.endSec}
@@ -127,9 +128,9 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
         <button className="secondary-button audio-tools-choose" onClick={chooseFile} disabled={busy}>{availableFiles.length ? "Choose a different audio file" : "Choose audio file"}</button>
         <input ref={fallbackInput} className="audio-tools-hidden-input" type="file" accept="audio/*,.wav" onChange={event => event.target.files?.[0] && selectFile(event.target.files[0])} />
         {audit&&<section className="audio-original-summary"><h2>Original recording</h2><strong>Original recording — preserved and never modified.</strong><dl><dt>File</dt><dd>{audit.originalName}</dd><dt>Duration</dt><dd>{audit.media?.durationSeconds?.toFixed(1)??"—"} seconds</dd><dt>Format</dt><dd>{audit.media?.codec??"—"}</dd><dt>Sample rate</dt><dd>{audit.media?.sampleRate?.toLocaleString()??"—"} Hz</dd><dt>Channels</dt><dd>{audit.media?.channels??"—"}</dd><dt>Size</dt><dd>{audit.storage.original.bytes.toLocaleString()} bytes</dd><dt>SHA-256</dt><dd>{audit.storage.original.sha256?"Verified":"Pending"}</dd></dl><p>Findings: {activeFindings.length?activeFindings.join(", "):"No validated concern detected."}</p></section>}
-        <section className="audio-tool-menu"><h2>Recommended for this recording</h2>{recommended.length?<div className="audio-tool-grid">{recommended.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileId===tool.id} onSelect={()=>setProfileId(tool.id)} trigger={tool.recommendFor.filter(code=>activeFindings.includes(code)).join(", ")}/>)}</div>:<p>No tool is automatically recommended. The original remains the default.</p>}<h2>Other tools</h2><div className="audio-tool-grid">{others.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileId===tool.id} onSelect={()=>setProfileId(tool.id)}/>)}</div>{selectedTool&&<p className="audio-tool-order">Selected execution order: {selectedTool.displayName} (step {selectedTool.chainOrder??"standalone"}).</p>}</section>
+        <section className="audio-tool-menu"><h2>Recommended for this recording</h2>{recommended.length?<div className="audio-tool-grid">{recommended.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileIds.includes(tool.id)} onSelect={()=>toggleTool(tool)} trigger={tool.recommendFor.filter(code=>activeFindings.includes(code)).join(", ")}/>)}</div>:<p>No tool is automatically recommended. The original remains the default.</p>}<h2>Other tools</h2><div className="audio-tool-grid">{others.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileIds.includes(tool.id)} onSelect={()=>toggleTool(tool)}/>)}</div>{selectedTools.length>0&&<p className="audio-tool-order">Execution order: {selectedTools.map(tool=>tool.displayName).join(" → ")}.</p>}</section>
         <div className="audio-tools-file"><strong>{file ? `${file.name} · ${file.size.toLocaleString()} bytes` : "No audio file selected"}</strong><span>{file ? `Processed copy: ${outputName(file.name)}` : "Select WAV, MP3, M4A, FLAC, OGG, AAC, or WMA."}</span></div>
-        <div className="audio-tools-actions"><button className="primary-button" disabled={!file || !profileId || busy} onClick={processAudio}>{busy && !derivative ? "Processing…" : "Process audio"}</button><button className="audio-save-button" disabled={!derivative || busy} onClick={saveAudio}>Save processed audio</button>{derivative?.kind==="rx-review"&&<button className="secondary-button" disabled={busy} onClick={promoteForTranscription}>Promote for transcription</button>}</div>
+        <div className="audio-tools-actions"><button className="primary-button" disabled={!file || !profileIds.length || busy} onClick={processAudio}>{busy && !derivative ? "Processing…" : `Process with ${profileIds.length} tool${profileIds.length===1?"":"s"}`}</button><button className="audio-save-button" disabled={!derivative || busy} onClick={saveAudio}>Save processed audio</button>{derivative?.kind==="rx-review"&&<button className="secondary-button" disabled={busy} onClick={promoteForTranscription}>Promote for transcription</button>}</div>
         <p className="audio-tools-message" role="status">{message}</p>
         {processedFile&&<p className="audio-tools-replacement"><strong>Ready to replace intake audio:</strong> {processedSource?.name} → {processedFile.name}</p>}
       </section>

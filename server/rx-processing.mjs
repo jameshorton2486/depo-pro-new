@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { inspectRx } from "./rx-adapter.mjs";
-import { getRxProfile } from "./rx-profiles.mjs";
+import { resolveAudioToolChain } from "./rx-profiles.mjs";
 import { measureAudioQuality } from "./audio-pipeline.mjs";
 import { compareRxMeasurements } from "./rx-delta.mjs";
 import { CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
@@ -123,7 +123,7 @@ async function recordViolation(recordAuditEvent, incident) {
 
 export async function createRxDerivative(root, audit, {
   originalPath,
-  profileId = "rx12-voice-denoise-factory-adaptive-v1",
+  profileId = "rx12-voice-denoise-factory-adaptive-v1", profileIds,
   pythonExecutable = DEFAULT_PYTHON,
   workerPath = DEFAULT_WORKER,
   pluginPath,
@@ -151,16 +151,16 @@ export async function createRxDerivative(root, audit, {
 
   const rx = inspectRxStatus({ includeExecutable:true });
   if (!rx.available || !rx.executable) throw new Error(rx.fallback || "iZotope RX 12 is unavailable.");
-  const profile = getRxProfile(profileId);
-  const resolvedPluginPath = pluginPath || path.join(process.env.RX_VST3_ROOT || DEFAULT_PLUGIN_ROOT, profile.pluginFile);
-  for (const required of [pythonExecutable, workerPath,resolvedPluginPath]) if (!fs.existsSync(required)) throw new Error(`RX processing dependency is unavailable: ${path.basename(required)}`);
+  const profiles=resolveAudioToolChain(profileIds||[profileId]),rxProfiles=profiles.filter(item=>item.engine==="rx"),resolvedPluginPaths=rxProfiles.map((profile,index)=>index===0&&pluginPath?pluginPath:path.join(process.env.RX_VST3_ROOT || DEFAULT_PLUGIN_ROOT,profile.pluginFile));
+  for (const required of [pythonExecutable,workerPath,...resolvedPluginPaths]) if (!fs.existsSync(required)) throw new Error(`RX processing dependency is unavailable: ${path.basename(required)}`);
+  const chainId=profiles.map(item=>item.id).join("+");
   const directory = path.dirname(path.resolve(originalPath));
   const operationId = randomId();
   const startedAt = now();
   const workRoot = path.join(path.resolve(root), "data", "rx-work");
   const lockDirectory = path.join(workRoot, "locks");
   const operationDirectory = path.join(workRoot, audit.uploadId, operationId);
-  const finalPath = path.join(directory, `candidate.${profile.id}.${operationId}.flac`);
+  const finalPath = path.join(directory, `candidate.chain.${operationId}.flac`);
   const temporaryPath = path.join(operationDirectory, "derivative.partial.wav");
   const encodedPath = path.join(operationDirectory, "derivative.partial.flac");
   const processingSourcePath = path.join(operationDirectory, "processing-source.wav");
@@ -196,20 +196,20 @@ export async function createRxDerivative(root, audit, {
       workerInputPath = processingSourcePath;
     }
     const sourceMedia = needsDecode ? await validateAudio(processingSourcePath) : uploadedSourceMedia;
-    fs.writeFileSync(profilePath, JSON.stringify(profile), { flag: "wx" });
-    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath, "--plugin", resolvedPluginPath, "--profile", profilePath, "--result", resultPath]);
+    fs.writeFileSync(profilePath, JSON.stringify(profiles), { flag: "wx" });
+    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath]);
     if (!fs.existsSync(temporaryPath)) throw new Error("RX worker reported success without producing output.");
     if (!fs.existsSync(resultPath)) throw new Error("RX worker reported success without a result record.");
     let worker;
     try { worker = JSON.parse(fs.readFileSync(resultPath, "utf8")); }
     catch (cause) { throw new RxProcessingError("RX worker result is invalid JSON.", "RX_PROVENANCE_INCOMPLETE", { cause }); }
-    if (!worker.manufacturer || !worker.pluginVersion || worker.manufacturer !== "iZotope" || worker.plugin !== profile.expectedPlugin || String(worker.pluginVersion).split(".", 1)[0] !== "12") throw new RxProcessingError("RX worker did not report a valid plug-in identity.", "RX_PROVENANCE_INCOMPLETE");
-    if (worker.profileId !== profile.id || worker.profileVersion !== profile.version) throw new RxProcessingError("RX worker profile identity does not match the requested profile.", "RX_PROVENANCE_INCOMPLETE");
+    const modules=worker.modules||[worker];if(modules.length!==profiles.length||modules.some((item,index)=>item.profileId!==profiles[index].id||item.profileVersion!==profiles[index].version))throw new RxProcessingError("RX worker chain identity does not match the requested profiles.","RX_PROVENANCE_INCOMPLETE");
+    for(let index=0;index<profiles.length;index++){const requested=profiles[index],actual=modules[index];if(requested.engine==="rx"&&(actual.manufacturer!=="iZotope"||actual.plugin!==requested.expectedPlugin||String(actual.pluginVersion).split(".",1)[0]!=="12"))throw new RxProcessingError("RX worker did not report a valid plug-in identity.","RX_PROVENANCE_INCOMPLETE")}
     if (!Number.isInteger(worker.sourceFrames) || !Number.isInteger(worker.framesProcessed) || worker.sourceFrames <= 0 || worker.framesProcessed !== worker.sourceFrames) throw new RxProcessingError("RX worker did not prove exact frame parity.", "RX_PROVENANCE_INCOMPLETE");
     const workerMedia = await validateAudio(temporaryPath);
     assertSampleAligned(sourceMedia, workerMedia, worker.framesProcessed);
     const measurementsBefore = await measureQuality(originalPath);
-    const provenanceTags={DEPO_PRO_UPLOAD_ID:audit.uploadId,DEPO_PRO_OPERATION_ID:operationId,DEPO_PRO_SOURCE_SHA256:beforeHash,DEPO_PRO_PROFILE_ID:profile.id,DEPO_PRO_PROFILE_VERSION:profile.version,DEPO_PRO_TIMELINE_POLICY:"frame-aligned-no-cuts"};
+    const provenanceTags={DEPO_PRO_UPLOAD_ID:audit.uploadId,DEPO_PRO_OPERATION_ID:operationId,DEPO_PRO_SOURCE_SHA256:beforeHash,DEPO_PRO_PROFILE_ID:chainId,DEPO_PRO_PROFILE_VERSION:profiles.map(item=>item.version).join("+"),DEPO_PRO_TIMELINE_POLICY:"frame-aligned-no-cuts"};
     const metadataArguments=Object.entries(provenanceTags).flatMap(([name,value])=>["-metadata",`${name}=${value}`]);
     await runEncoder("ffmpeg", ["-v", "error", "-nostdin", "-i", temporaryPath, "-map", "0:a:0", "-vn", "-c:a", "flac", "-sample_fmt", "s16", ...metadataArguments, encodedPath], 30 * 60 * 1000);
     if (!fs.existsSync(encodedPath)) throw new Error("Lossless FLAC encoding reported success without producing output.");
@@ -226,10 +226,8 @@ export async function createRxDerivative(root, audit, {
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      kind:profile.asrSafe?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sampleAligned: true, timelinePreserved:true, timelinePolicy:"frame-aligned-no-cuts", selectableForTranscription:profile.asrSafe, provenanceTags, sourceMedia, uploadedSourceMedia, processingInput: needsDecode ? { decodedToPcm: true, decoder: "ffmpeg", encoding: "pcm_s16le" } : { decodedToPcm: false }, processingRenderEncoding: worker.outputEncoding, outputEncoding: {container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true}, measurementsBefore, measurementsAfter, measurementDelta, tool: "iZotope RX VST3 via Spotify Pedalboard", toolVersion: worker.pluginVersion,
-      manufacturer: worker.manufacturer, product: profile.product, edition: profile.edition, module: profile.module,
-      pluginIdentifier: profile.pluginIdentifier, host: worker.worker, hostVersion: worker.workerVersion, profileId: profile.id,
-      profileVersion: profile.version, presetIdentity: profile.presetIdentity, requestedProcessingParameters: worker.requestedRawParameters, appliedProcessingParameters: worker.appliedRawParameters, effectiveProcessingParameters: worker.effectiveRawParameters, effectiveDisplayValues: worker.effectiveDisplayValues, processingParameters: worker.appliedRawParameters, createdAt: now(), media,
+      kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
+      manufacturer:"iZotope / Spotify",product:"RX 12 audio tool chain",edition:"Standard",module:profiles.map(item=>item.displayName).join(" → "),profileIds:profiles.map(item=>item.id),profileVersions:profiles.map(item=>item.version),modules,host:worker.worker,hostVersion:worker.workerVersion,profileId:profiles.length===1?profiles[0].id:chainId,profileVersion:profiles.length===1?profiles[0].version:"chain-v1",createdAt:now(),media,
     };
   } catch (error) {
     if (renamed && fs.existsSync(finalPath)) fs.rmSync(finalPath, { force: true });

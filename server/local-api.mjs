@@ -9,7 +9,7 @@ import { transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
-import { AUDIO_TOOL_PROFILES, publicAudioTools } from "./rx-profiles.mjs";
+import { publicAudioTools, resolveAudioToolChain } from "./rx-profiles.mjs";
 import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
@@ -133,16 +133,14 @@ const server = http.createServer(async (req,res) => {
       return json(res,201,await saveAudioForTools(req,{root,originalName,contentType:req.headers["content-type"]}),origin);
     }
     if (req.url === "/api/audio/rx-process" && req.method === "POST") {
-      const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original");
-      const selectedProfile=AUDIO_TOOL_PROFILES[input.profileId];if(!selectedProfile)throw new Error("Unsupported audio tool.");
+      const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original"),profiles=resolveAudioToolChain(input.profileIds||[input.profileId]);
       const recordAuditEvent=async event=>mutateAudioAudit(root,audit.uploadId,current=>current.history.push(event));
-      const derivative=selectedProfile.engine==="ffmpeg"?await createHighpassDerivative(root,audit):await createRxDerivative(root,audit,{originalPath,profileId:input.profileId,recordAuditEvent});
-      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"audio-tool-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,kind:derivative.kind,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
+      const derivative=profiles.length===1&&profiles[0].engine==="ffmpeg"?await createHighpassDerivative(root,audit):await createRxDerivative(root,audit,{originalPath,profileIds:profiles.map(item=>item.id),recordAuditEvent});
+      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"audio-tool-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,kind:derivative.kind,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileIds:profiles.map(item=>item.id)})});
       return json(res,200,{derivative,audit:updated},origin);
     }
     if (req.url === "/api/audio/promote" && req.method === "POST") {
-      const input=await body(req,64*1024);const profile=AUDIO_TOOL_PROFILES[input.profileId];if(!profile||profile.asrSafe)throw new Error("Only a review-marked tool result can be promoted.");
-      const updated=await mutateAudioAudit(root,input.uploadId,current=>{const derivative=current.storage.derivatives.find(item=>item.operationId===input.operationId);if(!derivative||derivative.kind!==DERIVATIVE_KINDS.RX_REVIEW)throw new Error("Review derivative was not found.");derivative.kind=DERIVATIVE_KINDS.RX_ASR;derivative.selectableForTranscription=true;current.history.push({event:"rx-review-derivative-promoted",at:new Date().toISOString(),operationId:derivative.operationId,profileId:profile.id,riskLevel:profile.riskLevel,caution:profile.caution});});
+      const input=await body(req,64*1024);const updated=await mutateAudioAudit(root,input.uploadId,current=>{const derivative=current.storage.derivatives.find(item=>item.operationId===input.operationId);if(!derivative||derivative.kind!==DERIVATIVE_KINDS.RX_REVIEW)throw new Error("Review derivative was not found.");const profiles=resolveAudioToolChain(derivative.profileIds||[derivative.profileId]),unsafe=profiles.filter(item=>!item.asrSafe);if(!unsafe.length)throw new Error("Only a review-marked tool result can be promoted.");derivative.kind=DERIVATIVE_KINDS.RX_ASR;derivative.selectableForTranscription=true;current.history.push({event:"rx-review-derivative-promoted",at:new Date().toISOString(),operationId:derivative.operationId,profileIds:profiles.map(item=>item.id),riskLevels:unsafe.map(item=>item.riskLevel),cautions:unsafe.map(item=>item.caution)});});
       return json(res,200,updated,origin);
     }
     if (req.url === "/api/audio/detect-speech-segments" && req.method === "POST") {

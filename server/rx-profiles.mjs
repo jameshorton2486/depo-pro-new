@@ -21,4 +21,6 @@ export const AUDIO_TOOL_PROFILES=Object.freeze({
 
 export function publicAudioTools(){return Object.values(AUDIO_TOOL_PROFILES).map(({id,version,engine,displayName,plainPurpose,riskLevel,asrSafe,chainOrder,recommendFor,excludes,caution})=>({id,version,engine,displayName,plainPurpose,riskLevel,asrSafe,chainOrder,recommendFor,excludes,caution}))}
 
+export function resolveAudioToolChain(profileIds){const ids=[...new Set(profileIds||[])];if(!ids.length)throw new Error("Select at least one audio tool.");const profiles=ids.map(id=>{const profile=AUDIO_TOOL_PROFILES[id];if(!profile)throw new Error(`Unsupported audio tool: ${id}`);return profile});if(profiles.some(profile=>profile.chainOrder===null)&&profiles.length>1)throw new Error("Repair Assistant must run by itself.");for(const profile of profiles)for(const excluded of profile.excludes||[])if(ids.includes(excluded))throw new Error(`${profile.displayName} cannot be combined with ${AUDIO_TOOL_PROFILES[excluded]?.displayName||excluded}.`);return profiles.sort((a,b)=>(a.chainOrder??999)-(b.chainOrder??999))}
+
 export function getRxProfile(profileId) { const profile=RX_PROFILES[profileId]; if(!profile) throw new Error(`Unsupported RX processing profile: ${profileId}`); return profile; }
