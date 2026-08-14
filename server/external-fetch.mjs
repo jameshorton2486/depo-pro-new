@@ -1,4 +1,4 @@
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const isRetryableStatus = status => status === 429 || (status >= 500 && status <= 599);
 
 export async function fetchExternal(url, options, { label, attempts = 2, timeoutMs = 120000, fetchImpl = fetch, sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) } = {}) {
   let lastError;
@@ -8,7 +8,7 @@ export async function fetchExternal(url, options, { label, attempts = 2, timeout
       console.log(`[external:${label}] request started`, { attempt });
       const response = await fetchImpl(url, { ...options, signal: controller.signal });
       console.log(`[external:${label}] response received`, { attempt, status: response.status, elapsedMs: Date.now() - startedAt });
-      if (attempt < attempts && RETRYABLE_STATUS.has(response.status)) { await response.arrayBuffer();await sleep(750 * attempt);continue; }
+      if (attempt < attempts && isRetryableStatus(response.status)) { await response.arrayBuffer();await sleep(750 * attempt);continue; }
       return response;
     } catch (error) {
       lastError = error;console.error(`[external:${label}] request failed`, { attempt, elapsedMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) });
