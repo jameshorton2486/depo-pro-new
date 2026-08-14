@@ -25,15 +25,17 @@ test("rendering spec rejects pages outside the canonical 25-line model", () => {
   assert.throws(() => createRenderingSpec({ depositionId: "depo-1", insertionPageSet: { sha256: "x", pages: [{ role: "title", lines: [] }] }, generatedAt: "now" }), /exactly 25 lines/);
 });
 
-test("Python transcript formatter renders the shared spec without changing text", { skip: !fs.existsSync("C:\\Users\\james\\transcript_formatter\\docx_exporter.py") }, () => {
+test("Python transcript formatter renders the shared spec without changing text", t => {
+  const formatterRoot=process.env.DEPO_PRO_FORMATTER_ROOT??path.join(os.homedir(),"transcript_formatter"),formatter=path.join(formatterRoot,"docx_exporter.py"),python=process.env.DEPO_PRO_PYTHON;
+  if(!python||!fs.existsSync(python))return t.skip("DEPO_PRO_PYTHON must point to an available Python interpreter for the formatter integration test.");
+  if(!fs.existsSync(formatter))return t.skip(`Transcript formatter is unavailable at ${formatterRoot}; set DEPO_PRO_FORMATTER_ROOT to run this integration test.`);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "depo-pro-renderer-"));
   const specPath = path.join(temporary, "spec.json");
   const outputPath = path.join(temporary, "output.docx");
   const spec = createRenderingSpec({ depositionId: "depo-1", insertionPageSet, generatedAt: "2026-08-14T00:00:00.000Z" });
   fs.writeFileSync(specPath, JSON.stringify(spec));
   const script = fileURLToPath(new URL("../../server/insertion-pages/python-docx-renderer.py", import.meta.url));
-  const python = process.env.DEPO_PRO_PYTHON ?? "C:\\Users\\james\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe";
-  const rendered = spawnSync(python, [script, "--spec", specPath, "--output", outputPath, "--formatter-root", "C:\\Users\\james\\transcript_formatter"], { encoding: "utf8" });
+  const rendered = spawnSync(python, [script, "--spec", specPath, "--output", outputPath, "--formatter-root", formatterRoot], { encoding: "utf8" });
   assert.equal(rendered.status, 0, rendered.stderr);
   assert.equal(fs.existsSync(outputPath), true);
   assert.ok(fs.statSync(outputPath).size > 1_000);
