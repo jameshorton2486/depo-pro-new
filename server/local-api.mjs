@@ -18,6 +18,7 @@ import { createDeposition, resolveDepositionAudio, scanDepositions } from "./dep
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const depositionStorageRoot = process.env.DEPO_PRO_DEPOSITIONS_ROOT || "C:\\Users\\james\\depos";
 const terminologyPrompt = fs.readFileSync(path.join(root, "prompts", "extraction", "case_terms", "v2.md"), "utf8");
 const secretFile = path.join(root, "data", "secrets.dat");
 const port = 4317;
@@ -88,12 +89,12 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
     if (req.url === "/api/audio/tools" && req.method === "GET") return json(res,200,publicAudioTools(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
-    if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root),origin);
+    if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
-      const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input),origin);
+      const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input,{storageRoot:depositionStorageRoot}),origin);
     }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
-      const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"));
+      const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
       res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
     }
     if (req.url === "/api/audio/select" && req.method === "POST") {
@@ -182,7 +183,7 @@ const server = http.createServer(async (req,res) => {
       data.deepgram_keyterms.budget={token_ceiling:500,working_target:400,quality_target_range:[25,50],product_cap:60};
       data.ufm_registry.entry_count=(data.ufm_registry.entries||[]).length;
       const deepgramArtifact={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",...data.deepgram_keyterms};
-      const ufmData={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
+      const ufmData={case_id:data.case_id,cause_number:data.setup.causeNumber,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
       const anomalyWarnings=(data.anomalies||[]).map((item)=>`Review flag: ${item.detail||item.type||"Document anomaly"}${item.action?` — ${item.action}`:""}`);
       return json(res,200,{...data.setup,keyterms:wire,deepgramArtifact,ufmData,warnings:[...(data.setup.warnings||[]),...(data.extraction_report.low_confidence_spellings||[]).map((term)=>`Low-confidence spelling: ${term}`),...anomalyWarnings],confidence:data.setup.confidence},origin);
     }
