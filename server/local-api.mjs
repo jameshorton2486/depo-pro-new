@@ -4,8 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, recordTranscription, recordComparison, mutateAudioAudit, createHighpassDerivative } from "./audio-pipeline.mjs";
-import { transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, mutateAudioAudit } from "./audio-pipeline.mjs";
+import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
+import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
@@ -16,9 +17,13 @@ import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
 import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
 import { fileURLToPath } from "node:url";
+import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
+import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const depositionStorageRoot = process.env.DEPO_PRO_DEPOSITIONS_ROOT || "C:\\Users\\james\\depos";
+const localEnvironment = path.join(root, ".env.local");
+if (fs.existsSync(localEnvironment)) process.loadEnvFile(localEnvironment);
+const depositionStorageRoot = configuredDepositionStorageRoot();
 const terminologyPrompt = fs.readFileSync(path.join(root, "prompts", "extraction", "case_terms", "v2.md"), "utf8");
 const secretFile = path.join(root, "data", "secrets.dat");
 const port = 4317;
@@ -47,7 +52,8 @@ function hashCode(code, salt = crypto.randomBytes(16).toString("hex")) {
 function validCode(code, config) {
   if (!config?.adminHash || !code) return false;
   const actual = crypto.scryptSync(code, config.adminSalt, 32);
-  return crypto.timingSafeEqual(actual, Buffer.from(config.adminHash, "hex"));
+  const expected = Buffer.from(config.adminHash, "hex");
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 function json(res, status, body, origin) {
   res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": origin, "vary": "Origin", "cache-control": "no-store" });
@@ -64,16 +70,17 @@ function contentBlock(file) {
   throw new Error("Claude extraction currently accepts PDF or plain-text notices. Convert Word files to PDF first.");
 }
 
-async function transcribeAudioWithCompatibility({ apiKey, audit, source, keyterms, operationId }) {
-  const requestedPath = resolveAudioPath(root, audit, source);
+async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivativeOperationId, expectedAudioSha256, audioFile, request, keyterms, operationId }) {
+  const requestedPath = audioFile;
   try {
-    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, keyterms, uploadId:audit.uploadId, operationId });
-    return { ...result, audioDelivery: { requestedSource: source, deliveredSource: source, converted: false, reason: "Deepgram accepted the selected audio directly." } };
+    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, request, keyterms, uploadId:audit.uploadId, operationId });
+    result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "deposition-workspace", converted: false, reason: "Deepgram accepted the frozen deposition audio directly." };result.delivery={source:"deposition-workspace",sha256:expectedAudioSha256,bytes:fs.statSync(requestedPath).size,converted:false};return result;
   } catch (error) {
     if (!isDeepgramMediaError(error)) throw error;
-    const fallback = await createDeepgramCompatibilityDerivative(root, audit, source);
-    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, keyterms, uploadId:audit.uploadId, operationId });
-    return { ...result, audioDelivery: { requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 } };
+    const fallback = await createDeepgramCompatibilityDerivative(root, audit, source,derivativeOperationId);
+    if(fallback.derivative.sourceSha256!==expectedAudioSha256)throw new Error("The compatibility derivative was not created from the frozen deposition audio.");
+    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, request, keyterms, uploadId:audit.uploadId, operationId });
+    result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 };result.delivery={source:"compatibility-wav",sha256:fallback.derivative.sha256,sourceSha256:fallback.derivative.sourceSha256,bytes:fallback.derivative.bytes,converted:true,derivativeKey:fallback.derivative.key};result.transportAttempts=[{status:error.status,code:error.code,rawResponseBytes:error.rawResponseBytes||null,headers:error.responseHeaders||{},outcome:"media_rejected"}];return result;
   }
 }
 const server = http.createServer(async (req,res) => {
@@ -93,6 +100,15 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/depositions" && req.method === "POST") {
       const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input,{storageRoot:depositionStorageRoot}),origin);
     }
+    if (req.url === "/api/insertion-pages/docx" && req.method === "POST") {
+      const input=await body(req,10*1024*1024);
+      return json(res,201,await createInsertionWordArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot}),origin);
+    }
+    if (req.url === "/api/insertion-pages/rendering-spec" && req.method === "POST") {
+      const input=await body(req,10*1024*1024);
+      const prepared=await prepareInsertionRenderingArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot});
+      return json(res,201,{variant:prepared.variant,findings:prepared.findings,renderingSpec:prepared.renderingSpec,workspaceDocument:prepared.workspaceDocument},origin);
+    }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
       res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
@@ -109,7 +125,7 @@ const server = http.createServer(async (req,res) => {
       const profileIds=profiles.map(item=>item.id),operationId=crypto.randomUUID(),correlator={uploadId:audit.uploadId,operationId},startedAt=Date.now();console.log("[external:RX audio processing] request started",{...correlator,profileIds});
       try {
         const recordAuditEvent=async event=>mutateAudioAudit(root,audit.uploadId,current=>current.history.push(event));
-        const derivative=profiles.length===1&&profiles[0].engine==="ffmpeg"?await createHighpassDerivative(root,audit,{operationId}):await createRxDerivative(root,audit,{originalPath,profileIds,recordAuditEvent,randomId:()=>operationId});
+        const derivative=await createRxDerivative(root,audit,{originalPath,profileIds,recordAuditEvent,randomId:()=>operationId});
         const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"audio-tool-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,kind:derivative.kind,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileIds})});
         console.log("[external:RX audio processing] response received",{...correlator,status:200,elapsedMs:Date.now()-startedAt,profileIds});return json(res,200,{derivative,audit:updated},origin);
       } catch(error) { console.error("[external:RX audio processing] request failed",{...correlator,elapsedMs:Date.now()-startedAt,profileIds,error:error instanceof Error?error.message:String(error)});throw error; }
@@ -139,21 +155,23 @@ const server = http.createServer(async (req,res) => {
       if(!file.startsWith(directory)) throw new Error("Processed audio path is invalid.");
       res.writeHead(200,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
     }
-    if (req.url === "/api/audio/auto-select" && req.method === "POST") {
-      const input=await body(req,2*1024*1024),audit=readAudioAudit(root,input.uploadId);
-      audit.automaticSelection={status:"not-run",method:"user-triggered-sampled-comparison",winner:"original",measuredWer:false,reason:"No full-file comparison was run during intake. The original remains selected until the user requests a sampled comparison."};
-      const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.automaticSelection=audit.automaticSelection});return json(res,200,updated,origin);
-    }    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
-      const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource,operationId=crypto.randomUUID();
-      const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[],operationId});
-      await recordTranscription(root,audit,source,transcript); return json(res,200,{source,...transcript},origin);
+    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
+      const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);
+      const result=await runTranscriptionJob(root,{depositionId:input.depositionId,uploadId:input.uploadId,keytermOverrideReason:input.keytermOverrideReason||"",storageRoot:depositionStorageRoot,submit:({audio,audioFile,request,keyterms,operationId})=>transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source:audio.source,derivativeOperationId:audio.operationId,expectedAudioSha256:audio.sha256,audioFile,request,keyterms,operationId})});
+      return json(res,200,{cached:result.cached,job:result.job,evidence:result.evidence,workingTranscript:result.workingTranscript,transcript:result.normalized||null},origin);
     }
+    if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
+    if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
-      const input=await body(req,10*1024*1024); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource; const hypothesis=input.hypothesis||audit.transcripts?.[source]?.transcript||"";
+      const input=await body(req,10*1024*1024); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource; const stored=input.hypothesis?null:await readStoredTranscript(root,audit,source); const hypothesis=input.hypothesis||stored?.transcript||"";
       const comparison={source,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[])}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
     }
     if (req.url?.startsWith("/api/audio/audit?") && req.method === "GET") {
-      const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"); return json(res,200,publicAudit(readAudioAudit(root,uploadId)),origin);
+      const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"),audit=readAudioAudit(root,uploadId),result=publicAudit(audit),source=audit.selectedSource,transcript=await readStoredTranscript(root,audit,source);if(transcript)result.transcripts[source]={...transcript,...audit.transcripts[source]};return json(res,200,result,origin);
+    }    if (req.url?.startsWith("/api/audio/transcript?") && req.method === "GET") {
+      const url=new URL(req.url,"http://localhost"),audit=readAudioAudit(root,url.searchParams.get("uploadId")),source=url.searchParams.get("source")||audit.selectedSource;const transcript=await readStoredTranscript(root,audit,source);return transcript?json(res,200,transcript,origin):json(res,404,{error:"Transcript was not found."},origin);
     }    if (req.url === "/api/admin/status" && req.method === "GET") {
       const config=loadSecrets(); return json(res,200,{ initialized:!!config?.adminHash, anthropicConfigured:!!config?.anthropicApiKey, deepgramConfigured:!!config?.deepgramApiKey },origin);
     }
@@ -173,14 +191,20 @@ const server = http.createServer(async (req,res) => {
       const result=await response.json(); if(!response.ok) return json(res,response.status,{error:result?.error?.message || "Claude request failed."},origin);
       const toolUse=result.content?.find((item)=>item.type==="tool_use"&&item.name==="extract_deposition_intake"); if(!toolUse) throw new Error("Claude did not return structured intake data.");
       const data=toolUse.input;
+      if (!data || typeof data !== "object") throw new Error("Claude returned an invalid structured intake object.");
+      data.setup ??={}; data.deepgram_keyterms ??={terms:[]}; data.ufm_registry ??={entries:[]}; data.extraction_report ??={low_confidence_spellings:[]};
+      data.setup.warnings=Array.isArray(data.setup.warnings)?data.setup.warnings:[];
+      data.deepgram_keyterms.terms=Array.isArray(data.deepgram_keyterms.terms)?data.deepgram_keyterms.terms:[];
+      data.ufm_registry.entries=Array.isArray(data.ufm_registry.entries)?data.ufm_registry.entries:[];
+      data.extraction_report.low_confidence_spellings=Array.isArray(data.extraction_report.low_confidence_spellings)?data.extraction_report.low_confidence_spellings:[];
       const seen=new Set();
-      data.deepgram_keyterms.terms=(data.deepgram_keyterms.terms||[]).filter((item)=>{const term=String(item.term||"").trim();const key=term.toLowerCase();if(!term||seen.has(key))return false;seen.add(key);item.term=term;return true;}).slice(0,60);
+      data.deepgram_keyterms.terms=(data.deepgram_keyterms.terms||[]).filter((item)=>{const term=String(item.term||"").trim();const key=term.toLowerCase();if(!term||seen.has(key))return false;seen.add(key);item.term=term;return true;}).slice(0,50);
       const wire=data.deepgram_keyterms.terms.map((item)=>item.term);
       const estimatedTokens=wire.reduce((sum,term)=>sum+Math.ceil(term.length/4)+1,0);
       data.deepgram_keyterms.wire=wire;
       data.deepgram_keyterms.term_count=wire.length;
       data.deepgram_keyterms.estimated_tokens=estimatedTokens;
-      data.deepgram_keyterms.budget={token_ceiling:500,working_target:400,quality_target_range:[25,50],product_cap:60};
+      data.deepgram_keyterms.budget={token_ceiling:500,working_target:400,quality_target_range:[20,50],product_cap:50};
       data.ufm_registry.entry_count=(data.ufm_registry.entries||[]).length;
       const deepgramArtifact={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",...data.deepgram_keyterms};
       const ufmData={case_id:data.case_id,cause_number:data.setup.causeNumber,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
@@ -203,6 +227,6 @@ const server = http.createServer(async (req,res) => {
       }
       return json(res,200,results,origin);
     }    return json(res,404,{error:"Not found."},origin);
-  } catch(error) { return json(res,500,{error:error instanceof Error?error.message:"Unexpected local service error.",code:error instanceof RxProcessingError?error.code:"LOCAL_API_ERROR"},origin); }
+  } catch(error) {const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
 server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));

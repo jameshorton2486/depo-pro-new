@@ -64,6 +64,21 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .form-row { display:grid; grid-template-columns:1fr 1fr; gap:13px; }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:8px; }
 .modal-actions .primary-button { padding:12px 17px; }
+.modal:has(.canonical-data-sheet) { width:min(880px,100%); max-height:94vh; overflow:auto; }
+.canonical-data-sheet { display:grid; gap:10px; padding:17px; border:1px solid #d9e2ef; border-radius:14px; background:#f8fafc; }
+.canonical-data-sheet>header { display:flex; align-items:start; justify-content:space-between; gap:16px; }
+.canonical-data-sheet h3 { margin:0; font-size:18px; }.canonical-data-sheet .eyebrow { margin-bottom:5px; }
+.canonical-data-sheet>p,.canonical-data-sheet details>p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.data-sheet-phase { padding:6px 9px; border-radius:99px; background:#e8f1ff; color:#2856a9; font-size:10px; font-weight:800; }
+.canonical-data-sheet details { border:1px solid #dfe6f0; border-radius:10px; background:#fff; padding:11px 12px; }
+.canonical-data-sheet summary { cursor:pointer; color:#34425b; font-size:12px; font-weight:800; }
+.canonical-data-sheet details[open] summary { margin-bottom:12px; }
+.field-state { float:right; padding:3px 7px; border-radius:99px; font-size:8px; text-transform:uppercase; letter-spacing:.06em; }
+.field-state.extracted { background:#e6f6ed; color:#237050; }.field-state.review { background:#fff3d9; color:#865c09; }.field-state.missing { background:#f2e9e9; color:#8a4545; }
+.data-sheet-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
+.canonical-data-sheet .data-sheet-check { display:flex; grid-template-columns:auto 1fr; align-items:center; }
+.canonical-data-sheet .data-sheet-check input { width:auto; }
+@media(max-width:620px){.data-sheet-grid{grid-template-columns:1fr}.canonical-data-sheet>header{flex-direction:column}}
 .add-reporter-button { justify-self:start; border:0; background:transparent; color:var(--blue); padding:2px 0; font-size:13px; font-weight:750; }
 .add-reporter-button:hover { text-decoration:underline; }
 .reporter-backdrop { z-index:30; }

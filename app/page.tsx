@@ -5,6 +5,7 @@ import IntakeScreen, { type IntakeDraft } from "./IntakeScreen";
 import AdminSettings from "./AdminSettings";
 import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import AudioToolsScreen from "./AudioToolsScreen";
+import CanonicalDataSheet from "./CanonicalDataSheet";
 
 type Deposition = {
   id: string;
@@ -15,6 +16,8 @@ type Deposition = {
   depositionDate: string;
   courtReporterId: string;
   courtReporterName: string;
+  reporterProfile?: CourtReporter;
+  canonicalSeed?: Record<string,unknown>;
   intakeNotes: string;
   noticeName: string;
   courtOrderName: string;
@@ -36,7 +39,8 @@ const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
 type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin";
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
-function readWorkflowSession():WorkflowSession{if(typeof window==="undefined")return{view:"library",activeDepositionId:null};try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:{view:"library",activeDepositionId:null}}catch{return{view:"library",activeDepositionId:null}}}
+const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
+function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
 function makeId() {
   const date = new Date();
@@ -62,15 +66,14 @@ async function loadSavedAudioFiles(deposition:Deposition){return Promise.all(dep
 function legacyFiles(depositionId:string){return new Promise<Array<{category:string;order:number;name:string;type:string;blob:Blob}>>((resolve,reject)=>{const request=indexedDB.open("depo-pro-local-files",1);request.onerror=()=>reject(request.error);request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files",{keyPath:"id"})};request.onsuccess=()=>{const db=request.result,transaction=db.transaction("files","readonly"),all=transaction.objectStore("files").getAll();all.onerror=()=>reject(all.error);all.onsuccess=()=>resolve(all.result.filter(item=>item.depositionId===depositionId));transaction.oncomplete=()=>db.close()}})}
 async function migrateLegacyDepositions(existing:Deposition[]){const raw=localStorage.getItem(LEGACY_DEPOSITIONS_KEY);if(!raw)return null;const legacy:Deposition[]=JSON.parse(raw),known=new Set(existing.map(item=>item.id)),migrated=[...existing];for(const deposition of legacy){if(known.has(deposition.id))continue;const records=await legacyFiles(deposition.id),notice=records.find(item=>item.category==="notice"),courtOrder=records.find(item=>item.category==="court-order"),supporting=records.filter(item=>item.category==="supporting-document").sort((a,b)=>a.order-b.order);const convert=async(item:typeof notice)=>item?{name:item.name,type:item.type,base64:await toBase64(new File([item.blob],item.name,{type:item.type}))}:null;const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition,artifacts:{notice:await convert(notice),courtOrder:await convert(courtOrder),supportingFiles:await Promise.all(supporting.map(convert))}})}),saved=await response.json();if(!response.ok)throw new Error(`Legacy migration stopped at ${deposition.id}: ${saved.error||"unknown error"}`);migrated.push(saved);known.add(saved.id)}localStorage.removeItem(LEGACY_DEPOSITIONS_KEY);indexedDB.deleteDatabase("depo-pro-local-files");return migrated}
 export default function Home() {
-  const [resumeSession] = useState(readWorkflowSession);
   const [depositions, setDepositions] = useState<Deposition[]>([]);
-  const [reporters, setReporters] = useState<CourtReporter[]>(()=>{if(typeof window==="undefined")return[];const saved=localStorage.getItem(REPORTERS_STORAGE_KEY);return saved?JSON.parse(saved):[]});
+  const [reporters, setReporters] = useState<CourtReporter[]>([]);
   const [query, setQuery] = useState("");
   const [caseId, setCaseId] = useState("");
-  const [showModal, setShowModal] = useState(resumeSession.view==="setup");
-  const [showIntake, setShowIntake] = useState(resumeSession.view==="intake");
-  const [showAdmin, setShowAdmin] = useState(resumeSession.view==="admin");
-  const [showAudioTools, setShowAudioTools] = useState(resumeSession.view==="audio-tools");
+  const [showModal, setShowModal] = useState(false);
+  const [showIntake, setShowIntake] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showAudioTools, setShowAudioTools] = useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -82,8 +85,23 @@ export default function Home() {
   const [libraryLoaded,setLibraryLoaded]=useState(false);
 
   useEffect(() => {
-    fetch(`${API}/api/depositions`).then(response=>response.json()).then(async result=>{const disk=result.depositions||[];const migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}).catch(error=>setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")).finally(()=>setLibraryLoaded(true));
-  }, [resumeSession]);
+    // The server and the client's first render must both be the library. Read
+    // browser-only persistence after hydration, then restore the saved view.
+    let cancelled=false;
+    async function restore(){
+      await Promise.resolve();
+      if(cancelled)return;
+      const resumeSession=readWorkflowSession();
+      try{const saved=localStorage.getItem(REPORTERS_STORAGE_KEY);setReporters(saved?JSON.parse(saved):[])}catch{setReporters([])}
+      setShowModal(resumeSession.view==="setup");
+      setShowIntake(resumeSession.view==="intake");
+      setShowAdmin(resumeSession.view==="admin");
+      setShowAudioTools(resumeSession.view==="audio-tools");
+      try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
+    }
+    void restore();
+    return()=>{cancelled=true};
+  }, []);
 
   useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showIntake,showModal]);
 
@@ -108,6 +126,13 @@ export default function Home() {
       depositionDate: String(data.get("depositionDate")),
       courtReporterId: reporter?.id ?? "",
       courtReporterName: reporter?.name ?? "",
+      reporterProfile: reporter ?? undefined,
+      canonicalSeed: {
+        ...(intakeDraft?.ufmData||{}),
+        court:String(data.get("canonicalCourt")||""),district:String(data.get("canonicalDistrict")||""),division:String(data.get("canonicalDivision")||""),county:String(data.get("canonicalCounty")||""),
+        scheduledStart:String(data.get("canonicalScheduledStart")||""),timeZone:String(data.get("canonicalTimeZone")||""),location:String(data.get("canonicalLocation")||""),remotePlatform:String(data.get("canonicalRemotePlatform")||""),
+        remote:data.get("canonicalRemote")==="on",videotaped:data.get("canonicalVideotaped")==="on",interpreted:data.get("canonicalInterpreted")==="on",corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on",
+      },
       intakeNotes: String(data.get("reporterNotes") || intakeDraft?.notes || ""),
       noticeName: intakeDraft?.notice?.name ?? "",
       courtOrderName: intakeDraft?.courtOrder?.name ?? "",
@@ -228,6 +253,7 @@ export default function Home() {
               <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || new Date().toISOString().slice(0, 10)} /></label><label>Court Reporter <small>Required for local filing</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
+              <CanonicalDataSheet seed={intakeDraft?.ufmData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
               <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":"Create Deposition"}</button></div>
             </form>

@@ -26,7 +26,7 @@ test("missing configured executable fails closed instead of falling back", () =>
 
 test("verified RX 12 default installation location is discovered without RX 11", () => {
   const result = inspectRx({ environment:{}, candidates:[verified], ...fakeFiles(verified), includeExecutable:true });
-  assert.equal(result.available,true); assert.equal(result.detectionMethod,"standard-install-location"); assert.equal(path.basename(result.executable),RX12_EXECUTABLE_NAME);
+  assert.equal(result.available,true); assert.equal(result.detectionMethod,"standard-install-location"); assert.equal(path.win32.basename(result.executable),RX12_EXECUTABLE_NAME);
 });
 
 test("RX 11 executable cannot masquerade as RX 12", () => {

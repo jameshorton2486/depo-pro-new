@@ -1,66 +1,86 @@
 # Depo-Pro New
 
-Depo-Pro New is a local-first Windows application for deposition intake, audited audio analysis and RX 12 processing, Claude-assisted case-term extraction, and Deepgram Nova-3 transcription.
+Depo-Pro is a local-first Windows application for deposition intake, immutable audio preservation, audited RX 12 processing, Claude-assisted case extraction, Deepgram Nova-3 transcription, canonical ASR evidence, and reviewed insertion-page generation.
 
-## Architecture
+## Local architecture
 
-- React 19 UI served locally at `http://localhost:3000`
-- Node local service bound to `127.0.0.1:4317`
-- Filesystem-authoritative deposition folders under the ignored `data/depositions/` directory
-- Immutable audio originals and audited derivatives under the ignored `data/` directory
-- Windows DPAPI-protected Claude and Deepgram credentials
-- FFmpeg/FFprobe analysis and compatibility conversion
-- iZotope RX 12 VST3 processing through a pinned Python/Pedalboard worker
+- Project source and runtime: `C:\Users\james\projects\depo-pro-new`
+- Browser UI: `http://localhost:3000`
+- Node local API: `http://127.0.0.1:4317`
+- Deposition workspaces: `C:\Users\james\depos` by default
+- Audio-intake evidence and encrypted credentials: ignored `data/` directory inside the project
+- Credentials: Windows DPAPI-protected; never written to request URLs or browser storage
+- Native processing: FFmpeg/FFprobe plus pinned Python, Pedalboard, and allow-listed RX 12 modules
 
-This application currently requires Windows and local native dependencies. The Cloudflare/Vinext scaffolding remains transitional and is not a production deployment target for workflows that depend on RX, FFmpeg, DPAPI, or localhost.
+Both application services and all durable deposition artifacts run from the local C drive. Claude document extraction and Deepgram transcription are external API operations initiated by the local server; their credentials remain local, and Depo-Pro preserves the resulting evidence locally.
+
+The deposition root can be changed explicitly with `DEPO_PRO_DEPOSITIONS_ROOT`. Do not point it at OneDrive or another synchronized folder when maintaining evidentiary workspaces.
 
 ## Prerequisites
 
 - Windows 11
-- Node.js `>=22.13.0`
+- Bundled Node.js 22.13.0 installed through the project dependencies
 - FFmpeg and FFprobe on `PATH`
-- Python worker environment created from `requirements-pedalboard.txt`
+- Python environment at `.venv-pedalboard`
+- `pedalboard==0.9.24`
 - iZotope RX 12 Audio Editor and the allow-listed RX 12 VST3 modules
-- Claude and Deepgram credentials configured in Administrator Settings
+- Claude and Deepgram credentials configured through Administrator Settings
 
-## Local setup
+## Run locally
 
 ```powershell
-cd "C:\Users\james\Projects\depo-pro-new"
+cd "C:\Users\james\projects\depo-pro-new"
 npm install
-python -m venv .venv-pedalboard
-.\.venv-pedalboard\Scripts\python.exe -m pip install -r requirements-pedalboard.txt
+npm run status
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Administrator Settings shows readiness for Node, FFmpeg, FFprobe, RX, Python, Pedalboard, RX modules, Claude, and Deepgram.
+Open [http://localhost:3000](http://localhost:3000). Keep the PowerShell window open while Depo-Pro is running. Stop both local services with `Ctrl+C`.
 
-## RX configuration
+## Storage boundaries
 
-Discovery precedence is explicit `RX_EXECUTABLE_PATH`, the standard RX 12 installation location, then a safe unavailable state. The value must be the full executable path:
+- `C:\Users\james\depos` is the filesystem-authoritative deposition library.
+- `data/audio-intake` contains immutable intake audio and audited derivatives used before deposition creation.
+- `data/secrets.dat` contains DPAPI-encrypted local credentials.
+- `.env.local` contains machine configuration such as the RX executable path; it is ignored by Git.
+- Generated build directories, dependencies, logs, caches, and temporary render artifacts are not source files and must not be copied between installations.
 
-```text
-RX_EXECUTABLE_PATH=C:\Program Files\iZotope\RX 12 Audio Editor\win64\iZotope RX 12 Audio Editor.exe
-```
+## Deepgram evidence pipeline
 
-The Audio Tools screen exposes allow-listed profiles for Voice De-noise, De-click, De-hum, De-reverb, Dialogue Isolate, and Repair Assistant. The browser sends profile IDs only; the server controls plug-in paths and parameters. Machine-specific paths are omitted from durable audit records.
+The server loads saved ordered keyterms, verifies the frozen deposition audio SHA-256, and submits prerecorded audio using Nova-3 with pinned diarizer v2. Each durable job preserves:
 
-Canonical RX derivatives are 16-bit lossless FLAC files with the source sample rate and channel count preserved. Depo-Pro validates sample/frame alignment after both RX rendering and FLAC encoding, records the exact operation ID and SHA-256, and displays a before/after measurement delta. Original clipping remains an evidentiary defect even when processing conceals it.
+1. `request.json` — exact final URL, options, ordered keyterms, and audio identity.
+2. `raw-response.json` — exact vendor response bytes and SHA-256.
+3. `asr-evidence.json` — immutable word timing, confidence, speaker evidence, and actual diarizer metadata.
+4. `transcript/working.json` — derived, source-referenced Working Transcript.
 
-The canonical transcription derivative never removes leading, trailing, or internal silence and never changes frame count. Its FLAC metadata embeds the upload ID, RX operation ID, source SHA-256, profile identity, and `frame-aligned-no-cuts` timeline policy. Any future shortened listening file must be marked as a non-evidentiary proxy and is structurally ineligible for transcription selection.
+Identical evidence requests are reused rather than retranscribed. Corrupt derived evidence can be rebuilt from a valid preserved raw response without another Deepgram call.
 
-## Validation
+## RX processing
 
-- `npm test` — deterministic application, audio, Deepgram, RX adapter, and integrity tests
-- `npm run test:integration` — disposable audio through installed RX modules
+Discovery precedence is the explicit `RX_EXECUTABLE_PATH`, the standard RX 12 installation location, then a safe unavailable state. Machine-specific paths are omitted from durable evidence records.
+
+Canonical RX derivatives are lossless FLAC files with the source sample rate, channels, frame count, and timeline preserved. Original clipping remains an evidentiary defect even if processing conceals it. Playback proxies and review-only derivatives are structurally ineligible for transcription unless explicitly promoted through the audited workflow.
+
+## Insertion pages
+
+The repository includes the canonical 25-line page model, reviewed Texas requested/waived template variants, hash-verified template inventories, Word rendering through the Python formatter boundary, and Thomas regression fixtures. Federal certificate variants remain intentional blocking stubs until an approved federal certificate source is supplied. Unknown UFM geometry continues to fail closed.
+
+## Validation commands
+
+- `npm run status` — report the local installation, storage root, and live service readiness without revealing secrets
+- `npm test` — deterministic application, audio, Deepgram, RX, canonical-data, and insertion-page tests
+- `npm run test:rx` — opt-in installed RX integration against an approved disposable fixture
+- `npm run test:deepgram` — opt-in live Deepgram integration against an approved disposable fixture
 - `npm run typecheck` — TypeScript validation
 - `npm run lint` — ESLint validation
 - `npm run build` — production build
-- `npm run verify` — deterministic release gate
+- `npm run verify` — complete deterministic release gate
 
-## Current limits
+## Current boundaries
 
-- Deposition metadata, intake artifacts, and selected audited audio are persisted under `data/depositions/<deposition-id>/`. JSON writes and directory publication are atomic, and startup reports malformed or orphaned folders.
-- The Court Reporter directory remains browser-managed and should move into the same filesystem store in a later contained slice.
-- Deepgram transcription remains synchronous. Durable asynchronous jobs, callback recovery, and immutable raw response storage require a separate design.
-- Canonical transcript graph, correction decisions, workspace, UFM, and certification are not yet implemented.
+- The reporter directory still originates in browser-managed configuration and should be migrated into the filesystem-authoritative profile store.
+- Deepgram processing is synchronous behind a durable job abstraction because the local Windows service has no public callback endpoint.
+- Reporter editing, AI correction proposals, final transcript classification/pagination, and certification lifecycle remain downstream phases.
+- Federal certification text and final UFM layout measurements require approved authoritative sources before those variants can be released.
+- Cloudflare/Vinext scaffolding is transitional. Native RX, DPAPI, filesystem evidence, and localhost services are intentionally not cloud-deployed.

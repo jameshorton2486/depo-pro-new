@@ -4,9 +4,13 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { inspectRx } from "./rx-adapter.mjs";
 import { ASR_ELIGIBLE_KINDS, CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
-import { compareRxMeasurements } from "./rx-delta.mjs";
 
-const MAX_AUDIO_BYTES = Number(process.env.MAX_AUDIO_BYTES) || 12 * 1024 ** 3;
+const DEFAULT_MAX_AUDIO_BYTES = 12 * 1024 ** 3;
+const configuredMaxAudioBytes = Number(process.env.MAX_AUDIO_BYTES ?? DEFAULT_MAX_AUDIO_BYTES);
+if (!Number.isSafeInteger(configuredMaxAudioBytes) || configuredMaxAudioBytes < 1) throw new Error("MAX_AUDIO_BYTES must be a positive integer.");
+const MAX_AUDIO_BYTES = configuredMaxAudioBytes;
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function assertUploadId(value) { if (!UPLOAD_ID.test(String(value || ""))) throw new Error("Invalid audio intake identifier."); return String(value); }
 const SCHEMA_VERSION = "3.0.0";
 const ANALYSIS_VERSION = "audio-quality-v2.0.0";
 const ROUTING_VERSION = "audio-routing-v2.0.0";
@@ -28,8 +32,8 @@ async function run(command, args, { binary = false } = {}) {
   });
 }
 function metric(text, pattern) { const match = text.match(pattern); return match ? Number(match[1]) : null; }
-function sha256(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
-function storageDirectory(root, uploadId) { return path.join(root, "data", "audio-intake", uploadId); }
+async function sha256(file) { const hash=crypto.createHash("sha256"); for await (const chunk of fs.createReadStream(file)) hash.update(chunk); return hash.digest("hex"); }
+function storageDirectory(root, uploadId) { return path.join(root, "data", "audio-intake", assertUploadId(uploadId)); }
 function resolveKey(root, key) {
   const normalized = String(key || "").replaceAll("\\", "/");
   if (!/^audio-intake\/[a-f0-9-]+\/[a-z0-9._ -]+$/i.test(normalized)) throw new Error("Invalid audio storage key.");
@@ -50,17 +54,24 @@ function atomicWrite(file, value) {
   finally { fs.closeSync(descriptor); }
   fs.renameSync(temporary, file);
 }
+function atomicBuffer(file, value) {
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const descriptor=fs.openSync(file,"wx");
+  try { fs.writeFileSync(descriptor,value); fs.fsyncSync(descriptor); }
+  finally { fs.closeSync(descriptor); }
+}
 function appendHistory(audit, event, details = {}) { audit.history.push({ event, at: new Date().toISOString(), ...details }); }
 function publicAudit(audit) { return structuredClone(audit); }
 export { publicAudit };
 
 export function readAudioAudit(root, uploadId) {
+  assertUploadId(uploadId);
   const target = auditFile(root, uploadId);
   if (!fs.existsSync(target)) throw new Error("Audio intake record was not found.");
   return validateAudit(JSON.parse(fs.readFileSync(target, "utf8")));
 }
-export function writeAudioAudit(root, audit) { validateAudit(audit); atomicWrite(auditFile(root, audit.uploadId), audit); }
-export async function mutateAudioAudit(root,uploadId,mutator){return withAuditLock(uploadId,async()=>{const audit=readAudioAudit(root,uploadId),result=await mutator(audit);writeAudioAudit(root,audit);return result??publicAudit(audit)})}
+export function writeAudioAudit(root, audit) { validateAudit(audit); assertUploadId(audit.uploadId); atomicWrite(auditFile(root, audit.uploadId), audit); }
+export async function mutateAudioAudit(root,uploadId,mutator){assertUploadId(uploadId);return withAuditLock(uploadId,async()=>{const audit=readAudioAudit(root,uploadId),result=await mutator(audit);writeAudioAudit(root,audit);return result??publicAudit(audit)})}
 
 export async function saveAudioForTools(req, { root, originalName, contentType }) {
   const uploadId = crypto.randomUUID();
@@ -72,6 +83,8 @@ export async function saveAudioForTools(req, { root, originalName, contentType }
   let bytes = 0;
   const output = fs.createWriteStream(originalPath, { flags: "wx" });
   try {
+    const declaredLength=Number(req.headers?.["content-length"]||0);
+    if (declaredLength > MAX_AUDIO_BYTES) throw new Error(`Audio file exceeds the configured ${MAX_AUDIO_BYTES} byte limit.`);
     for await (const chunk of req) {
       bytes += chunk.length;
       if (bytes > MAX_AUDIO_BYTES) throw new Error(`Audio file exceeds the configured ${MAX_AUDIO_BYTES} byte limit.`);
@@ -81,7 +94,7 @@ export async function saveAudioForTools(req, { root, originalName, contentType }
     await new Promise((resolve, reject) => output.end(error => error ? reject(error) : resolve()));
     if (!bytes) throw new Error("The selected audio file is empty.");
     const sha = hash.digest("hex");
-    const audit = { schemaVersion:SCHEMA_VERSION, uploadId, status:"ready", originalName:safeName, contentType:contentType||"application/octet-stream", storage:{original:{key:`audio-intake/${uploadId}/${path.basename(originalPath)}`,sha256:sha,bytes,immutable:true},derivatives:[]}, selectedSource:"original", selectedDerivativeOperationId:null, selectedAudioSha256:sha, selectionBasis:"audio-tools", rx:inspectRx(), tools:{ffmpeg:null}, transcripts:{}, comparisons:[], history:[{event:"audio-tools-original-ingested",at:new Date().toISOString(),sha256:sha,bytes}], createdAt:new Date().toISOString() };
+    const audit = { schemaVersion:SCHEMA_VERSION, intakeMode:"tools", analysisVersion:null, routingPolicyVersion:null, uploadId, status:"ready", originalName:safeName, contentType:contentType||"application/octet-stream", media:null, measurements:null, findings:null, recommendation:null, storage:{original:{key:`audio-intake/${uploadId}/${path.basename(originalPath)}`,sha256:sha,bytes,immutable:true},derivatives:[]}, selectedSource:"original", selectedDerivativeOperationId:null, selectedAudioSha256:sha, selectionBasis:"audio-tools", rx:inspectRx(), tools:{ffmpeg:null}, transcripts:{}, comparisons:[], history:[{event:"audio-tools-original-ingested",at:new Date().toISOString(),sha256:sha,bytes}], createdAt:new Date().toISOString() };
     writeAudioAudit(root, audit);
     return publicAudit(audit);
   } catch (error) {
@@ -101,7 +114,10 @@ async function probeAudio(file) {
 async function measureAudio(file) {
   const filter = "volumedetect,astats=metadata=1:reset=0";
   const text = await run("ffmpeg", ["-hide_banner", "-nostats", "-i", file, "-af", filter, "-f", "null", "-"]);
-  const clippedSamples = metric(text, /histogram_0db:\s*(\d+)/i) ?? 0;
+  return parseAudioMeasurements(text);
+}
+export function parseAudioMeasurements(text) {
+  const clippedSamples = metric(text, /histogram_0db:\s*(\d+)/i);
   const peakDbfs = metric(text, /Peak level dB:\s*(-?[\d.]+)/i) ?? metric(text, /max_volume:\s*(-?[\d.]+) dB/i);
   const meanVolumeDb = metric(text, /mean_volume:\s*(-?[\d.]+) dB/i);
   const dynamicRangeDb = metric(text, /Dynamic range:\s*([\d.]+)/i);
@@ -162,20 +178,14 @@ function recommendProcessing(findings) {
   return { route: "original", candidateProfile: null, reason: "No validated quality concern requires processing." };
 }
 function profileFilter(profile) {
-  return { "low-frequency-normalize-v2":"highpass=f=70,loudnorm=I=-23:TP=-2:LRA=11", "low-frequency-rolloff-v2":"highpass=f=70", "gentle-normalization-v2":"loudnorm=I=-23:TP=-2:LRA=11" }[profile];
+  return { "low-frequency-rolloff-v2":"highpass=f=70" }[profile];
 }
 async function createDerivative(root, audit, originalPath, profile, measurementsBefore) {
   const filter = profileFilter(profile), directory = storageDirectory(root, audit.uploadId), name = `candidate.${profile}.wav`, target = path.join(directory, name);
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", originalPath, "-af", filter, "-c:a", "pcm_s16le", target];
   await run("ffmpeg", args);
   const after = await measureAudio(target);
-  return { kind:DERIVATIVE_KINDS.FFMPEG_CANDIDATE, operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", sourcePcmPrecision:"decoded source; lossy inputs have no source PCM bit depth",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
-}
-export async function createHighpassDerivative(root,audit,{operationId=crypto.randomUUID()}={}){
-  const originalPath=resolveKey(root,audit.storage.original.key),name=`candidate.low-frequency-rolloff-v2.${operationId}.flac`,target=path.join(storageDirectory(root,audit.uploadId),name),measurementsBefore=await measureAudioQuality(originalPath);
-  await run("ffmpeg",["-y","-hide_banner","-loglevel","error","-i",originalPath,"-af","highpass=f=70","-c:a","flac",target]);
-  const measurementsAfter=await measureAudioQuality(target);
-  return {kind:DERIVATIVE_KINDS.RX_ASR,operationId,key:`audio-intake/${audit.uploadId}/${name}`,bytes:fs.statSync(target).size,sha256:sha256(target),sourceSha256:audit.storage.original.sha256,sourceImmutable:true,tool:"ffmpeg",toolVersion:audit.tools.ffmpeg,profileId:"low-frequency-rolloff-v2",profileVersion:"2.0.0",sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:true,outputEncoding:{container:"flac",lossless:true},measurementsBefore,measurementsAfter,measurementDelta:compareRxMeasurements(measurementsBefore,measurementsAfter),createdAt:new Date().toISOString()};
+  return { kind:DERIVATIVE_KINDS.FFMPEG_CANDIDATE, operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:await sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", sourcePcmPrecision:"decoded source; lossy inputs have no source PCM bit depth",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
 }
 
 function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => ASR_ELIGIBLE_KINDS.has(item.kind) && item.timelinePreserved !== false && item.selectableForTranscription !== false); }
@@ -193,7 +203,7 @@ export function resolveAudioItem(audit, source = audit.selectedSource, derivativ
 export async function createDeepgramCompatibilityDerivative(root, audit, source = audit.selectedSource, derivativeOperationId = audit.selectedDerivativeOperationId) {
   const sourceItem = resolveAudioItem(audit, source, derivativeOperationId);
   if (!sourceItem) throw new Error("The requested audio source is unavailable for conversion.");
-  const existing = audit.storage.derivatives.find(item => item.kind === "deepgram-compatibility" && item.sourceSha256 === sourceItem.sha256);
+  const existing = audit.storage.derivatives.find(item => item.kind === DERIVATIVE_KINDS.DEEPGRAM_COMPATIBILITY && item.sourceSha256 === sourceItem.sha256);
   if (existing) {
     await mutateAudioAudit(root,audit.uploadId,current=>appendHistory(current,"deepgram-compatibility-derivative-reused",{source,key:existing.key,sha256:existing.sha256}));
     return { path: resolveKey(root, existing.key), derivative: existing };
@@ -207,7 +217,7 @@ export async function createDeepgramCompatibilityDerivative(root, audit, source 
   if (!stream) throw new Error("The compatibility conversion did not produce readable audio.");
   const derivative = {
     kind: DERIVATIVE_KINDS.DEEPGRAM_COMPATIBILITY, key: `audio-intake/${audit.uploadId}/${name}`,
-    bytes: fs.statSync(target).size, sha256: sha256(target), sourceSha256: sourceItem.sha256,
+    bytes: fs.statSync(target).size, sha256: await sha256(target), sourceSha256: sourceItem.sha256,
     tool: "ffmpeg", toolVersion: audit.tools.ffmpeg, profileId: "deepgram-pcm-wav-v1", profileVersion: "1.0.0",
     commandArguments: ["-i", sourceItem.key, "-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", "OUTPUT_KEY"],
     media: { codec: stream.codec_name || "pcm_s16le", sampleRate: Number(stream.sample_rate || 0), channels: Number(stream.channels || 0) },
@@ -221,7 +231,7 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
   fs.mkdirSync(directory, { recursive: true });
   const originalPath = path.join(directory, `original${path.extname(safeName) || ".bin"}`), hash = crypto.createHash("sha256");
   let bytes = 0;
-  const audit = { schemaVersion:SCHEMA_VERSION, analysisVersion:ANALYSIS_VERSION, routingPolicyVersion:ROUTING_VERSION, uploadId, status:"ingesting", originalName:safeName, contentType:contentType||"application/octet-stream", storage:{ original:{ key:`audio-intake/${uploadId}/${path.basename(originalPath)}`, sha256:null, bytes:0, immutable:true }, derivatives:[] }, media:null, measurements:null, findings:null, recommendation:null, selectedSource:"original", selectedDerivativeOperationId:null, selectedAudioSha256:null, selectionBasis:"safety-default", rx:inspectRx(), tools:{ffmpeg:null}, transcripts:{}, comparisons:[], history:[], createdAt:new Date().toISOString() };
+  const audit = { schemaVersion:SCHEMA_VERSION, intakeMode:"analysis", analysisVersion:ANALYSIS_VERSION, routingPolicyVersion:ROUTING_VERSION, uploadId, status:"ingesting", originalName:safeName, contentType:contentType||"application/octet-stream", storage:{ original:{ key:`audio-intake/${uploadId}/${path.basename(originalPath)}`, sha256:null, bytes:0, immutable:true }, derivatives:[] }, media:null, measurements:null, findings:null, recommendation:null, selectedSource:"original", selectedDerivativeOperationId:null, selectedAudioSha256:null, selectionBasis:"safety-default", rx:inspectRx(), tools:{ffmpeg:null}, transcripts:{}, comparisons:[], history:[], createdAt:new Date().toISOString() };
   const declaredLength = Number(req.headers?.["content-length"] || 0);
   if (declaredLength > MAX_AUDIO_BYTES) throw new Error(`Audio file exceeds the configured ${MAX_AUDIO_BYTES} byte limit.`);
   const output = fs.createWriteStream(originalPath, { flags:"wx" });
@@ -241,5 +251,17 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
 }
 export async function selectAudioSource(root,uploadId,source,reason="user-override",derivativeOperationId=null) {return mutateAudioAudit(root,uploadId,audit=>{const item=resolveAudioItem(audit,source,derivativeOperationId);audit.selectedSource=source;audit.selectedDerivativeOperationId=source==="processed"?item.operationId:null;audit.selectedAudioSha256=item.sha256;audit.selectionBasis=reason;appendHistory(audit,"source-selected",{source,reason,derivativeOperationId:audit.selectedDerivativeOperationId,audioSha256:item.sha256})})}
 export function resolveAudioPath(root,audit,source=audit.selectedSource,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){return resolveKey(root,resolveAudioItem(audit,source,derivativeOperationId).key);}
-export async function recordTranscription(root,audit,source,transcript,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){return mutateAudioAudit(root,audit.uploadId,current=>{const item=resolveAudioItem(current,source,derivativeOperationId);current.transcripts[source]={...transcript,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null};appendHistory(current,"deepgram-transcription-completed",{source,operationId:transcript.operationId,requestId:transcript.requestId,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null})})}
+function transcriptFile(root,uploadId,operationId){assertUploadId(uploadId);assertUploadId(operationId);return path.join(storageDirectory(root,uploadId),"transcripts",`${operationId}.json`)}
+export async function recordTranscription(root,audit,source,transcript,derivativeOperationId=source==="processed"?audit.selectedDerivativeOperationId:null){
+  const item=resolveAudioItem(audit,source,derivativeOperationId),serialized=Buffer.from(JSON.stringify(transcript)),transcriptSha256=crypto.createHash("sha256").update(serialized).digest("hex");
+  const file=transcriptFile(root,audit.uploadId,transcript.operationId);atomicBuffer(file,serialized);
+  const relativePath=`audio-intake/${audit.uploadId}/transcripts/${transcript.operationId}.json`;
+  try{return await mutateAudioAudit(root,audit.uploadId,current=>{const currentItem=resolveAudioItem(current,source,derivativeOperationId);if(currentItem.sha256!==item.sha256)throw new Error("The selected audio changed before the transcript could be recorded.");current.transcripts[source]={operationId:transcript.operationId,requestId:transcript.requestId,model:transcript.model,provider:transcript.provider,createdAt:transcript.createdAt,audioSha256:item.sha256,derivativeOperationId:source==="processed"?item.operationId:null,transcriptSha256,path:relativePath,wordCount:Array.isArray(transcript.words)?transcript.words.length:0,confidence:transcript.confidence,keytermCount:transcript.keytermCount,diarization:transcript.diarization,audioDelivery:transcript.audioDelivery};appendHistory(current,"deepgram-transcription-completed",{source,operationId:transcript.operationId,requestId:transcript.requestId,audioSha256:item.sha256,transcriptSha256,path:relativePath,derivativeOperationId:source==="processed"?item.operationId:null})})}catch(error){fs.rmSync(file,{force:true});throw error}
+}
+export async function readStoredTranscript(root,audit,source=audit.selectedSource){
+  const metadata=audit.transcripts?.[source];if(!metadata)return null;
+  if(!metadata.path)return metadata;
+  const expected=`audio-intake/${assertUploadId(audit.uploadId)}/transcripts/${assertUploadId(metadata.operationId)}.json`;if(metadata.path!==expected)throw new Error("Stored transcript path is invalid.");
+  const value=await fs.promises.readFile(transcriptFile(root,audit.uploadId,metadata.operationId));const digest=crypto.createHash("sha256").update(value).digest("hex");if(digest!==metadata.transcriptSha256)throw new Error("Stored transcript integrity verification failed.");return JSON.parse(value.toString("utf8"));
+}
 export async function recordComparison(root,audit,comparison){return mutateAudioAudit(root,audit.uploadId,current=>{current.comparisons.push(comparison);appendHistory(current,"transcript-quality-compared",{source:comparison.source,wer:comparison.wer,criticalLegalErrorRate:comparison.criticalLegalErrorRate})})}

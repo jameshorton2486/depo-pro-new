@@ -2,28 +2,35 @@ function words(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9' -]/g, " ").split(/\s+/).filter(Boolean);
 }
 
+const DEFAULT_MAX_COMPARISON_WORDS = 5_000;
+function comparisonWordLimit() {
+  const value = Number(process.env.MAX_TRANSCRIPT_COMPARISON_WORDS ?? DEFAULT_MAX_COMPARISON_WORDS);
+  return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_MAX_COMPARISON_WORDS;
+}
+
 function distance(reference, hypothesis) {
-  const rows = Array.from({ length: reference.length + 1 }, () => Array(hypothesis.length + 1).fill(null));
-  rows[0][0] = { cost: 0, s: 0, d: 0, i: 0 };
-  for (let r = 1; r <= reference.length; r++) rows[r][0] = { cost: r, s: 0, d: r, i: 0 };
-  for (let h = 1; h <= hypothesis.length; h++) rows[0][h] = { cost: h, s: 0, d: 0, i: h };
-  for (let r = 1; r <= reference.length; r++) for (let h = 1; h <= hypothesis.length; h++) {
-    if (reference[r - 1] === hypothesis[h - 1]) rows[r][h] = { ...rows[r - 1][h - 1] };
-    else {
-      const choices = [
-        { ...rows[r - 1][h - 1], cost: rows[r - 1][h - 1].cost + 1, s: rows[r - 1][h - 1].s + 1 },
-        { ...rows[r - 1][h], cost: rows[r - 1][h].cost + 1, d: rows[r - 1][h].d + 1 },
-        { ...rows[r][h - 1], cost: rows[r][h - 1].cost + 1, i: rows[r][h - 1].i + 1 },
-      ];
-      rows[r][h] = choices.sort((a, b) => a.cost - b.cost)[0];
+  const width=hypothesis.length+1;
+  let previous={cost:Int32Array.from({length:width},(_,i)=>i),s:new Int32Array(width),d:new Int32Array(width),i:Int32Array.from({length:width},(_,i)=>i)};
+  let current={cost:new Int32Array(width),s:new Int32Array(width),d:new Int32Array(width),i:new Int32Array(width)};
+  for(let r=1;r<=reference.length;r++){
+    current.cost[0]=r;current.s[0]=0;current.d[0]=r;current.i[0]=0;
+    for(let h=1;h<width;h++){
+      if(reference[r-1]===hypothesis[h-1]){current.cost[h]=previous.cost[h-1];current.s[h]=previous.s[h-1];current.d[h]=previous.d[h-1];current.i[h]=previous.i[h-1];continue}
+      const substitution=previous.cost[h-1]+1,deletion=previous.cost[h]+1,insertion=current.cost[h-1]+1;
+      if(substitution<=deletion&&substitution<=insertion){current.cost[h]=substitution;current.s[h]=previous.s[h-1]+1;current.d[h]=previous.d[h-1];current.i[h]=previous.i[h-1]}
+      else if(deletion<=insertion){current.cost[h]=deletion;current.s[h]=previous.s[h];current.d[h]=previous.d[h]+1;current.i[h]=previous.i[h]}
+      else{current.cost[h]=insertion;current.s[h]=current.s[h-1];current.d[h]=current.d[h-1];current.i[h]=current.i[h-1]+1}
     }
+    [previous,current]=[current,previous];
   }
-  return rows[reference.length][hypothesis.length];
+  const last=hypothesis.length;return{cost:previous.cost[last],s:previous.s[last],d:previous.d[last],i:previous.i[last]};
 }
 
 export function compareTranscripts(referenceText, hypothesisText, criticalTerms = []) {
   const reference = words(referenceText);
   const hypothesis = words(hypothesisText);
+  const limit=comparisonWordLimit();
+  if(reference.length>limit||hypothesis.length>limit)throw new RangeError(`Transcript comparison is limited to ${limit} words per transcript. Compare smaller aligned excerpts.`);
   const result = distance(reference, hypothesis);
   const terms = [...new Set(criticalTerms.map(term => String(term).trim()).filter(Boolean))];
   const normalizedHypothesis = ` ${hypothesis.join(" ")} `;

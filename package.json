@@ -7,10 +7,12 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "status": "node scripts/local-status.mjs",
     "build": "vinext build",
     "start": "vinext start",
     "test": "node scripts/test-all.mjs",
     "test:rx": "node scripts/test-rx-integration.mjs",
+    "test:deepgram": "node scripts/test-deepgram-integration.mjs",
     "test:integration": "npm run test:rx",
     "typecheck": "tsc --noEmit --incremental false",
     "verify": "npm test && npm run typecheck && npm run lint && npm run build",

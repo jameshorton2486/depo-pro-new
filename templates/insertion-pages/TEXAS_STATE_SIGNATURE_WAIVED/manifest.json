@@ -1,0 +1,21 @@
+{
+  "templateId": "texas-state-signature-waived-field-inventory",
+  "version": "1.0.0",
+  "available": true,
+  "reviewStatus": "reviewed",
+  "reviewedBy": "project-owner-approved-UFM-source",
+  "reviewedAt": "2026-08-14",
+  "sourceFigures": [3, 4, 9, "9A", 11],
+  "scope": "field-inventory-only; certification prose is deferred to step 6",
+  "templates": {
+    "fieldInventory": {
+      "file": "field-inventory.tmpl",
+      "sha256": "715ce6854013c1a469f0980b57179decb77a3a29c708ec11be39441daf9e3a39"
+    },
+    "title": { "file": "../common/title.tmpl", "sha256": "20f82cb6050c8fdf7babf4f5891b937117a4b5497b2701dda3d8da464efbd5de" },
+    "appearances": { "file": "../common/appearances.tmpl", "sha256": "f05b1933925306924a164725b184e57d01a1747cec8fdfa4f2f4c192ee777fda" },
+    "index": { "file": "../common/index.tmpl", "sha256": "648e04ea36c210ecd31f3a36e0bfb1d3993a3699b02a3e46f0fbd5668a4219f7" },
+    "certification1": { "file": "certification-1.tmpl", "sha256": "dabd02c97d19dbb5b870343dd2a5eb9d75b9fe1bbf9981b188016b3bb324524f" },
+    "certification2": { "file": "certification-2.tmpl", "sha256": "3b66de6fb05957eeb9795d6f13b7a9895c02d15dad66d455cd74690eb0dfca6d" }
+  }
+}

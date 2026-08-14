@@ -1,0 +1,9 @@
+{
+  "templateId": "federal-signature-requested",
+  "version": "0.0.0-stub",
+  "available": false,
+  "reviewStatus": "source-required",
+  "sourceFigures": [],
+  "expectedTemplatePath": "templates/insertion-pages/FEDERAL_SIGNATURE_REQUESTED/certification.tmpl",
+  "templates": {}
+}

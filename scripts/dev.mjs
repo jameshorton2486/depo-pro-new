@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,7 +17,10 @@ let stopping = false;
 function stop(code = 0) {
   if (stopping) return;
   stopping = true;
-  for (const child of processes) if (!child.killed) child.kill();
+  for (const child of processes) if (!child.killed) {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide:true, stdio:"ignore" });
+    else child.kill();
+  }
   process.exit(code);
 }
 process.on("SIGINT", () => stop());
