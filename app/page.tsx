@@ -10,6 +10,7 @@ type Deposition = {
   id: string;
   caseStyle: string;
   witness: string;
+  causeNumber: string;
   deponentType: string;
   depositionDate: string;
   courtReporterId: string;
@@ -102,6 +103,7 @@ export default function Home() {
       id: makeId(),
       caseStyle: String(data.get("caseStyle")),
       witness: String(data.get("witness")),
+      causeNumber: String(data.get("causeNumber")),
       deponentType: String(data.get("deponentType")),
       depositionDate: String(data.get("depositionDate")),
       courtReporterId: reporter?.id ?? "",
@@ -116,7 +118,7 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
     if(!intakeDraft)return;setCreating(true);setNotice("");
-    try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,deepgramArtifact:intakeDraft.deepgramArtifact,ufmData:intakeDraft.ufmData,warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved)}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
+    try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,deepgramArtifact:intakeDraft.deepgramArtifact,ufmData:{...intakeDraft.ufmData,cause_number:item.causeNumber},warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved)}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
   }
 
 
@@ -223,6 +225,7 @@ export default function Home() {
             <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Claude extraction ready for review</strong><small>{intakeDraft.keyterms.length} Deepgram keyterms and UFM data will be saved with this deposition.</small></div></div>}
               <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={intakeDraft?.deponentType || "Fact witness"}><option>Fact witness</option><option>Expert witness</option><option>Corporate representative</option><option>Party</option><option>Other</option></select></label></div>
+              <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || new Date().toISOString().slice(0, 10)} /></label><label>Court Reporter <small>Required for local filing</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
