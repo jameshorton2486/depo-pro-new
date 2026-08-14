@@ -13,6 +13,7 @@ import { publicAudioTools, resolveAudioToolChain } from "./rx-profiles.mjs";
 import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
+import { fetchExternal } from "./external-fetch.mjs";
 import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
 import { fileURLToPath } from "node:url";
 
@@ -62,45 +63,15 @@ function contentBlock(file) {
   throw new Error("Claude extraction currently accepts PDF or plain-text notices. Convert Word files to PDF first.");
 }
 
-async function fetchExternal(url, options, { label, attempts = 2, timeoutMs = 120000 } = {}) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const startedAt = Date.now();
-    try {
-      console.log(`[external:${label}] request started`, { attempt });
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      console.log(`[external:${label}] response received`, { attempt, status: response.status, elapsedMs: Date.now() - startedAt });
-      if (attempt < attempts && [429, 500, 502, 503, 504].includes(response.status)) {
-        await response.arrayBuffer();
-        await new Promise(resolve => setTimeout(resolve, 750 * attempt));
-        continue;
-      }
-      return response;
-    } catch (error) {
-      lastError = error;
-      console.error(`[external:${label}] request failed`, { attempt, elapsedMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) });
-      if (attempt < attempts) {
-        await new Promise(resolve => setTimeout(resolve, 750 * attempt));
-        continue;
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  if (lastError instanceof Error && lastError.name === "AbortError") throw new Error(`${label} did not respond within ${Math.round(timeoutMs / 1000)} seconds. Please try again.`);
-  throw new Error(`${label} could not be reached after ${attempts} attempts. Check the internet connection and try again.`);
-}
-async function transcribeAudioWithCompatibility({ apiKey, audit, source, keyterms }) {
+async function transcribeAudioWithCompatibility({ apiKey, audit, source, keyterms, operationId }) {
   const requestedPath = resolveAudioPath(root, audit, source);
   try {
-    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, keyterms });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, keyterms, uploadId:audit.uploadId, operationId });
     return { ...result, audioDelivery: { requestedSource: source, deliveredSource: source, converted: false, reason: "Deepgram accepted the selected audio directly." } };
   } catch (error) {
     if (!isDeepgramMediaError(error)) throw error;
     const fallback = await createDeepgramCompatibilityDerivative(root, audit, source);
-    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, keyterms });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, keyterms, uploadId:audit.uploadId, operationId });
     return { ...result, audioDelivery: { requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 } };
   }
 }
@@ -134,13 +105,13 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url === "/api/audio/rx-process" && req.method === "POST") {
       const input=await body(req,64*1024); const audit=readAudioAudit(root,input.uploadId); const originalPath=resolveAudioPath(root,audit,"original"),profiles=resolveAudioToolChain(input.profileIds||[input.profileId]);
-      const profileIds=profiles.map(item=>item.id),startedAt=Date.now();console.log("[external:RX audio processing] request started",{profileIds});
+      const profileIds=profiles.map(item=>item.id),operationId=crypto.randomUUID(),correlator={uploadId:audit.uploadId,operationId},startedAt=Date.now();console.log("[external:RX audio processing] request started",{...correlator,profileIds});
       try {
         const recordAuditEvent=async event=>mutateAudioAudit(root,audit.uploadId,current=>current.history.push(event));
-        const derivative=profiles.length===1&&profiles[0].engine==="ffmpeg"?await createHighpassDerivative(root,audit):await createRxDerivative(root,audit,{originalPath,profileIds,recordAuditEvent});
+        const derivative=profiles.length===1&&profiles[0].engine==="ffmpeg"?await createHighpassDerivative(root,audit,{operationId}):await createRxDerivative(root,audit,{originalPath,profileIds,recordAuditEvent,randomId:()=>operationId});
         const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);current.history.push({event:"audio-tool-derivative-created",at:new Date().toISOString(),operationId:derivative.operationId,key:derivative.key,kind:derivative.kind,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileIds})});
-        console.log("[external:RX audio processing] response received",{status:200,elapsedMs:Date.now()-startedAt,profileIds});return json(res,200,{derivative,audit:updated},origin);
-      } catch(error) { console.error("[external:RX audio processing] request failed",{elapsedMs:Date.now()-startedAt,profileIds,error:error instanceof Error?error.message:String(error)});throw error; }
+        console.log("[external:RX audio processing] response received",{...correlator,status:200,elapsedMs:Date.now()-startedAt,profileIds});return json(res,200,{derivative,audit:updated},origin);
+      } catch(error) { console.error("[external:RX audio processing] request failed",{...correlator,elapsedMs:Date.now()-startedAt,profileIds,error:error instanceof Error?error.message:String(error)});throw error; }
     }
     if (req.url === "/api/audio/promote" && req.method === "POST") {
       const input=await body(req,64*1024);const updated=await mutateAudioAudit(root,input.uploadId,current=>{const derivative=current.storage.derivatives.find(item=>item.operationId===input.operationId);if(!derivative||derivative.kind!==DERIVATIVE_KINDS.RX_REVIEW)throw new Error("Review derivative was not found.");const profiles=resolveAudioToolChain(derivative.profileIds||[derivative.profileId]),unsafe=profiles.filter(item=>!item.asrSafe);if(!unsafe.length)throw new Error("Only a review-marked tool result can be promoted.");derivative.kind=DERIVATIVE_KINDS.RX_ASR;derivative.selectableForTranscription=true;current.history.push({event:"rx-review-derivative-promoted",at:new Date().toISOString(),operationId:derivative.operationId,profileIds:profiles.map(item=>item.id),riskLevels:unsafe.map(item=>item.riskLevel),cautions:unsafe.map(item=>item.caution)});});
@@ -172,8 +143,8 @@ const server = http.createServer(async (req,res) => {
       audit.automaticSelection={status:"not-run",method:"user-triggered-sampled-comparison",winner:"original",measuredWer:false,reason:"No full-file comparison was run during intake. The original remains selected until the user requests a sampled comparison."};
       const updated=await mutateAudioAudit(root,audit.uploadId,current=>{current.automaticSelection=audit.automaticSelection});return json(res,200,updated,origin);
     }    if (req.url === "/api/audio/transcribe" && req.method === "POST") {
-      const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource;
-      const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[]});
+      const input=await body(req,2*1024*1024); const config=loadSecrets(); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource,operationId=crypto.randomUUID();
+      const transcript=await transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source,keyterms:input.keyterms||[],operationId});
       await recordTranscription(root,audit,source,transcript); return json(res,200,{source,...transcript},origin);
     }
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
@@ -197,7 +168,7 @@ const server = http.createServer(async (req,res) => {
       const config=loadSecrets(); if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings first."},origin);
       const input=await body(req); const document=contentBlock(input.file); const supportingDocuments=(input.supportingFiles||[]).slice(0,10).map((file,index)=>[{type:"text",text:`Supporting document ${index+1}: ${file.name}. Use this only to confirm spellings, proper names, firms, locations, and specialized terminology. Do not override conflicting deposition facts from the Notice.`},contentBlock(file)]).flat();
       const tool=extractionTool;
-      const response=await fetchExternal("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":config.anthropicApiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:config.claudeModel,max_tokens:8192,system:terminologyPrompt+"\n\nCompatibility requirement: In the same extraction, populate the setup object for the Depo-Pro setup screen. The Notice controls setup facts when sources conflict.",tools:[tool],tool_choice:{type:"tool",name:"extract_deposition_intake"},messages:[{role:"user",content:[{type:"text",text:"The first document is the authoritative Notice of Deposition. Supporting documents follow."},document,...supportingDocuments]}]})},{label:"Claude document analysis",attempts:1,timeoutMs:Number(process.env.CLAUDE_TIMEOUT_MS)||5*60*1000});
+      const response=await fetchExternal("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":config.anthropicApiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:config.claudeModel,max_tokens:8192,system:terminologyPrompt+"\n\nCompatibility requirement: In the same extraction, populate the setup object for the Depo-Pro setup screen. The Notice controls setup facts when sources conflict.",tools:[tool],tool_choice:{type:"tool",name:"extract_deposition_intake"},messages:[{role:"user",content:[{type:"text",text:"The first document is the authoritative Notice of Deposition. Supporting documents follow."},document,...supportingDocuments]}]})},{label:"Claude document analysis",attempts:2,timeoutMs:Number(process.env.CLAUDE_TIMEOUT_MS)||5*60*1000});
       const result=await response.json(); if(!response.ok) return json(res,response.status,{error:result?.error?.message || "Claude request failed."},origin);
       const toolUse=result.content?.find((item)=>item.type==="tool_use"&&item.name==="extract_deposition_intake"); if(!toolUse) throw new Error("Claude did not return structured intake data.");
       const data=toolUse.input;
