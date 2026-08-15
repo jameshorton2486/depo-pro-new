@@ -4,7 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
@@ -91,7 +91,10 @@ const server = http.createServer(async (req,res) => {
   try {
     if (req.url === "/api/audio/analyze" && req.method === "POST") {
       const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "audio.bin"));
-      const profile = await saveAndAnalyzeAudio(req, { root, originalName, contentType:req.headers["content-type"] });
+      // One renderer for every derivative. The recommended candidate goes through the same
+      // audited path as an operator-selected chain, so a profile id means one thing.
+      const createCandidate = ({ root:candidateRoot, audit, originalPath, profileIds }) => createRxDerivative(candidateRoot, audit, { originalPath, profileIds, recordAuditEvent:async event => { audit.history.push(event); writeAudioAudit(candidateRoot, audit); } });
+      const profile = await saveAndAnalyzeAudio(req, { root, originalName, contentType:req.headers["content-type"], createCandidate });
       return json(res,200,profile,origin);
     }
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
