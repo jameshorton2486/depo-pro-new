@@ -14,7 +14,9 @@ Depo-Pro is a local-first Windows application for deposition intake, immutable a
 
 Both application services and all durable deposition artifacts run from the local C drive. Claude document extraction and Deepgram transcription are external API operations initiated by the local server; their credentials remain local, and Depo-Pro preserves the resulting evidence locally.
 
-The deposition root can be changed explicitly with `DEPO_PRO_DEPOSITIONS_ROOT`. Do not point it at OneDrive or another synchronized folder when maintaining evidentiary workspaces.
+The deposition root can be changed explicitly with `DEPO_PRO_DEPOSITIONS_ROOT`. Keep it on local storage. A cloud sync engine holds file handles, performs partial writes, and can rewrite files underneath Depo-Pro while a deposition is being written, which is why deposition folder commits already carry a retry ladder for Windows sharing violations.
+
+`npm run status` warns when the project root or the deposition root is inside a sync client's own reported root, behind a junction that redirects it, or on a UNC network path. The warning does not block: set `DEPO_PRO_ALLOW_SYNCED_ROOT=1` to acknowledge it deliberately, and the acknowledgement is reported rather than hidden. Detection is by mechanism — what the sync client itself publishes — so a folder that merely has a client's name in it is not flagged, and no username or directory-layout pattern is involved. Two gaps are worth knowing: a OneDrive cloud placeholder is invisible once the client is uninstalled and its environment variables are gone, and a mapped network drive letter is not detected.
 
 ## Prerequisites
 
