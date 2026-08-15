@@ -1,0 +1,11 @@
+{
+  "documents": [
+    {
+      "id": "DOC-0317",
+      "title": "ADR-0017 — Workspace UFM First-Render and Correction Architecture",
+      "path": "docs/architecture/adr/ADR-0017-workspace-ufm-first-render.md",
+      "status": "draft",
+      "date": "2026-08-14"
+    }
+  ]
+}
