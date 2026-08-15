@@ -13,6 +13,9 @@ const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PYTHON = process.env.DEPO_PRO_RX_PYTHON || path.join(MODULE_DIRECTORY, "..", ".venv-pedalboard", "Scripts", "python.exe");
 const DEFAULT_WORKER = path.join(MODULE_DIRECTORY, "rx-pedalboard-worker.py");
 const DEFAULT_PLUGIN_ROOT = "C:\\Program Files\\Common Files\\VST3\\iZotope";
+// Must match DEFAULT_CHUNK_SECONDS in rx-pedalboard-worker.py. Recorded per render, because
+// a plug-in whose output varies with chunk size is not reproducible from the profile alone.
+export const DEFAULT_CHUNK_SECONDS = 10;
 
 export class RxProcessingError extends Error {
   constructor(message, code, details = {}) {
@@ -127,6 +130,7 @@ export async function createRxDerivative(root, audit, {
   pythonExecutable = DEFAULT_PYTHON,
   workerPath = DEFAULT_WORKER,
   pluginPath,
+  chunkSeconds = DEFAULT_CHUNK_SECONDS,
   runWorker = runProcess,
   runDecoder = runProcess,
   runEncoder = runProcess,
@@ -197,7 +201,7 @@ export async function createRxDerivative(root, audit, {
     }
     const sourceMedia = needsDecode ? await validateAudio(processingSourcePath) : uploadedSourceMedia;
     fs.writeFileSync(profilePath, JSON.stringify(profiles), { flag: "wx" });
-    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath]);
+    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath, "--chunk-seconds", String(chunkSeconds)]);
     if (!fs.existsSync(temporaryPath)) throw new Error("RX worker reported success without producing output.");
     if (!fs.existsSync(resultPath)) throw new Error("RX worker reported success without a result record.");
     let worker;
@@ -227,7 +231,7 @@ export async function createRxDerivative(root, audit, {
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
       kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
-      manufacturer:"iZotope / Spotify",product:"RX 12 audio tool chain",edition:"Standard",module:profiles.map(item=>item.displayName).join(" → "),profileIds:profiles.map(item=>item.id),profileVersions:profiles.map(item=>item.version),modules,host:worker.worker,hostVersion:worker.workerVersion,profileId:profiles.length===1?profiles[0].id:chainId,profileVersion:profiles.length===1?profiles[0].version:"chain-v1",createdAt:now(),media,
+      manufacturer:"iZotope / Spotify",product:"RX 12 audio tool chain",edition:"Standard",module:profiles.map(item=>item.displayName).join(" → "),profileIds:profiles.map(item=>item.id),profileVersions:profiles.map(item=>item.version),modules,host:worker.worker,hostVersion:worker.workerVersion,numpyVersion:worker.numpyVersion??null,renderChunkSeconds:worker.chunkSeconds??null,renderChunkFrames:worker.chunkFrames??null,profileId:profiles.length===1?profiles[0].id:chainId,profileVersion:profiles.length===1?profiles[0].version:"chain-v1",createdAt:now(),media,
     };
   } catch (error) {
     if (renamed && fs.existsSync(finalPath)) fs.rmSync(finalPath, { force: true });
