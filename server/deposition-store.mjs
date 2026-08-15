@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
-import { DEFAULT_DEPOSITIONS_ROOT, depositionStorageRoot } from "./storage-config.mjs";
+import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
 import { createCanonicalDepositionRecord } from "./canonical-deposition-record.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
@@ -43,4 +43,4 @@ export function createDeposition(root,input,options={}){const metadata=input?.de
 
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 
-export const _testing={within,safeName,pathPart,personName,reporterFolder,causeFolder,depositionFolder,atomicJson,commitDirectory,ID_PATTERN,DEFAULT_STORAGE_ROOT:DEFAULT_DEPOSITIONS_ROOT};
+export const _testing={within,safeName,pathPart,personName,reporterFolder,causeFolder,depositionFolder,atomicJson,commitDirectory,ID_PATTERN,resolveDefaultDepositionsRoot};

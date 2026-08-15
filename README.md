@@ -7,7 +7,7 @@ Depo-Pro is a local-first Windows application for deposition intake, immutable a
 - Project source and runtime: `C:\Users\james\projects\depo-pro-new`
 - Browser UI: `http://localhost:3000`
 - Node local API: `http://127.0.0.1:4317`
-- Deposition workspaces: `C:\Users\james\depos` by default
+- Deposition workspaces: the operating-system user home directory plus `depos` (resolved by Node `os.homedir()`)
 - Audio-intake evidence and encrypted credentials: ignored `data/` directory inside the project
 - Credentials: Windows DPAPI-protected; never written to request URLs or browser storage
 - Native processing: FFmpeg/FFprobe plus pinned Python, Pedalboard, and allow-listed RX 12 modules
@@ -39,7 +39,7 @@ Open [http://localhost:3000](http://localhost:3000). Keep the PowerShell window 
 
 ## Storage boundaries
 
-- `C:\Users\james\depos` is the filesystem-authoritative deposition library.
+- The `depos` folder under the operating-system user home directory is the filesystem-authoritative deposition library.
 - `data/audio-intake` contains immutable intake audio and audited derivatives used before deposition creation.
 - `data/secrets.dat` contains DPAPI-encrypted local credentials.
 - `.env.local` contains machine configuration such as the RX executable path; it is ignored by Git.
