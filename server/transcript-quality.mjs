@@ -1,5 +1,52 @@
+import crypto from "node:crypto";
+import { TERM_GROUP_SETS } from "./term-groups.mjs";
+
 function words(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9' -]/g, " ").split(/\s+/).filter(Boolean);
+}
+
+// Sourced from the term-group catalog so the set definition has one home. These two are
+// applied unconditionally: a caller can add to them but never narrow them.
+const { negations: NEGATION_TERMS, shortAnswers: SHORT_ANSWER_TERMS } = TERM_GROUP_SETS["deposition-core-v1"];
+
+function occurrences(haystack, needle) {
+  if (!needle.length || needle.length > haystack.length) return 0;
+  let count = 0;
+  for (let index = 0; index <= haystack.length - needle.length; index += 1) {
+    if (needle.every((word, offset) => haystack[index + offset] === word)) count += 1;
+  }
+  return count;
+}
+
+function phraseMetrics(reference, hypothesis, terms = []) {
+  const unique = [...new Set(terms.map(term => String(term).trim()).filter(Boolean))];
+  let expected = 0, matched = 0;
+  const missedTerms = [];
+  for (const term of unique) {
+    const needle = words(term), referenceCount = occurrences(reference, needle);
+    if (!referenceCount) continue;
+    const hypothesisCount = occurrences(hypothesis, needle), termMatched = Math.min(referenceCount, hypothesisCount);
+    expected += referenceCount;
+    matched += termMatched;
+    if (termMatched < referenceCount) missedTerms.push(term);
+  }
+  const missed = expected - matched;
+  return { expected, matched, missed, errorRate: expected ? missed / expected : null, missedTerms };
+}
+
+function matches(value, pattern) { return String(value || "").match(pattern) || []; }
+function automaticTermGroups(referenceText) {
+  const numberWords = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million";
+  const months = "January|February|March|April|May|June|July|August|September|October|November|December";
+  return {
+    numbers: matches(referenceText, new RegExp(`\\b(?:\\d+(?:[.,]\\d+)*|${numberWords})\\b`, "gi")),
+    dates: [
+      ...matches(referenceText, new RegExp(`\\b(?:${months})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`, "gi")),
+      ...matches(referenceText, /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g),
+    ],
+    money: matches(referenceText, /(?:\$\s?\d+(?:[.,]\d+)*|\b\d+(?:[.,]\d+)*\s+dollars?\b)/gi),
+    measurements: matches(referenceText, /\b\d+(?:\.\d+)?\s*(?:mg|milligrams?|grams?|kg|kilograms?|feet|foot|inches?|miles?|mph|percent|degrees?)\b/gi),
+  };
 }
 
 const DEFAULT_MAX_COMPARISON_WORDS = 5_000;
@@ -26,7 +73,7 @@ function distance(reference, hypothesis) {
   const last=hypothesis.length;return{cost:previous.cost[last],s:previous.s[last],d:previous.d[last],i:previous.i[last]};
 }
 
-export function compareTranscripts(referenceText, hypothesisText, criticalTerms = []) {
+export function compareTranscripts(referenceText, hypothesisText, criticalTerms = [], termGroups = {}) {
   const reference = words(referenceText);
   const hypothesis = words(hypothesisText);
   const limit=comparisonWordLimit();
@@ -37,8 +84,23 @@ export function compareTranscripts(referenceText, hypothesisText, criticalTerms 
   const critical = terms.map(term => ({ term, present: normalizedHypothesis.includes(` ${words(term).join(" ")} `) }));
   const expected = critical.filter(item => ` ${reference.join(" ")} `.includes(` ${words(item.term).join(" ")} `));
   const missed = expected.filter(item => !item.present);
+  const automatic = automaticTermGroups(referenceText);
+  const groups = {
+    properNames: termGroups.properNames || [],
+    keyterms: termGroups.keyterms || criticalTerms,
+    medicalTerms: termGroups.medicalTerms || [],
+    technicalTerms: termGroups.technicalTerms || [],
+    exhibitTerms: termGroups.exhibitTerms || [],
+    numbers: [...automatic.numbers, ...(termGroups.numbers || [])],
+    dates: [...automatic.dates, ...(termGroups.dates || [])],
+    money: [...automatic.money, ...(termGroups.money || [])],
+    measurements: [...automatic.measurements, ...(termGroups.measurements || [])],
+    negations: [...NEGATION_TERMS, ...(termGroups.negations || [])],
+    shortAnswers: [...SHORT_ANSWER_TERMS, ...(termGroups.shortAnswers || [])],
+  };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    referenceSha256: crypto.createHash("sha256").update(String(referenceText || "")).digest("hex"),
     referenceWords: reference.length,
     hypothesisWords: hypothesis.length,
     substitutions: result.s,
@@ -49,6 +111,7 @@ export function compareTranscripts(referenceText, hypothesisText, criticalTerms 
     criticalLegalErrorRate: expected.length ? missed.length / expected.length : null,
     criticalTermsExpected: expected.length,
     criticalTermsMissed: missed.map(item => item.term),
+    depositionMetrics: Object.fromEntries(Object.entries(groups).map(([name, terms]) => [name, phraseMetrics(reference, hypothesis, terms)])),
     comparedAt: new Date().toISOString(),
   };
 }
