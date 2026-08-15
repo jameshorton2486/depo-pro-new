@@ -91,10 +91,12 @@ validates and persists those proposals for reporter review; the reporter
 accepts or rejects each one. Only accepted corrections apply to the same
 canonical transcript.
 
-The existing `corrections` table, `correction_decisions` table,
-`aiCorrectionBridge.ts`, and correction decision endpoints remain the
-authoritative ATIA implementation of this flow. This ADR must not orphan,
-bypass, or replace them.
+The `corrections` table, `correction_decisions` table,
+`aiCorrectionBridge.ts`, and correction decision endpoints are **required
+target infrastructure** that does not currently exist in this repository.
+They must be built before the AI correction button can be connected to a live
+transcript. This ADR must not be read as authorizing a bypass or replacement
+of that infrastructure — it must be built, not substituted.
 
 ### D5 — Parentheticals render in plain black
 
@@ -187,8 +189,9 @@ A failure in one chunk must not block or corrupt other chunks.
 |---|---|---|---|
 | OI-1 | Parenthetical color — closed 2026-08-15: plain black | Miah | Closed |
 | OI-2 | Generic versioned correction prompt — closed 2026-08-15 | Agent | Closed |
-| OI-3 | Chunk size and overlap strategy | Agent | REQ-3 implementation |
+| OI-3 | Reopened — budget-based revision required; fixed-utterance design superseded by audit findings | Agent | REQ-3 implementation |
 | OI-4 | Retranscription verification (clean Thomas) | James | REQ-2 scoping |
+| OI-5 | Build ATIA infrastructure (`corrections` table, `correction_decisions` table, `aiCorrectionBridge.ts`, decision endpoints) | Agent | Part 2 code — blocks AI button |
 
 ---
 
