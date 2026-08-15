@@ -1,0 +1,113 @@
+name: verify
+
+# What this proves, and what it cannot.
+#
+# CI proves the code is sound: the deterministic suite, typecheck, lint, and build, on a
+# clean checkout at the Node version package.json actually declares.
+#
+# It cannot prove the audio guarantees. The RX integration and qualification suites need
+# licensed iZotope VST3 plug-ins and a disposable fixture, neither of which can exist on a
+# hosted runner. Those tests skip here by design, so determinism, time alignment, and chunk
+# invariance are NOT enforced by this workflow. They are measured locally and recorded as
+# qualification records (server/rx-qualification.mjs). A green build here says nothing about
+# whether a profile carrying `asrSafe: true` has earned it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }}, autocrlf ${{ matrix.autocrlf }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The floor is the primary job. Everything has been green locally under Node 24
+          # while package.json declares >=22.13.0, and the declared floor is the claim the
+          # manifest makes to anyone installing this.
+          #
+          # It also runs with core.autocrlf=true, which is how a Windows machine checks the
+          # repository out by default. Slice 1B existed precisely because a working tree
+          # passed while a fresh CRLF checkout failed every template manifest hash.
+          - node: '22.13.0'
+            autocrlf: 'true'
+            primary: true
+          # Secondary: current Node with Unix line endings, to catch drift in the other
+          # direction. Allowed to matter, but the floor is what is being promised.
+          - node: '24'
+            autocrlf: 'false'
+            primary: false
+
+    steps:
+      # Before checkout, deliberately. core.autocrlf decides how the working tree is
+      # written, and template integrity is byte-exact -- setting it afterwards would test
+      # nothing.
+      - name: Configure line endings
+        run: git config --global core.autocrlf ${{ matrix.autocrlf }}
+
+      # A fresh clone every run. `clean: true` is the default and is stated here because it
+      # is load-bearing: restoring a cached working tree would reproduce exactly the blind
+      # spot this workflow exists to close.
+      - name: Check out a clean tree
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
+
+      - name: Use Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          # Caches the npm download cache only. node_modules is never restored -- `npm ci`
+          # builds it from the lockfile every run, and nothing in the checked-out tree is
+          # carried between runs.
+          cache: npm
+
+      - name: Assert the floor job matches package.json
+        if: matrix.primary
+        shell: pwsh
+        run: |
+          $declared = (Get-Content package.json -Raw | ConvertFrom-Json).engines.node
+          $pinned = '22.13.0'
+          if ($declared -ne ">=$pinned") {
+            throw "package.json declares engines.node '$declared' but the CI floor job pins $pinned. Change both together, or CI stops testing the version the manifest promises."
+          }
+          "declared floor $declared; running $(node --version)"
+
+      # Three tests measure real audio through FFmpeg and fail without it. Verified by
+      # running the suite with FFmpeg off PATH rather than assumed.
+      - name: Install FFmpeg
+        run: choco install ffmpeg --yes --no-progress
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Report checkout line endings
+        shell: pwsh
+        run: |
+          $template = Get-Content templates/insertion-pages/common/title.tmpl -Raw
+          "core.autocrlf=${{ matrix.autocrlf }} -- CRLF present in checked-out template: $($template -match "`r`n")"
+          "Template manifest hashes are asserted by the suite; this line only makes the checkout state visible."
+
+      - name: Verify
+        run: npm run verify
+
+      - name: State what was not enforced
+        if: always()
+        shell: pwsh
+        run: |
+          "The RX integration and qualification suites are skipped on hosted runners: no licensed"
+          "iZotope VST3 plug-ins and no audio fixture. Determinism, time alignment, and chunk"
+          "invariance are NOT proven by this run. They are measured locally and recorded as"
+          "qualification records. A profile carrying asrSafe: true is not validated by CI."

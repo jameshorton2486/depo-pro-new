@@ -16,8 +16,13 @@ function intake(t) {
   const directory=path.join(root,"data","audio-intake",uploadId),originalPath=path.join(directory,"original.wav");
   fs.mkdirSync(directory,{recursive:true});
   fs.writeFileSync(originalPath,Buffer.alloc(2048,7));
+  // Stand-in for the Python interpreter and worker. Without these the defaults resolve to
+  // the real .venv-pedalboard, so the test would pass or fail depending on whether this
+  // machine happens to have one -- which is how it passed locally and failed on a clean CI
+  // runner. The point here is the RX gate, not dependency discovery.
+  const dependency=path.join(root,"dependency.bin"); fs.writeFileSync(dependency,"dependency");
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(originalPath)).digest("hex");
-  return { root, originalPath, audit:{ uploadId, storage:{ original:{ key:`audio-intake/${uploadId}/original.wav`, immutable:true, sha256 }, derivatives:[] } } };
+  return { root, originalPath, dependency, audit:{ uploadId, storage:{ original:{ key:`audio-intake/${uploadId}/original.wav`, immutable:true, sha256 }, derivatives:[] } } };
 }
 
 test("audio-pipeline exports no second renderer for tool profiles",()=>{
@@ -38,10 +43,11 @@ test("the recommended candidate profile resolves through the shared catalog",()=
 test("a chain with no RX-engine profile renders without the RX editor installed",async t=>{
   // Gating the high-pass filter on RX availability is what forced a second ffmpeg renderer
   // to exist. With RX reported unavailable, the chain must still reach the worker.
-  const { root, originalPath, audit }=intake(t);
+  const { root, originalPath, dependency, audit }=intake(t);
   let workerCalled=false;
   await assert.rejects(
     createRxDerivative(root,audit,{ originalPath, profileIds:["low-frequency-rolloff-v2"], recordAuditEvent:async()=>{},
+      pythonExecutable:dependency, workerPath:dependency, pluginPath:dependency,
       inspectRxStatus:UNAVAILABLE, validateAudio:async()=>({durationSeconds:1,sampleRate:48000,channels:1,sampleFrames:48000}),
       runWorker:async()=>{workerCalled=true} }),
     // It gets past the RX gate and fails later, on the worker producing nothing.
@@ -51,10 +57,11 @@ test("a chain with no RX-engine profile renders without the RX editor installed"
 });
 
 test("an RX-engine chain still refuses to render without the RX editor",async t=>{
-  const { root, originalPath, audit }=intake(t);
+  const { root, originalPath, dependency, audit }=intake(t);
   let workerCalled=false;
   await assert.rejects(
     createRxDerivative(root,audit,{ originalPath, profileIds:["rx12-de-hum-dynamic-v1"], recordAuditEvent:async()=>{},
+      pythonExecutable:dependency, workerPath:dependency, pluginPath:dependency,
       inspectRxStatus:UNAVAILABLE, validateAudio:async()=>({durationSeconds:1,sampleRate:48000,channels:1,sampleFrames:48000}),
       runWorker:async()=>{workerCalled=true} }),
     /iZotope RX 12 is unavailable/,
