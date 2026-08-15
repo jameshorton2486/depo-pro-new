@@ -56,7 +56,7 @@ function runProcess(command, args, timeoutMs = 30 * 60 * 1000) {
 }
 
 async function validateReadableAudio(file, runner = runProcess) {
-  const text = await runner("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type,sample_rate,channels,duration_ts,time_base", "-of", "json", file], 60_000);
+  const text = await runner("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type,sample_rate,channels,duration_ts,time_base,bits_per_raw_sample,bits_per_sample", "-of", "json", file], 60_000);
   const probe = JSON.parse(text);
   const stream = probe.streams?.find(item => item.codec_type === "audio");
   const durationSeconds = Number(probe.format?.duration || 0);
@@ -67,7 +67,33 @@ async function validateReadableAudio(file, runner = runProcess) {
   const sampleFrames = Number.isFinite(durationTicks) && timeNumerator > 0 && timeDenominator > 0
     ? Math.round(durationTicks * timeNumerator * sampleRate / timeDenominator)
     : Math.round(durationSeconds * sampleRate);
-  return { durationSeconds, sampleRate, channels: Number(stream.channels), sampleFrames };
+  // M-6: a lossy source has no meaningful PCM bit depth and reports 0 here, which is
+  // recorded as null rather than as a depth of zero.
+  const declaredBits = Number(stream.bits_per_raw_sample || stream.bits_per_sample || 0);
+  const bitDepth = Number.isFinite(declaredBits) && declaredBits > 0 ? declaredBits : null;
+  return { durationSeconds, sampleRate, channels: Number(stream.channels), sampleFrames, bitDepth };
+}
+
+/**
+ * M-5. When the upload needs decoding, every alignment assertion downstream compares against
+ * the decoded intermediate, so the chain proves RX did not change the length of the decoded
+ * file -- not that the decoded file matches what was uploaded. Encoder delay and padding in
+ * AAC and MP3 routinely shift frame counts through a decode, and most deposition recorders
+ * write compressed formats, so this is the common path rather than an edge case.
+ *
+ * A frame delta is expected and is recorded rather than rejected. A changed sample rate or
+ * channel count is not: those break the timeline claim materially, so they fail closed.
+ */
+export function compareDecodeGeometry(uploaded, decoded) {
+  if (uploaded.sampleRate !== decoded.sampleRate) throw new RxProcessingError("Decoding changed the audio sample rate, so the derivative timeline cannot be tied to the upload.", "RX_DECODE_GEOMETRY_VIOLATION", { uploadedSampleRate:uploaded.sampleRate, decodedSampleRate:decoded.sampleRate });
+  if (uploaded.channels !== decoded.channels) throw new RxProcessingError("Decoding changed the audio channel count, so the derivative timeline cannot be tied to the upload.", "RX_DECODE_GEOMETRY_VIOLATION", { uploadedChannels:uploaded.channels, decodedChannels:decoded.channels });
+  const decodeFrameDelta = decoded.sampleFrames - uploaded.sampleFrames;
+  return {
+    decodeFrameDelta,
+    decodeDurationDeltaSeconds: decoded.durationSeconds - uploaded.durationSeconds,
+    uploadedTimelinePreserved: decodeFrameDelta === 0,
+    reason: decodeFrameDelta === 0 ? null : "Encoder delay or padding in the compressed upload changed the frame count through decoding. The derivative is frame-aligned with the decoded intermediate; this delta records its offset from the upload.",
+  };
 }
 
 function assertSampleAligned(source, derivative, workerFrames) {
@@ -204,6 +230,16 @@ export async function createRxDerivative(root, audit, {
       workerInputPath = processingSourcePath;
     }
     const sourceMedia = needsDecode ? await validateAudio(processingSourcePath) : uploadedSourceMedia;
+    // M-5: assert the decoded intermediate against the upload it came from, and record the
+    // offset. Without this the record claims a preserved timeline having only compared the
+    // derivative to the intermediate.
+    const decodeGeometry = needsDecode ? compareDecodeGeometry(uploadedSourceMedia, sourceMedia) : { decodeFrameDelta:0, decodeDurationDeltaSeconds:0, uploadedTimelinePreserved:true, reason:null };
+    if (decodeGeometry.decodeFrameDelta !== 0) await recordAuditEvent({ event:"rx-decode-frame-delta", code:"DECODE_FRAME_DELTA", operationId, at:now(), decodeFrameDelta:decodeGeometry.decodeFrameDelta, uploadedSampleFrames:uploadedSourceMedia.sampleFrames, decodedSampleFrames:sourceMedia.sampleFrames, reason:decodeGeometry.reason });
+    // M-6: the canonical derivative is 16-bit. A 24-bit source loses eight bits of depth, so
+    // the record states the source depth and that precision was reduced rather than leaving
+    // it to be inferred from a code comment.
+    const sourceBitDepth = uploadedSourceMedia.bitDepth ?? null;
+    const precisionReduced = Number.isFinite(sourceBitDepth) && sourceBitDepth > CANONICAL_ASR_PCM_BITS;
     fs.writeFileSync(profilePath, JSON.stringify(profiles), { flag: "wx" });
     await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath, "--chunk-seconds", String(chunkSeconds)]);
     if (!fs.existsSync(temporaryPath)) throw new Error("RX worker reported success without producing output.");
@@ -234,7 +270,7 @@ export async function createRxDerivative(root, audit, {
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
+      kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sourceBitDepth,precisionReduced,precisionReductionNote:precisionReduced?`The source is ${sourceBitDepth}-bit; the canonical derivative is ${CANONICAL_ASR_PCM_BITS}-bit, so sample depth was reduced.`:null,decodeFrameDelta:decodeGeometry.decodeFrameDelta,decodeDurationDeltaSeconds:decodeGeometry.decodeDurationDeltaSeconds,uploadedTimelinePreserved:decodeGeometry.uploadedTimelinePreserved,uploadedTimelineNote:decodeGeometry.reason,sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
       manufacturer:"iZotope / Spotify",product:"RX 12 audio tool chain",edition:"Standard",module:profiles.map(item=>item.displayName).join(" → "),profileIds:profiles.map(item=>item.id),profileVersions:profiles.map(item=>item.version),modules,host:worker.worker,hostVersion:worker.workerVersion,numpyVersion:worker.numpyVersion??null,renderChunkSeconds:worker.chunkSeconds??null,renderChunkFrames:worker.chunkFrames??null,profileId:profiles.length===1?profiles[0].id:chainId,profileVersion:profiles.length===1?profiles[0].version:"chain-v1",createdAt:now(),media,
     };
   } catch (error) {
