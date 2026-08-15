@@ -1,7 +1,7 @@
 # OI-3 — Chunk Sizing and Overlap Strategy
 
 **Related:** ADR-0017 REQ-3
-**Status:** DRAFT — reopened after measurement; requires ratification before Part 2 code
+**Status:** RATIFIED — measured against the active Etminan transcript on 2026-08-15
 **Date:** 2026-08-15
 
 ---
@@ -19,10 +19,12 @@ contains opaque IDs, timestamps, confidence scores, and metadata. Chunk sizing
 must therefore be budget-based and must measure the complete serialized
 request.
 
-The target values in this document are provisional. They must be measured
-against actual serialized Etminan chunks before ratification, and the Part 2
-code PR must include a measurement step confirming that every request remains
-within the approved model context budget.
+The target values in this document were measured against fully serialized
+chunks from the active Etminan transcript. The largest observed request was
+81,376 bytes (79.47% of the 100 KB ceiling), so the budget satisfies the
+ratification rule. Runtime code must still measure every fully serialized
+request and enforce the byte and available provider-token limits before
+submission.
 
 ## 1. Chunk contract and identity
 
@@ -54,7 +56,7 @@ measurable before serialization, while utterance length can range from a
 single word to more than 200 words. Utterances remain the indivisible boundary
 unit, but their count is not a request-size proxy.
 
-| Parameter | Provisional value |
+| Parameter | Ratified value |
 |---|---:|
 | Target editable body | Approximately 300 words |
 | Maximum editable body | 350 words (hard ceiling) |
@@ -195,7 +197,46 @@ R2–R10 is discarded and reported. In v1, an `[inaudible]` proposal is also
 rejected unless the relevant word data includes acoustic evidence such as low
 confidence or an explicit inaudible marker.
 
-## 10. Decisions and ratification status
+## 10. Ratification measurement
+
+The measurement used the active Etminan working transcript with transcript
+hash
+`df083746b1659975c38efcb6c7ca0ae9f34e7ba5160fc482924cee57db1478c1`:
+
+- 12,185 immutable ASR words in 1,061 complete transcript segments.
+- Average segment length: 11.48 words; observed range: 1–84 words.
+- Three representative chunks: dense medical testimony, frequent short Q./A.
+  exchanges, and opening proceedings.
+- One global highest-density chunk: at least 300 editable words represented
+  by the fewest complete utterances.
+- Every payload included the complete case context, deterministic SHA-based
+  pass/chunk/content IDs, per-utterance envelopes, per-word IDs, timestamps,
+  confidence values, editability flags, and complete-utterance overlap.
+- No transcript content was submitted to a correction model. Token counts use
+  the documented serialized-byte-count / 4 fallback.
+
+| Sample | Editable words | Leading overlap | Trailing overlap | Total utterances | Serialized bytes | 100 KB used | Estimated tokens |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Dense medical | 335 | 48 | 43 | 31 | 81,376 | 79.47% | 20,344 |
+| Q./A. transition | 310 | 45 | 41 | 48 | 79,689 | 77.82% | 19,923 |
+| Proceedings | 309 | 0 | 37 | 26 | 64,918 | 63.40% | 16,230 |
+| Highest density | 314 | 36 | 49 | 21 | 73,827 | 72.10% | 18,457 |
+
+The largest observed serialized request leaves 21,024 bytes, or 20.53%, of
+the 100 KB ceiling unused. It is 544 bytes below the protocol's 80% threshold
+of 81,920 bytes. This satisfies the stated **ratify as-is** rule, while the
+narrow distance from that threshold reinforces that the 100 KB runtime check
+is authoritative and that the 300-word value is a target rather than a
+guarantee of request size.
+
+The four measured editable bodies averaged 317 words after preserving complete
+utterances. At that measured average, a full sequential pass projects to about
+39 calls (78 seconds at two seconds per call) for the 12,185-word Etminan
+transcript and 45 calls (90 seconds) for the 13,960-word Thomas transcript.
+Actual counts may be higher when boundary preservation or the serialized-byte
+ceiling requires an earlier boundary.
+
+## 11. Decisions and ratification status
 
 | Decision | Outcome |
 |---|---|
@@ -203,6 +244,8 @@ confidence or an explicit inaudible marker.
 | OI-3B — Restart granularity | Resume failed chunk only when `transcript_hash` is unchanged; otherwise invalidate and restart at chunk 0 |
 | OI-3C — Request measurement | Measure the fully serialized request; provider tokenizer preferred, 100 KB byte ceiling as fallback |
 
-OI-3 remains **unratified**. The approximately 300-word target, 350-word hard
-ceiling, overlap allowance, and 100 KB serialized ceiling must be verified by
-measurement before ADR-0017 or this implementation design may be ratified.
+OI-3 is **ratified**. The approximately 300-word target, 350-word hard ceiling,
+up-to-50-word overlap allowance per side, and 100 KB serialized ceiling are the
+approved v1 chunking contract. Any implementation that changes these values or
+omits complete-request measurement requires a new measurement and explicit
+ratification before live use.
