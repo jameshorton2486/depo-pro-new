@@ -14,7 +14,7 @@ function joinText(left, right) {
   const second = String(right || "").trim();
   if (!first) return second;
   if (!second) return first;
-  if (/^[,.;:!?)]/.test(second) || /[(\[]$/.test(first)) return `${first}${second}`;
+  if (/^[,.;:!?)]/.test(second) || /[([]$/.test(first)) return `${first}${second}`;
   return `${first} ${second}`;
 }
 
