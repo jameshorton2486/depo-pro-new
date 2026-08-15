@@ -31,10 +31,12 @@ verbatim. A generic, versioned, ID-bound replacement is required.
 
 ### D1 — The Workspace is the formatting and correction surface
 
-Corrections and UFM formatting apply to the working transcript in the
-Workspace. The reporter reviews and approves in the Workspace. Export
-renders the approved working transcript and never re-derives or re-formats
-at export time. This is the DTAS reproducibility principle.
+Corrections and UFM formatting apply directly to the one canonical transcript
+in the Workspace. Validated AI corrections are applied automatically and
+autosaved; the reporter or scopist manually reviews the resulting transcript
+and corrects any remaining errors. Export renders that canonical transcript
+and never re-derives or re-formats its content at export time. This is the
+DTAS reproducibility principle.
 
 ### D2 — First render is UFM-formatted
 
@@ -69,9 +71,11 @@ Admin pages generate at export from Intake metadata.
 ### D4 — "Format and Correct the Transcript" button applies corrections only
 
 The button applies AI-assisted corrections ON TOP of the already-formatted
-working transcript. Formatting already happened on first render. The button's
-job is correction (speaker mapping, STT error flags, structural corrections),
-delivered as reviewable CorrectionObjects the reporter accepts or rejects.
+canonical transcript. Formatting already happened on first render. The
+button's job is correction (speaker mapping, STT error flags, structural
+corrections). The AI returns structured CorrectionObjects as an internal
+machine contract; the application validates them and atomically applies valid
+corrections to the same transcript without an accept/reject workflow.
 
 ### D5 — Parenthetical color is an open item
 
@@ -109,14 +113,18 @@ references those IDs — it does not return a rewritten document.
 **REQ-4 — Structured corrections only — no rewritten free-form document.**
 The AI must return structured CorrectionObjects (using the existing schema:
 word_id anchor, correction type, proposed value, confidence score, evidence).
-It must not return a rewritten version of the transcript. Free-form document
+CorrectionObject is an internal machine contract between the AI correction
+service and the application, not a persistent reporter approval queue. The AI
+must not return a rewritten version of the transcript. Free-form document
 output is prohibited.
 
 **REQ-5 — Atomic application preserving Deepgram references.**
-Corrections apply atomically to the single working transcript. Each corrected
-token is marked `aiTouched: true` with its original Deepgram value preserved
-in `raw_text`. The Deepgram word-level provenance chain must never be broken.
-Corrections that cannot be anchored to a stable word_id must be rejected.
+After validation, corrections apply automatically and atomically to the one
+canonical transcript and are autosaved. Each corrected token is marked
+`aiTouched: true` with its original Deepgram value preserved in `raw_text`.
+The immutable Deepgram word-level evidence chain must never be broken.
+Corrections that cannot be anchored to a stable word_id must be discarded
+without changing the transcript.
 
 **REQ-6 — Never change substantive testimony without evidence.**
 The AI must not change any spoken word, phrase, or utterance unless the
@@ -138,8 +146,13 @@ A failure in one chunk must not block or corrupt other chunks.
 
 ## Consequences
 
-- The export pipeline becomes a thin renderer of the approved working
-  transcript — it never re-derives structure or corrections.
+- The export pipeline becomes a thin renderer of the canonical transcript —
+  it never re-derives structure or corrections.
+- CorrectionObjects are transient internal machine messages. They do not
+  become a reporter approval queue, a second transcript authority, transcript
+  snapshots, revision objects, accepted/rejected histories, or edit history.
+- Certification is a state of the same canonical transcript, not a separate
+  Certified Transcript object.
 - The Thomas-specific 8-step prompt series remains as documentation only
   and must not be wired to any live transcript.
 - Part 2 code work is blocked until this ADR is ratified and the generic
@@ -165,6 +178,9 @@ A failure in one chunk must not block or corrupt other chunks.
 - No dropped-word reconstruction from context
 - No Thomas-specific content in the generic prompt
 - No single-call processing of a full 1,000+ utterance transcript
-- No silent AI corrections — every change is a reviewable CorrectionObject
+- No reporter accept/reject workflow or persistent correction-proposal queue
+- No transcript snapshots, prior-text copies, revisions, or edit histories
+- No second transcript authority; certification remains a state of the same
+  canonical transcript
 - No partial transcript overwrite on failure
 - No code PR before this ADR is ratified
