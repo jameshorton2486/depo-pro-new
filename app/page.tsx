@@ -6,6 +6,7 @@ import AdminSettings from "./AdminSettings";
 import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
+import { formatDisplayDate } from "./date-format.mjs";
 
 type Deposition = {
   id: string;
@@ -49,7 +50,7 @@ function makeId() {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+  return formatDisplayDate(value);
 }
 
 function formatPhoneNumber(value: string) {
