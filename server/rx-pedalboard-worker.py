@@ -12,6 +12,7 @@ from pedalboard.io import AudioFile
 
 PARAMETER_TOLERANCE = 1e-6
 OUTPUT_BIT_DEPTH = 16
+DEFAULT_CHUNK_SECONDS = 10
 EXPECTED_MANUFACTURER = "iZotope"
 EXPECTED_MAJOR_VERSION = "12"
 
@@ -23,7 +24,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plugin", action="append", default=[])
     parser.add_argument("--profile", required=True)
     parser.add_argument("--result", required=True)
-    return parser.parse_args()
+    # Chunk size is a render parameter, not an implementation detail: if a plug-in's output
+    # varies with it, two derivatives from the same profile are not reproducible from the
+    # audit record alone. It is recorded in the result so the record can state which one
+    # produced the file, and it is settable so chunk invariance can be measured.
+    parser.add_argument("--chunk-seconds", type=int, default=DEFAULT_CHUNK_SECONDS)
+    arguments = parser.parse_args()
+    if arguments.chunk_seconds < 1:
+        raise SystemExit("--chunk-seconds must be a positive integer.")
+    return arguments
 
 
 def identity(plugin: object, attribute: str) -> str:
@@ -91,7 +100,7 @@ def main() -> None:
             sample_rate = int(source.samplerate)
             channels = int(source.num_channels)
             source_frames = int(source.frames)
-            chunk_frames = sample_rate * 10
+            chunk_frames = sample_rate * args.chunk_seconds
             first_block = True
             with AudioFile(str(output_path), "w", sample_rate, channels, bit_depth=OUTPUT_BIT_DEPTH) as destination:
                 while source.tell() < source_frames:
@@ -119,6 +128,9 @@ def main() -> None:
         result = {
             "worker": "spotify-pedalboard",
             "workerVersion": pedalboard.version.__version__,
+            "numpyVersion": np.__version__,
+            "chunkSeconds": int(args.chunk_seconds),
+            "chunkFrames": int(chunk_frames),
             "modules": module_results,
             "plugin": module_results[0]["plugin"],
             "manufacturer": module_results[0]["manufacturer"],
