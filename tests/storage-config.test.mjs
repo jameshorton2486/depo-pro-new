@@ -7,7 +7,7 @@ test("depositions default to the operating-system user home directory",()=>{
   assert.equal(depositionStorageRoot({},()=>"C:\\Users\\reporter"),path.join("C:\\Users\\reporter","depos"));
 });
 
-test("an explicit deposition root takes precedence over the user profile",()=>{
+test("an explicit deposition root succeeds without resolving the user home directory",()=>{
   assert.equal(depositionStorageRoot({DEPO_PRO_DEPOSITIONS_ROOT:"D:\\Depositions"},()=>{throw new Error("must not resolve home")}),path.resolve("D:\\Depositions"));
 });
 
