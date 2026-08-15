@@ -10,6 +10,12 @@ export function extractCaretInventory(body) {
   return [...body.matchAll(CARET_FIELD)].map((match) => match[1]);
 }
 
+// Template integrity is byte-exact, so the checkout's line endings must not reach the hash.
+// LF is the canonical form: manifest hashes and rendering both read the normalized body.
+export function canonicalTemplateBody(body) {
+  return body.replace(/\r\n?/g, "\n");
+}
+
 export async function loadTemplateVariant(variant, { root = DEFAULT_TEMPLATE_ROOT } = {}) {
   const directory = path.resolve(root, variant);
   const manifestPath = path.join(directory, "manifest.json");
@@ -21,7 +27,7 @@ export async function loadTemplateVariant(variant, { root = DEFAULT_TEMPLATE_ROO
   const templates = {};
   for (const [role, specification] of Object.entries(manifest.templates ?? {})) {
     const filePath = path.join(directory, specification.file);
-    const body = await readFile(filePath, "utf8");
+    const body = canonicalTemplateBody(await readFile(filePath, "utf8"));
     const bodyHash = sha256(body);
     if (bodyHash !== specification.sha256) throw new Error(`Template hash mismatch for ${variant}/${specification.file}`);
     templates[role] = { body, filePath, sha256: bodyHash, fields: extractCaretInventory(body) };
