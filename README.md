@@ -79,6 +79,24 @@ The repository includes the canonical 25-line page model, reviewed Texas request
 - `npm run build` — production build
 - `npm run verify` — complete deterministic release gate
 
+## RX profile qualification
+
+`asrSafe` on a profile is a claim about how a plug-in behaves. `server/rx-qualification.mjs` measures it and writes a per-profile record.
+
+```powershell
+npm run fixture:rx -- "$env:TEMP\depo-rx-fixture"
+node -e "import('./server/rx-qualification.mjs').then(async m => { const r = await m.qualifyProfile({ fixturePath: '<fixture>', profileIds: ['rx12-de-hum-dynamic-v1'] }); m.writeQualificationRecord('<records>', r) })"
+```
+
+`scripts/make-rx-fixture.mjs` synthesizes a disposable fixture deterministically: 310 seconds so the ten-second chunk loop runs 31 times, impulse markers at exactly known sample offsets including one straddling a chunk seam, 60 Hz hum with harmonics, room tone, periodic table noise, and overlapping speech-band content. It emits both a 24-bit and a 16-bit WAV, the 24-bit one exercising the native path where source depth exceeds the canonical 16-bit derivative. Seeded throughout, so regenerating produces a byte-identical file and the fixture hash in a record identifies exactly that content.
+
+**What the synthetic fixture can and cannot qualify.** Determinism, time alignment, chunk invariance, frame parity and real-time factor are properties of the signal path and are measured more precisely against synthesized audio, where a marker's position is known rather than estimated. The ASR delta — the test that actually earns `asrSafe` — compares Deepgram output against a human-verified reference and needs real speech with a real transcript. A profile qualified against this fixture is qualified for the signal-path properties only; `asrSafe` remains a separate, unearned claim until measured against real testimony.
+
+Two measurement rules the runner enforces, both learned by getting them wrong first:
+
+- **Determinism compares decoded PCM, not the container.** Derivatives carry provenance in FLAC metadata including a per-render operation id, so container hashes can never match and would report every profile as non-deterministic.
+- **Alignment cross-correlates a window, rather than picking the loudest sample.** De-click exists to remove isolated impulses, so peak-picking its output locks onto unrelated content and invents a large offset. The surrounding material survives and still correlates.
+
 ## Continuous integration
 
 `.github/workflows/verify.yml` runs `npm run verify` on Windows against a clean checkout, on every pull request and every push to `main`.

@@ -11,6 +11,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "node scripts/test-all.mjs",
+    "fixture:rx": "node scripts/make-rx-fixture.mjs",
     "test:rx": "node scripts/test-rx-integration.mjs",
     "test:deepgram": "node scripts/test-deepgram-integration.mjs",
     "test:integration": "npm run test:rx",

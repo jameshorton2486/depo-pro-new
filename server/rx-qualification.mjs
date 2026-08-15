@@ -69,17 +69,42 @@ export function findTransients(samples, { threshold = TRANSIENT_THRESHOLD, separ
   return found;
 }
 
-// For each marker in the source, finds the strongest sample within the search window in the
-// derivative and reports the signed frame offset. The offset is the diagnosis: a constant
-// non-zero value across every marker is fixed plug-in latency, which can be compensated
+// Cross-correlates a window of source audio against the derivative to find the lag that best
+// matches. Correlating a WINDOW rather than picking the loudest sample is what makes this
+// work for modules that modify the landmark itself: De-click's entire purpose is removing
+// isolated impulses, so peak-picking a de-clicked derivative locks onto unrelated content
+// and reports a large fictitious offset. The surrounding room tone, hum and speech-band
+// material survive, so the window still correlates even when the marker does not.
+function bestLag(sourceSamples, derivativeSamples, centre, { window = 1024, search = ALIGNMENT_SEARCH_FRAMES } = {}) {
+  const from = Math.max(0, centre - window), to = Math.min(sourceSamples.length, centre + window);
+  let bestScore = -Infinity, best = 0;
+  for (let lag = -search; lag <= search; lag += 1) {
+    let dot = 0;
+    for (let index = from; index < to; index += 1) {
+      const shifted = index + lag;
+      if (shifted < 0 || shifted >= derivativeSamples.length) continue;
+      dot += sourceSamples[index] * derivativeSamples[shifted];
+    }
+    // A plain matched filter, deliberately not energy-normalised. Dividing by the window's
+    // energy is the textbook move for detecting whether a template is present, and it is
+    // wrong here: at the correct lag both windows contain the same loud transient, so the
+    // energy term is largest exactly where the answer is right and normalising suppresses
+    // it. Measured directly -- normalised scoring returned 3418 and -7841 on signals shifted
+    // by a known 512 frames, while the plain dot product returned 512 in both.
+    if (dot > bestScore) { bestScore = dot; best = lag; }
+  }
+  return best;
+}
+
+// For each marker in the source, reports the signed frame offset at which the surrounding
+// audio best matches in the derivative. The offset is the diagnosis: a constant non-zero
+// value across every marker is fixed plug-in latency, which can be compensated
 // deterministically; a varying one cannot. A boolean would throw that distinction away.
 export function measureAlignment(sourceSamples, derivativeSamples, { search = ALIGNMENT_SEARCH_FRAMES } = {}) {
   const markers = findTransients(sourceSamples);
   const offsets = markers.map(frame => {
-    const start = Math.max(0, frame - search), end = Math.min(derivativeSamples.length, frame + search + 1);
-    let best = start, bestValue = -1;
-    for (let index = start; index < end; index += 1) { const value = Math.abs(derivativeSamples[index]); if (value > bestValue) { bestValue = value; best = index; } }
-    return { sourceFrame:frame, derivativeFrame:best, offsetFrames:best - frame };
+    const lag = bestLag(sourceSamples, derivativeSamples, frame, { search });
+    return { sourceFrame:frame, derivativeFrame:frame + lag, offsetFrames:lag };
   });
   const values = offsets.map(item => item.offsetFrames);
   const distinct = [...new Set(values)];
@@ -103,7 +128,16 @@ async function renderOnce(fixturePath, profileIds, { chunkSeconds = DEFAULT_CHUN
   const startedMs = now();
   const derivative = await createRxDerivative(root, audit, { originalPath, profileIds, chunkSeconds, recordAuditEvent:async()=>{} });
   const elapsedMs = now() - startedMs;
-  return { root, derivative, elapsedMs, derivativePath:path.join(root, "data", ...derivative.key.split("/")) };
+  const derivativePath = path.join(root, "data", ...derivative.key.split("/"));
+  // Determinism and chunk invariance must compare AUDIO, not the container.
+  //
+  // createRxDerivative writes provenance into FLAC metadata, including DEPO_PRO_OPERATION_ID
+  // and DEPO_PRO_UPLOAD_ID, both fresh per render. Comparing derivative.sha256 therefore
+  // compares two unique UUIDs and can never match -- it reports every profile as
+  // non-deterministic regardless of what the plug-in actually did. Hashing the decoded PCM
+  // stream measures the rendered signal, which is the thing the claim is about.
+  const audioSha256 = crypto.createHash("sha256").update(await run("ffmpeg", ["-v","error","-nostdin","-i",derivativePath,"-map","0:a:0","-f","s16le","-acodec","pcm_s16le","-"])).digest("hex");
+  return { root, derivative, elapsedMs, derivativePath, audioSha256 };
 }
 
 function pluginBinaries(profileIds, { pluginRoot = process.env.RX_VST3_ROOT || "C:\\Program Files\\Common Files\\VST3\\iZotope" } = {}) {
@@ -153,12 +187,12 @@ export async function qualifyProfile({ fixturePath, profileIds, workRoot = fs.mk
   // to tautological. The failure worth catching is per-process variation: seeded RNG, thread
   // pool sizing, model load order. createRxDerivative spawns a fresh interpreter per call.
   const second = await renderOnce(fixturePath, ids, { chunkSeconds:DEFAULT_CHUNK_SECONDS, workRoot, now });
-  record.results.determinism = { firstSha256:first.derivative.sha256, secondSha256:second.derivative.sha256, separateProcesses:true, passed:first.derivative.sha256 === second.derivative.sha256 };
+  record.results.determinism = { firstAudioSha256:first.audioSha256, secondAudioSha256:second.audioSha256, firstContainerSha256:first.derivative.sha256, secondContainerSha256:second.derivative.sha256, separateProcesses:true, comparedOn:"decoded PCM; container hashes differ by design because provenance metadata is unique per render", passed:first.audioSha256 === second.audioSha256 };
 
   // Test 3 -- chunk invariance. If output differs, chunk size is part of profile identity
   // and the qualified value becomes mandatory rather than incidental.
   const alternate = await renderOnce(fixturePath, ids, { chunkSeconds:alternateChunkSeconds, workRoot, now });
-  record.results.chunkInvariance = { chunkSeconds:DEFAULT_CHUNK_SECONDS, alternateChunkSeconds, sha256:first.derivative.sha256, alternateSha256:alternate.derivative.sha256, passed:first.derivative.sha256 === alternate.derivative.sha256 };
+  record.results.chunkInvariance = { chunkSeconds:DEFAULT_CHUNK_SECONDS, alternateChunkSeconds, audioSha256:first.audioSha256, alternateAudioSha256:alternate.audioSha256, comparedOn:"decoded PCM", passed:first.audioSha256 === alternate.audioSha256 };
 
   // Test 2 -- time alignment. The one the frame-parity check cannot substitute for: equal
   // length says nothing about equal position.
