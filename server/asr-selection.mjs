@@ -25,6 +25,10 @@ function categoryRegressions(original, processed) {
 
 export function chooseMeasuredAsrSource(original, processed, { minimumAbsoluteWerGain = .005, maximumDeletionIncrease = 0 } = {}) {
   if (!original || !processed || original.referenceSha256 !== processed.referenceSha256) throw new Error("Measured ASR candidates must use the same human reference transcript.");
+  // A candidate scored under a different term group set was judged by a different gate --
+  // categoryRegressions below would be comparing groups that do not correspond. Same reason
+  // the reference hashes must agree, one level up.
+  if (!original.termGroupSetId || original.termGroupSetId !== processed.termGroupSetId || original.termGroupSetVersion !== processed.termGroupSetVersion) throw new Error("Measured ASR candidates must be scored under the same resolved term group set.");
   if (!Number.isFinite(original.wer) || !Number.isFinite(processed.wer)) throw new Error("Measured ASR selection requires WER for both candidates.");
   const werGain = original.wer - processed.wer;
   const regressions = categoryRegressions(original, processed);

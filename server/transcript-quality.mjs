@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
+import { TERM_GROUP_SETS } from "./term-groups.mjs";
 
 function words(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9' -]/g, " ").split(/\s+/).filter(Boolean);
 }
 
-const NEGATION_TERMS = ["no", "not", "never", "cannot", "can't", "didn't", "doesn't", "don't", "won't", "wasn't", "weren't"];
-const SHORT_ANSWER_TERMS = ["yes", "no", "correct", "incorrect", "I don't know", "I do not know", "I don't recall", "I do not recall"];
+// Sourced from the term-group catalog so the set definition has one home. These two are
+// applied unconditionally: a caller can add to them but never narrow them.
+const { negations: NEGATION_TERMS, shortAnswers: SHORT_ANSWER_TERMS } = TERM_GROUP_SETS["deposition-core-v1"];
 
 function occurrences(haystack, needle) {
   if (!needle.length || needle.length > haystack.length) return 0;

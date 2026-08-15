@@ -297,6 +297,12 @@ export async function selectAsrSource(root,uploadId,{referenceSha256=null}={}){
     const matching=current.comparisons.filter(item=>item.referenceSha256&&item.referenceSha256===hash);
     const original=[...matching].reverse().find(item=>item.source==="original"),processed=[...matching].reverse().find(item=>item.source==="processed");
     if(!original||!processed)return;
+    // Fail closed on the gate itself. An unresolved term group set means the comparison was
+    // scored without the case terms it was supposed to check, and a mismatched one means the
+    // two candidates were judged by different gates. Refuse to select rather than select on
+    // a weaker check -- the whole point of the gate is that it cannot be quietly narrowed.
+    if(!original.termGroupSetId||!processed.termGroupSetId){outcome={status:"term-group-set-unresolved",selection:null,blocker:"A comparison was scored without a resolved term group set."};return}
+    if(original.termGroupSetId!==processed.termGroupSetId||original.termGroupSetVersion!==processed.termGroupSetVersion){outcome={status:"term-group-set-mismatch",selection:null,blocker:`Candidates were scored under different term group sets: ${original.termGroupSetId}@${original.termGroupSetVersion} and ${processed.termGroupSetId}@${processed.termGroupSetVersion}.`};return}
     const selection=chooseMeasuredAsrSource(original,processed),processedOperationId=processed.derivativeOperationId||current.transcripts?.processed?.derivativeOperationId||null;
     const selected=selection.winner==="processed"?resolveAudioItem(current,"processed",processedOperationId):current.storage.original;
     current.automaticSelection=selection;
@@ -304,7 +310,7 @@ export async function selectAsrSource(root,uploadId,{referenceSha256=null}={}){
     current.selectedDerivativeOperationId=selection.winner==="processed"?selected.operationId:null;
     current.selectedAudioSha256=selected.sha256;
     current.selectionBasis="measured-human-reference";
-    appendHistory(current,"asr-source-selected-from-human-reference",{source:selection.winner,method:selection.method,referenceSha256:hash,derivativeOperationId:current.selectedDerivativeOperationId,audioSha256:selected.sha256});
+    appendHistory(current,"asr-source-selected-from-human-reference",{source:selection.winner,method:selection.method,referenceSha256:hash,termGroupSetId:original.termGroupSetId,termGroupSetVersion:original.termGroupSetVersion,derivativeOperationId:current.selectedDerivativeOperationId,audioSha256:selected.sha256});
     outcome={status:"selected",selection};
   });
   return {...outcome,audit};

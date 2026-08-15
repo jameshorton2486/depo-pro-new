@@ -41,6 +41,7 @@ export function createDeposition(root,input,options={}){const metadata=input?.de
   atomicJson(path.join(staging,"audio","audit.json"),{schemaVersion:"1.0.0",items:audio});atomicJson(path.join(staging,"intake","canonical-deposition-record.json"),canonicalData);atomicJson(path.join(staging,"deposition.json"),record);commitDirectory(staging,finalDirectory);return record;
  }catch(error){fs.rmSync(staging,{recursive:true,force:true});throw error}}
 
+export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 
 export const _testing={within,safeName,pathPart,personName,reporterFolder,causeFolder,depositionFolder,atomicJson,commitDirectory,ID_PATTERN,resolveDefaultDepositionsRoot};

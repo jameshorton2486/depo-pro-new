@@ -15,7 +15,8 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
+import { createDeposition, readDepositionIntake, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
+import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
@@ -166,7 +167,13 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
       const input=await body(req,10*1024*1024); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource; const stored=input.hypothesis?null:await readStoredTranscript(root,audit,source); const hypothesis=input.hypothesis||stored?.transcript||"";
-      const comparison={source,derivativeOperationId:source==="processed"?(input.derivativeOperationId||audit.transcripts?.processed?.derivativeOperationId||null):null,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[],input.termGroups||{})}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
+      // Term groups are resolved here from the named set plus this deposition's own UFM
+      // registry and intake keyterms. Any groups in the request body are ignored on purpose:
+      // a client able to narrow them is a client able to weaken the selection gate.
+      let resolved=null,termGroupError=null;
+      try{const intake=input.depositionId?readDepositionIntake(root,input.depositionId,{storageRoot:depositionStorageRoot}):null;resolved=buildTermGroups(input.termGroupSetId,{ufmEntries:intake?.ufmData?.ufm_registry?.entries||[],keyterms:intake?.keyterms||[]})}
+      catch(error){termGroupError=error instanceof Error?error.message:String(error)}
+      const comparison={source,derivativeOperationId:source==="processed"?(input.derivativeOperationId||audit.transcripts?.processed?.derivativeOperationId||null):null,termGroupSetId:resolved?.termGroupSetId??null,termGroupSetVersion:resolved?.termGroupSetVersion??null,termGroupError,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[],resolved?.groups||{})}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
     }
     if (req.url === "/api/audio/select-asr-source" && req.method === "POST") {
       const input=await body(req,64*1024); const result=await selectAsrSource(root,input.uploadId,{referenceSha256:input.referenceSha256||null});
