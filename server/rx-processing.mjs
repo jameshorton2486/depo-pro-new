@@ -154,8 +154,12 @@ export async function createRxDerivative(root, audit, {
   if (path.resolve(originalPath) !== expectedOriginalPath) throw new Error("RX source path does not match the audited original.");
 
   const rx = inspectRxStatus({ includeExecutable:true });
-  if (!rx.available || !rx.executable) throw new Error(rx.fallback || "iZotope RX 12 is unavailable.");
   const profiles=resolveAudioToolChain(profileIds||[profileId]),rxProfiles=profiles.filter(item=>item.engine==="rx"),resolvedPluginPaths=rxProfiles.map((profile,index)=>index===0&&pluginPath?pluginPath:path.join(process.env.RX_VST3_ROOT || DEFAULT_PLUGIN_ROOT,profile.pluginFile));
+  // RX availability gates RX modules, not the renderer. A chain containing no RX-engine
+  // profile -- the high-pass filter is the only one today -- still renders through this same
+  // Pedalboard host, and requiring the RX editor for it would be the reason a second
+  // ffmpeg renderer existed in the first place.
+  if (rxProfiles.length && (!rx.available || !rx.executable)) throw new Error(rx.fallback || "iZotope RX 12 is unavailable.");
   for (const required of [pythonExecutable,workerPath,...resolvedPluginPaths]) if (!fs.existsSync(required)) throw new Error(`RX processing dependency is unavailable: ${path.basename(required)}`);
   const chainId=profiles.map(item=>item.id).join("+");
   const directory = path.dirname(path.resolve(originalPath));

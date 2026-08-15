@@ -178,16 +178,23 @@ function recommendProcessing(findings) {
   if (findings.lowLevel.detected || findings.unevenLevels.detected) return { route: "review", candidateProfile: null, reason: "Level concerns require listening review; automatic gain is not applied to transcription evidence." };
   return { route: "original", candidateProfile: null, reason: "No validated quality concern requires processing." };
 }
-function profileFilter(profile) {
-  return { "low-frequency-rolloff-v2":"highpass=f=70" }[profile];
-}
-async function createDerivative(root, audit, originalPath, profile, measurementsBefore) {
-  const filter = profileFilter(profile), directory = storageDirectory(root, audit.uploadId), name = `candidate.${profile}.wav`, target = path.join(directory, name);
-  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", originalPath, "-af", filter, "-c:a", "pcm_s16le", target];
-  await run("ffmpeg", args);
-  const after = await measureAudio(target);
-  return { kind:DERIVATIVE_KINDS.FFMPEG_CANDIDATE, operationId:crypto.randomUUID(), key:`audio-intake/${audit.uploadId}/${name}`, bytes:fs.statSync(target).size, sha256:await sha256(target), sourceSha256:audit.storage.original.sha256, tool:"ffmpeg", toolVersion:audit.tools.ffmpeg, commandArguments:["-i", audit.storage.original.key, "-af", filter, "-c:a", "pcm_s16le", "OUTPUT_KEY"], profileId:profile, profileVersion:"2.0.0", sourcePcmPrecision:"decoded source; lossy inputs have no source PCM bit depth",processingPrecision:"ffmpeg internal",outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`,timelinePreserved:true,selectableForTranscription:true,createdAt:new Date().toISOString(), measurementsBefore, measurementsAfter:after };
-}
+// There is deliberately no second renderer here.
+//
+// `low-frequency-rolloff-v2` used to render two ways: through `ffmpeg -af highpass=f=70`
+// on this path, and through Pedalboard's HighpassFilter in the RX worker when the same
+// profile appeared in an operator-selected chain. Both recorded profileId
+// "low-frequency-rolloff-v2" and profileVersion "2.0.0", so two derivatives could carry
+// identical stated provenance while being different files with different SHA-256 values
+// and different phase responses. An opposing expert re-running the documented profile
+// would not reproduce the recorded hash.
+//
+// The ffmpeg path also asserted timelinePreserved and selectableForTranscription without
+// verifying either, and FFMPEG_CANDIDATE is in ASR_ELIGIBLE_KINDS, so those unverified
+// assertions were load-bearing on what could be transcribed.
+//
+// Candidate rendering is now injected (see saveAndAnalyzeAudio) and goes through
+// createRxDerivative like every other tool operation, inheriting its locking, source-hash
+// verification, frame-parity proof, and provenance tagging.
 
 function processingDerivatives(audit) { return audit.storage.derivatives.filter(item => ASR_ELIGIBLE_KINDS.has(item.kind) && item.timelinePreserved !== false && item.selectableForTranscription !== false); }
 export function resolveAudioItem(audit, source = audit.selectedSource, derivativeOperationId = source === "processed" ? audit.selectedDerivativeOperationId : null) {
@@ -227,7 +234,11 @@ export async function createDeepgramCompatibilityDerivative(root, audit, source 
   await mutateAudioAudit(root,audit.uploadId,current=>{current.storage.derivatives.push(derivative);appendHistory(current,"deepgram-compatibility-derivative-created",{source,key:derivative.key,sha256:derivative.sha256,sourceSha256:derivative.sourceSha256,profileId:derivative.profileId})});
   return { path: target, derivative };
 }
-export async function saveAndAnalyzeAudio(req, { root, originalName, contentType }) {
+// `createCandidate` is injected rather than imported so this module does not depend on
+// rx-processing.mjs, which already imports measureAudioQuality from here. local-api.mjs
+// supplies the audited renderer; without it no candidate is rendered and the omission is
+// recorded rather than silently skipped.
+export async function saveAndAnalyzeAudio(req, { root, originalName, contentType, createCandidate }) {
   const uploadId = crypto.randomUUID(), safeName = path.basename(originalName || "audio.bin").replace(/[^a-zA-Z0-9._ -]/g, "_"), directory = storageDirectory(root, uploadId);
   fs.mkdirSync(directory, { recursive: true });
   const originalPath = path.join(directory, `original${path.extname(safeName) || ".bin"}`), hash = crypto.createHash("sha256");
@@ -246,7 +257,24 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
     audit.media={durationSeconds:Number(probe.format?.duration||0),codec:stream.codec_name||"unknown",sampleRate:Number(stream.sample_rate||0),channels:Number(stream.channels||0)};
     const measurements=await measureAudioQuality(originalPath); audit.measurements=measurements;
     audit.findings=classifyAudio(measurements,audit.media.durationSeconds); audit.recommendation=recommendProcessing(audit.findings); appendHistory(audit,"technical-analysis-completed",{analysisVersion:ANALYSIS_VERSION});
-    if(audit.recommendation.candidateProfile){const derivative=await createDerivative(root,audit,originalPath,audit.recommendation.candidateProfile,measurements);audit.storage.derivatives.push(derivative);appendHistory(audit,"candidate-derivative-created",{key:derivative.key,sha256:derivative.sha256,profileId:derivative.profileId});}
+    if(audit.recommendation.candidateProfile){
+      const profileId=audit.recommendation.candidateProfile;
+      if(typeof createCandidate!=="function"){
+        appendHistory(audit,"candidate-derivative-skipped",{profileId,reason:"No audited renderer was supplied to the analysis pipeline."});
+      } else {
+        try{
+          const derivative=await createCandidate({root,audit,originalPath,profileIds:[profileId]});
+          audit.storage.derivatives.push(derivative);
+          appendHistory(audit,"candidate-derivative-created",{key:derivative.key,sha256:derivative.sha256,profileId:derivative.profileId});
+        }catch(error){
+          // The analysis and the recommendation stand on their own. A candidate that could
+          // not be rendered is recorded as absent rather than failing the whole intake --
+          // the operator can still run the tool explicitly, and a silently missing
+          // derivative would be indistinguishable from one that was never recommended.
+          appendHistory(audit,"candidate-derivative-failed",{profileId,error:error instanceof Error?error.message:"Candidate rendering failed."});
+        }
+      }
+    }
     audit.status="ready"; appendHistory(audit,"routing-recommendation-created",{routingPolicyVersion:ROUTING_VERSION,route:audit.recommendation.route}); writeAudioAudit(root,audit); return publicAudit(audit);
   } catch(error) { audit.status="analysis-failed"; audit.analysisError=error instanceof Error?error.message:"Audio analysis failed."; appendHistory(audit,"analysis-failed",{error:audit.analysisError}); writeAudioAudit(root,audit); return publicAudit(audit); }
 }
