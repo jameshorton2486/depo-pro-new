@@ -96,12 +96,11 @@ The existing `corrections` table, `correction_decisions` table,
 authoritative ATIA implementation of this flow. This ADR must not orphan,
 bypass, or replace them.
 
-### D5 — Parenthetical color is an open item
+### D5 — Parentheticals render in plain black
 
-Navy blue (#1E3A5F) for parentheticals is listed in some documentation but
-is NOT present in any of the four reference transcripts (Trisha Myler, CSR).
-This is unratified. It is flagged as an open item for Miah's confirmation
-before being encoded as a rule.
+Miah confirmed on 2026-08-15 that parentheticals render in plain black. Navy
+blue (`#1E3A5F`) is not supported by the reference transcripts and must not be
+encoded as a rule. F20 requires no parenthetical color change.
 
 ---
 
@@ -178,7 +177,7 @@ A failure in one chunk must not block or corrupt other chunks.
   and must not be wired to any live transcript.
 - Part 2 code work is blocked until this ADR is ratified and the generic
   versioned prompt is written and reviewed.
-- Parenthetical color (navy vs. none) is blocked on Miah's confirmation.
+- Parentheticals remain plain black; no F20 color change is required.
 
 ---
 
@@ -186,7 +185,7 @@ A failure in one chunk must not block or corrupt other chunks.
 
 | ID | Item | Owner | Blocks |
 |---|---|---|---|
-| OI-1 | Parenthetical color — navy #1E3A5F or none | Miah | F20 update, Part 2 CSS |
+| OI-1 | Parenthetical color — closed 2026-08-15: plain black | Miah | Closed |
 | OI-2 | Generic versioned correction prompt — closed 2026-08-15 | Agent | Closed |
 | OI-3 | Chunk size and overlap strategy | Agent | REQ-3 implementation |
 | OI-4 | Retranscription verification (clean Thomas) | James | REQ-2 scoping |
