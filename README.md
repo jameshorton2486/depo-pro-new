@@ -79,6 +79,16 @@ The repository includes the canonical 25-line page model, reviewed Texas request
 - `npm run build` — production build
 - `npm run verify` — complete deterministic release gate
 
+## Continuous integration
+
+`.github/workflows/verify.yml` runs `npm run verify` on Windows against a clean checkout, on every pull request and every push to `main`.
+
+Two jobs. The primary one pins Node to the `package.json` floor — the version the manifest promises — and checks out with `core.autocrlf=true`, which is how a Windows machine clones this repository by default. That combination is deliberate: the template-integrity defect fixed in Slice 1B existed because an established working tree passed while a fresh CRLF checkout failed every manifest hash. A build step asserts the pinned floor still matches `engines.node`, so the two cannot drift apart silently. The secondary job runs current Node with LF endings.
+
+Nothing in the working tree is carried between runs. Only the npm download cache is reused; `node_modules` is rebuilt from the lockfile each time.
+
+**What CI cannot prove.** The RX integration and qualification suites need licensed iZotope VST3 plug-ins and a disposable audio fixture, neither of which can exist on a hosted runner, so they skip. Determinism, time alignment, and chunk invariance are therefore *not* enforced by CI. They are measured locally through `server/rx-qualification.mjs` and recorded as per-profile qualification records. A green build says the code is sound; it says nothing about whether a profile carrying `asrSafe: true` has earned it.
+
 ## Current boundaries
 
 - The reporter directory still originates in browser-managed configuration and should be migrated into the filesystem-authoritative profile store.
