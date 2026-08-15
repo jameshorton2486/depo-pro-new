@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { inspectRx } from "./rx-adapter.mjs";
 import { ASR_ELIGIBLE_KINDS, CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
+import { chooseMeasuredAsrSource } from "./asr-selection.mjs";
 
 const DEFAULT_MAX_AUDIO_BYTES = 12 * 1024 ** 3;
 const configuredMaxAudioBytes = Number(process.env.MAX_AUDIO_BYTES ?? DEFAULT_MAX_AUDIO_BYTES);
@@ -264,4 +265,47 @@ export async function readStoredTranscript(root,audit,source=audit.selectedSourc
   const expected=`audio-intake/${assertUploadId(audit.uploadId)}/transcripts/${assertUploadId(metadata.operationId)}.json`;if(metadata.path!==expected)throw new Error("Stored transcript path is invalid.");
   const value=await fs.promises.readFile(transcriptFile(root,audit.uploadId,metadata.operationId));const digest=crypto.createHash("sha256").update(value).digest("hex");if(digest!==metadata.transcriptSha256)throw new Error("Stored transcript integrity verification failed.");return JSON.parse(value.toString("utf8"));
 }
-export async function recordComparison(root,audit,comparison){return mutateAudioAudit(root,audit.uploadId,current=>{current.comparisons.push(comparison);appendHistory(current,"transcript-quality-compared",{source:comparison.source,wer:comparison.wer,criticalLegalErrorRate:comparison.criticalLegalErrorRate})})}
+// Records an observation. It must not change which audio is eligible for transcription --
+// selection is an explicit act, performed by selectAsrSource below.
+export async function recordComparison(root,audit,comparison){return mutateAudioAudit(root,audit.uploadId,current=>{
+  if(!["original","processed"].includes(comparison.source))throw new Error("Transcript comparison source must be original or processed audio.");
+  current.comparisons.push(comparison);
+  appendHistory(current,"transcript-quality-compared",{source:comparison.source,wer:comparison.wer,criticalLegalErrorRate:comparison.criticalLegalErrorRate,referenceSha256:comparison.referenceSha256});
+})}
+
+// Pairs the most recent original and processed comparisons scored against the same human
+// reference, and lets the measured result decide the ASR source.
+//
+// Invariant: selection never proceeds without a concrete reference hash to pair on.
+// schemaVersion 1 comparison records predate `referenceSha256` and carry none, so they are
+// unpairable and cannot drive a selection. This matters because `undefined === undefined`
+// is true -- if an absent hash were ever compared against another absent hash, every v1
+// record would "match" every other, and chooseMeasuredAsrSource could not catch it: its own
+// mismatch check would be comparing the same two undefined values.
+//
+// Three lines hold the invariant together, and it is deliberately over-determined: the
+// `find(item => item.referenceSha256)` below only ever selects a record that has one, the
+// trailing `|| null` keeps an absent hash from staying `undefined`, and `if(!hash) return`
+// refuses to pair without it. Removing any single one leaves the others sufficient today --
+// removing the wrong two does not. The behavior is pinned by tests in
+// tests/measured-asr-selection.test.mjs; change this block only with those in front of you.
+export async function selectAsrSource(root,uploadId,{referenceSha256=null}={}){
+  let outcome={status:"insufficient-comparisons",selection:null};
+  const audit=await mutateAudioAudit(root,uploadId,current=>{
+    const hash=referenceSha256||[...current.comparisons].reverse().find(item=>item.referenceSha256)?.referenceSha256||null;
+    if(!hash)return;
+    const matching=current.comparisons.filter(item=>item.referenceSha256&&item.referenceSha256===hash);
+    const original=[...matching].reverse().find(item=>item.source==="original"),processed=[...matching].reverse().find(item=>item.source==="processed");
+    if(!original||!processed)return;
+    const selection=chooseMeasuredAsrSource(original,processed),processedOperationId=processed.derivativeOperationId||current.transcripts?.processed?.derivativeOperationId||null;
+    const selected=selection.winner==="processed"?resolveAudioItem(current,"processed",processedOperationId):current.storage.original;
+    current.automaticSelection=selection;
+    current.selectedSource=selection.winner;
+    current.selectedDerivativeOperationId=selection.winner==="processed"?selected.operationId:null;
+    current.selectedAudioSha256=selected.sha256;
+    current.selectionBasis="measured-human-reference";
+    appendHistory(current,"asr-source-selected-from-human-reference",{source:selection.winner,method:selection.method,referenceSha256:hash,derivativeOperationId:current.selectedDerivativeOperationId,audioSha256:selected.sha256});
+    outcome={status:"selected",selection};
+  });
+  return {...outcome,audit};
+}

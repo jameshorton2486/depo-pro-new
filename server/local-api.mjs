@@ -4,7 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, mutateAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
 import { compareTranscripts } from "./transcript-quality.mjs";
@@ -166,7 +166,11 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
       const input=await body(req,10*1024*1024); const audit=readAudioAudit(root,input.uploadId); const source=input.source||audit.selectedSource; const stored=input.hypothesis?null:await readStoredTranscript(root,audit,source); const hypothesis=input.hypothesis||stored?.transcript||"";
-      const comparison={source,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[])}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
+      const comparison={source,derivativeOperationId:source==="processed"?(input.derivativeOperationId||audit.transcripts?.processed?.derivativeOperationId||null):null,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[],input.termGroups||{})}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
+    }
+    if (req.url === "/api/audio/select-asr-source" && req.method === "POST") {
+      const input=await body(req,64*1024); const result=await selectAsrSource(root,input.uploadId,{referenceSha256:input.referenceSha256||null});
+      return json(res,200,{status:result.status,selection:result.selection,audit:publicAudit(result.audit)},origin);
     }
     if (req.url?.startsWith("/api/audio/audit?") && req.method === "GET") {
       const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"),audit=readAudioAudit(root,uploadId),result=publicAudit(audit),source=audit.selectedSource,transcript=await readStoredTranscript(root,audit,source);if(transcript)result.transcripts[source]={...transcript,...audit.transcripts[source]};return json(res,200,result,origin);
