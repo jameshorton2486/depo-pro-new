@@ -195,6 +195,18 @@ export async function createRxDerivative(root, audit, {
   const pinnedChunkSeconds = [...new Set(profiles.map(item => item.renderChunkSeconds).filter(Number.isFinite))];
   if (pinnedChunkSeconds.length > 1) throw new RxProcessingError("Chained profiles pin different render chunk sizes.", "RX_CHUNK_SIZE_CONFLICT", { pinnedChunkSeconds });
   const effectiveChunkSeconds = chunkSeconds ?? pinnedChunkSeconds[0] ?? DEFAULT_CHUNK_SECONDS;
+  // Measured processing latency, compensated deterministically below.
+  //
+  // Frame parity cannot see this: the derivative is the same length as the source with its
+  // content late inside it. Dialogue Isolate is 4096 frames, Repair Assistant 8159, both
+  // constant across every search width tested -- which is what makes them compensable at all.
+  //
+  // A chain's total latency is NOT the sum of its parts as far as this code is concerned,
+  // because that sum has never been measured. Two latency-declaring profiles in one chain
+  // fails closed rather than compensating by an assumed figure.
+  const latencyProfiles = profiles.filter(item => Number.isFinite(item.measuredLatencyFrames) && item.measuredLatencyFrames > 0);
+  if (latencyProfiles.length > 1) throw new RxProcessingError("Chained profiles each declare processing latency, and the chain's combined latency has not been measured.", "RX_CHAIN_LATENCY_UNMEASURED", { profileIds:latencyProfiles.map(item => item.id) });
+  const latencyFrames = latencyProfiles[0]?.measuredLatencyFrames ?? 0;
   for (const required of [pythonExecutable,workerPath,...resolvedPluginPaths]) if (!fs.existsSync(required)) throw new Error(`RX processing dependency is unavailable: ${path.basename(required)}`);
   const chainId=profiles.map(item=>item.id).join("+");
   const directory = path.dirname(path.resolve(originalPath));
@@ -207,6 +219,7 @@ export async function createRxDerivative(root, audit, {
   const temporaryPath = path.join(operationDirectory, "derivative.partial.wav");
   const encodedPath = path.join(operationDirectory, "derivative.partial.flac");
   const processingSourcePath = path.join(operationDirectory, "processing-source.wav");
+  const compensatedPath = path.join(operationDirectory, "derivative.compensated.wav");
   const profilePath = path.join(operationDirectory, "profile.json");
   const resultPath = path.join(operationDirectory, "result.json");
   assertWithin(finalPath, directory);
@@ -252,6 +265,19 @@ export async function createRxDerivative(root, audit, {
     fs.writeFileSync(profilePath, JSON.stringify(profiles), { flag: "wx" });
     await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath, "--chunk-seconds", String(effectiveChunkSeconds)]);
     if (!fs.existsSync(temporaryPath)) throw new Error("RX worker reported success without producing output.");
+    // Shift the rendered audio back by the profile's measured latency: drop the leading
+    // `latencyFrames` samples the plug-in produced before the signal arrived, and pad the
+    // tail so the total frame count is unchanged and the derivative stays frame-aligned.
+    // whole_len pins the output length exactly rather than letting apad guess.
+    let latencyCompensation = null;
+    if (latencyFrames > 0) {
+      await runEncoder("ffmpeg", ["-v","error","-nostdin","-i",temporaryPath,"-map","0:a:0","-vn","-af",`atrim=start_sample=${latencyFrames},asetpts=N/SR/TB,apad=whole_len=${sourceMedia.sampleFrames}`,"-c:a","pcm_s16le",compensatedPath], 30 * 60 * 1000);
+      if (!fs.existsSync(compensatedPath)) throw new RxProcessingError("Latency compensation reported success without producing audio.", "RX_LATENCY_COMPENSATION_FAILED", { latencyFrames });
+      fs.rmSync(temporaryPath, { force:true });
+      fs.renameSync(compensatedPath, temporaryPath);
+      latencyCompensation = { frames:latencyFrames, seconds:latencyFrames / sourceMedia.sampleRate, method:"trim-head-pad-tail", profileId:latencyProfiles[0].id, note:"The plug-in delays its output by a constant measured offset. The derivative is shifted back by that offset and the tail padded to preserve the frame count, so timestamps derived from it match the original timeline." };
+      await recordAuditEvent({ event:"rx-latency-compensated", code:"LATENCY_COMPENSATED", operationId, at:now(), ...latencyCompensation });
+    }
     if (!fs.existsSync(resultPath)) throw new Error("RX worker reported success without a result record.");
     let worker;
     try { worker = JSON.parse(fs.readFileSync(resultPath, "utf8")); }
@@ -279,7 +305,7 @@ export async function createRxDerivative(root, audit, {
     renamed = true;
     return {
       key, operationId, bytes: fs.statSync(finalPath).size, sha256: derivativeHash, sourceSha256: beforeHash, sourceImmutable: true,
-      kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sourceBitDepth,precisionReduced,precisionReductionNote:precisionReduced?`The source is ${sourceBitDepth}-bit; the canonical derivative is ${CANONICAL_ASR_PCM_BITS}-bit, so sample depth was reduced.`:null,decodeFrameDelta:decodeGeometry.decodeFrameDelta,decodeDurationDeltaSeconds:decodeGeometry.decodeDurationDeltaSeconds,uploadedTimelinePreserved:decodeGeometry.uploadedTimelinePreserved,uploadedTimelineNote:decodeGeometry.reason,sampleAligned:true,timelinePreserved:true,timelinePolicy:"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
+      kind:profiles.every(item=>item.asrSafe)?DERIVATIVE_KINDS.RX_ASR:DERIVATIVE_KINDS.RX_REVIEW, sourcePcmPrecision:needsDecode?"decoded to signed 16-bit PCM":"source WAV decoded by Pedalboard", processingPrecision:"32-bit floating point", outputPcmPrecision:`signed ${CANONICAL_ASR_PCM_BITS}-bit PCM`, sourceBitDepth,precisionReduced,precisionReductionNote:precisionReduced?`The source is ${sourceBitDepth}-bit; the canonical derivative is ${CANONICAL_ASR_PCM_BITS}-bit, so sample depth was reduced.`:null,decodeFrameDelta:decodeGeometry.decodeFrameDelta,decodeDurationDeltaSeconds:decodeGeometry.decodeDurationDeltaSeconds,uploadedTimelinePreserved:decodeGeometry.uploadedTimelinePreserved,uploadedTimelineNote:decodeGeometry.reason,sampleAligned:true,measuredLatencyFrames:latencyFrames||null,latencyCompensation,timelinePreserved:latencyFrames===0||Boolean(latencyCompensation),timelinePolicy:latencyCompensation?"frame-aligned-latency-compensated":"frame-aligned-no-cuts",selectableForTranscription:profiles.every(item=>item.asrSafe),provenanceTags,sourceMedia,uploadedSourceMedia,processingInput:needsDecode?{decodedToPcm:true,decoder:"ffmpeg",encoding:"pcm_s16le"}:{decodedToPcm:false},processingRenderEncoding:worker.outputEncoding,outputEncoding:{container:"flac",sampleFormat:"s16",bitDepth:16,lossless:true},measurementsBefore,measurementsAfter,measurementDelta,tool:"iZotope RX chain via Spotify Pedalboard",toolVersion:worker.workerVersion,
       manufacturer:"iZotope / Spotify",product:"RX 12 audio tool chain",edition:"Standard",module:profiles.map(item=>item.displayName).join(" → "),profileIds:profiles.map(item=>item.id),profileVersions:profiles.map(item=>item.version),modules,host:worker.worker,hostVersion:worker.workerVersion,numpyVersion:worker.numpyVersion??null,renderChunkSeconds:worker.chunkSeconds??null,renderChunkFrames:worker.chunkFrames??null,profileId:profiles.length===1?profiles[0].id:chainId,profileVersion:profiles.length===1?profiles[0].version:"chain-v1",createdAt:now(),media,
     };
   } catch (error) {
