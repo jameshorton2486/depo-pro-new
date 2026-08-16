@@ -1,3 +1,19 @@
+// Chunk invariance: no rule is known. Measure every module.
+//
+// De-hum and Voice De-noise render identically at 10-second and 30-second chunks. De-click,
+// De-reverb, Dialogue Isolate and Repair Assistant do not. There is no property of a module
+// that predicts which side it lands on -- "spectral repair is invariant, separation is not"
+// was the obvious hypothesis and De-click kills it, being a repair module that fails.
+//
+// So do not infer from the pattern. A module without a renderChunkSeconds pin is one that
+// was measured and found invariant, never one that was assumed to be. Anything added to this
+// catalog is unqualified until qualifyProfile has been run against it.
+//
+// Two modules also carry measuredLatencyFrames, and the same applies: De-hum and Voice
+// De-noise measured 0, Dialogue Isolate 4096 and Repair Assistant 8159, and nothing about
+// the modules predicted which. De-click and De-reverb carry no figure at all because their
+// alignment is indeterminate -- correlation cannot resolve a lag for a module that reshapes
+// the waveform rather than delaying it. Absent is not zero.
 const identity = (id, module, description, rawParameters, metadata) => Object.freeze({
   id, version:"1.0.0", product:"iZotope RX 12", edition:"Standard", module, description,
   engine:"rx",...metadata,

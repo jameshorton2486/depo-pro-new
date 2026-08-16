@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTransients, measureAlignment, measureStableGlobalAlignment } from "../server/rx-qualification.mjs";
+import { findTransients, measureAlignment, measureMarkerSurvival, measureStableGlobalAlignment } from "../server/rx-qualification.mjs";
 
 // Synthetic signals, so the detection maths is covered without the audio fixture. The gated
 // suite in rx-qualification.integration.test.mjs exercises the same functions against real
@@ -107,4 +107,24 @@ test("an offset that moves with the search width is reported as indeterminate, n
   assert.equal(result.offsetFrames,null,"no offset may be reported when the estimate is not stable");
   assert.equal(result.aligned,false);
   assert.match(result.note,/not a time shift/);
+});
+
+test("marker survival is measured in the output, not assumed from the fixture",()=>{
+  const positions=[48000,144000];
+  const source=withImpulses(200000,positions);
+  // A module that removed the markers entirely: validating them against the source said
+  // nothing about whether a marker measurement taken here means anything.
+  const stripped=withImpulses(200000,[]);
+  const survived=measureMarkerSurvival(source,source);
+  assert.deepEqual(survived.map(item=>item.retention),[1,1]);
+  const removed=measureMarkerSurvival(source,stripped);
+  assert.equal(removed.length,2);
+  assert.ok(removed.every(item=>item.retention<0.1),`a destroyed marker must show near-zero retention, got ${JSON.stringify(removed.map(item=>item.retention))}`);
+});
+
+test("marker survival reports partial attenuation rather than a pass or fail",()=>{
+  const source=withImpulses(200000,[48000],{amplitude:20000});
+  const attenuated=withImpulses(200000,[48000],{amplitude:6000});
+  const [marker]=measureMarkerSurvival(source,attenuated);
+  assert.ok(marker.retention>0.25&&marker.retention<0.35,`expected roughly 0.3 retention, got ${marker.retention}`);
 });

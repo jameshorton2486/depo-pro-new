@@ -170,9 +170,15 @@ export function measureGlobalAlignment(sourceSamples, derivativeSamples, { maxLa
 }
 
 /**
- * Alignment sampled at chosen positions rather than at markers. Distinguishes a step (lag
- * changes once, e.g. at a chunk boundary) from progressive drift (lag grows with position),
- * which have very different severities.
+ * Alignment sampled at chosen positions rather than at markers, to separate a step from
+ * progressive drift.
+ *
+ * RECORDED WITH A CAVEAT: on stationary content this is not informative, and the control
+ * proves it. Voice De-noise is aligned by both other methods -- whole-file correlation 0,
+ * marker offsets 0 to 15 frames at uniform 8.5+ prominence, markers 84-93% retained -- yet
+ * this sweep returned -8018, -8019, -8019, 6380, 0, 6382 on the same render. Away from a
+ * landmark there is only room tone and quasi-periodic hum, which correlates ambiguously at
+ * many lags. Read it as corroboration when it agrees, never as evidence when it does not.
  */
 /**
  * Whole-file alignment, measured at two search widths and only trusted when they agree.
@@ -202,6 +208,53 @@ export function measureStableGlobalAlignment(sourceSamples, derivativeSamples, {
     indeterminate: !stable,
     note: stable ? null : `Whole-file correlation returned different offsets at different search widths (${measurements.map(item => `${item.offsetFrames} at +/-${item.maxLag}`).join(", ")}). The relationship between input and output is not a time shift, so no offset is being measured.`,
   };
+}
+
+/**
+ * Does the landmark survive the module?
+ *
+ * Validating a marker style against the fixture is necessary and not sufficient. Burst
+ * markers self-correlate at 8.48-8.52 prominence in the source, but a 3.3 kHz burst is
+ * exactly the kind of thing De-reverb might smear or a de-noiser might attenuate as
+ * non-speech. If the marker is gone from the output, a marker-based alignment measurement is
+ * measuring nothing regardless of how clean it looked going in.
+ *
+ * Retention is the derivative's local peak over the source's, per marker. It is recorded
+ * rather than thresholded, because what counts as "survived" depends on the module -- but a
+ * marker measurement taken where retention is near zero should not be believed.
+ *
+ * Measured, and it closes the causal chain behind every alignment failure seen so far.
+ * Retention predicts prominence predicts whether the offset means anything:
+ *
+ *   De-click       retention 1, 1, 1, 0.138, 0.132   prominence 8.48, 8.50, 8.46, 4.02, 3.71
+ *   De-reverb      retention 1, 1, 1, 0.111, 0.110   prominence 8.48, 8.50, 8.46, 3.69, 3.04
+ *   Voice De-noise retention 0.93, 0.85, 0.84, 0.84, 0.84   prominence 8.50 - 8.56 throughout
+ *
+ * The markers that survive give offset 0 at high prominence. The markers reduced to ~12% give
+ * noise. And retention is exactly 1.0 for the three markers inside the first ten-second chunk
+ * and ~0.12 for the two after it -- under reset=first_block the plug-in starts each render
+ * fresh, so early content passes through lightly processed while later content does not.
+ *
+ * That makes chunk non-invariance and marker-based alignment failure one phenomenon with two
+ * symptoms, not two findings: the same cross-chunk state that changes the output with block
+ * size is what destroys the landmarks later in the file. Burst markers did NOT rescue these
+ * two modules -- the instrument is unimproved for them past the first chunk, which is why
+ * whole-file correlation is what alignment gates on.
+ */
+export function measureMarkerSurvival(sourceSamples, derivativeSamples, { window = 2048 } = {}) {
+  return findTransients(sourceSamples).map(frame => {
+    const from = Math.max(0, frame - window), to = Math.min(sourceSamples.length, frame + window);
+    let sourcePeak = 0, derivativePeak = 0;
+    for (let index = from; index < to; index += 1) {
+      const source = Math.abs(sourceSamples[index]);
+      if (source > sourcePeak) sourcePeak = source;
+      if (index < derivativeSamples.length) {
+        const derivative = Math.abs(derivativeSamples[index]);
+        if (derivative > derivativePeak) derivativePeak = derivative;
+      }
+    }
+    return { sourceFrame:frame, sourcePeak, derivativePeak, retention: sourcePeak ? Number((derivativePeak / sourcePeak).toFixed(3)) : null };
+  });
 }
 
 export function measureAlignmentAtPositions(sourceSamples, derivativeSamples, positionsSeconds, { sampleRate = 48_000, window = 4096, search = ALIGNMENT_SEARCH_FRAMES } = {}) {
@@ -332,7 +385,18 @@ export async function qualifyProfile({ fixturePath, profileIds, workRoot = fs.mk
   // 2048 samples against up to 96001 candidate lags, which is underdetermined -- the global
   // measurement uses every sample in the file.
   const global = measureStableGlobalAlignment(sourceSamples, derivativeSamples);
-  record.results.alignment = { ...alignment, markerAligned:alignment.aligned, global, passed:global.aligned };
+  // Two independent methods, recorded together. Whole-file correlation decides because it
+  // does not depend on a landmark surviving the module; the per-marker and per-position
+  // measurements corroborate it. Agreement between methods is a far stronger record than one
+  // method with better markers, and disagreement is itself worth having on file.
+  //
+  // The position sweep exists to separate a step from drift. Every failing module so far
+  // reads 0 inside the first ten-second chunk and loses the lock later, which tracks exactly
+  // with chunk-one-versus-the-rest under reset=first_block -- plausibly one phenomenon with
+  // two symptoms rather than two findings.
+  const positions = measureAlignmentAtPositions(sourceSamples, derivativeSamples, [5, 15, 25, 50, 150, 290]);
+  const markerSurvival = measureMarkerSurvival(sourceSamples, derivativeSamples);
+  record.results.alignment = { ...alignment, markerAligned:alignment.aligned, markerSurvival, positions, global, passed:global.aligned };
   if (!alignment.markers) record.results.alignment.note = "No transient markers found in the fixture; alignment was not measured.";
 
   for (const [name, result] of Object.entries(record.results)) if (result.passed === false) record.failures.push(name);
