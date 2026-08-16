@@ -21,3 +21,39 @@ test("corrupt normalized evidence rebuilds from raw response without resubmissio
 test("multiple recordings keep independent speaker namespaces and ordered assembly",async t=>{const value=fixture(2);t.after(()=>fs.rmSync(value.root,{recursive:true,force:true}));const first=await runTranscriptionJob(value.root,{depositionId:"DEP-20260814-GATES",uploadId:value.audio[0].uploadId,storageRoot:value.storageRoot,submit:async({keyterms})=>result(keyterms,"First.","request-1",0)}),second=await runTranscriptionJob(value.root,{depositionId:"DEP-20260814-GATES",uploadId:value.audio[1].uploadId,storageRoot:value.storageRoot,submit:async({keyterms})=>result(keyterms,"Second.","request-2",0)});assert.deepEqual(second.workingTranscript.segments.map(item=>item.text),["First.","Second."]);const reconciled=reconcileSpeakerMap(second.workingTranscript,[{sourceJobIdentity:first.job.jobId,deepgramSpeaker:0,speakerIdentity:"witness",transcriptRole:"WITNESS"},{sourceJobIdentity:second.job.jobId,deepgramSpeaker:0,speakerIdentity:"attorney-1",transcriptRole:"QUESTIONING_ATTORNEY"}]);assert.deepEqual(reconciled.segments.map(item=>item.speakerIdentity),["witness","attorney-1"]);assert.equal(reconciled.speakerMap.status,"reconciled")});
 
 test("a persisted interrupted processing state is retried under the same identity",async t=>{const value=fixture();t.after(()=>fs.rmSync(value.root,{recursive:true,force:true}));const terms=authoritativeKeyterms({deepgramArtifact:{wire:["Smith","Aviation"]}}),identity=transcriptionIdentity({audioSha256:value.audio[0].sha256,keytermSetSha256:terms.sha256}).sha256,directory=path.join(value.directory,"deepgram","jobs",identity);fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(path.join(directory,"job.json"),JSON.stringify({jobId:identity,status:"processing",attempts:1,createdAt:new Date().toISOString()}));fs.writeFileSync(path.join(directory,"job.lock"),JSON.stringify({pid:99999999,identity}));let calls=0;const completed=await runTranscriptionJob(value.root,{depositionId:"DEP-20260814-GATES",uploadId:value.audio[0].uploadId,storageRoot:value.storageRoot,submit:async({keyterms})=>{calls++;return result(keyterms)}});assert.equal(completed.job.status,"completed");assert.equal(completed.job.attempts,2);assert.equal(calls,1)});
+
+// The invariant the reproducibility claim rests on, and the one a correction seam would
+// inherit: working.json is a projection of immutable evidence plus stored parameters, so
+// re-deriving its segments must re-apply those parameters rather than discard them.
+//
+// mergeWorking is the only function that derives segments from evidence -- rebuildFromRaw
+// routes through it -- and reconcileDepositionSpeakers is a second writer that stores a
+// parameter rather than deriving anything. That split is what makes the claim hold, and
+// nothing asserted it until now: the existing rebuild test checks evidence integrity and
+// never touches the speaker map.
+test("a rebuild from raw re-applies the stored speaker map to the re-derived segments",async t=>{
+  const value=fixture(); t.after(()=>fs.rmSync(value.root,{recursive:true,force:true}));
+  const first=await runTranscriptionJob(value.root,{depositionId:"DEP-20260814-GATES",uploadId:value.audio[0].uploadId,storageRoot:value.storageRoot,submit:async({keyterms})=>result(keyterms)});
+  const workingFile=path.join(value.directory,"transcript","working.json");
+  const working=JSON.parse(fs.readFileSync(workingFile,"utf8"));
+  const [segment]=working.segments;
+  assert.ok(segment,"the job must have produced at least one segment");
+
+  const reconciled=reconcileSpeakerMap(working,[{sourceJobIdentity:segment.sourceJobIdentity,deepgramSpeaker:segment.deepgramSpeaker,speakerIdentity:"witness",transcriptRole:"WITNESS"}]);
+  fs.writeFileSync(workingFile,JSON.stringify(reconciled));
+  assert.equal(reconciled.segments[0].speakerIdentity,"witness");
+
+  // Corrupting the normalized evidence forces every segment to be re-derived from the raw
+  // response. If the stored map were baked into segments rather than re-applied, the
+  // reconciliation would silently vanish here.
+  fs.writeFileSync(path.join(value.directory,first.job.response.evidencePath),"corrupt");
+  const rebuilt=getTranscriptionJob(value.root,{depositionId:"DEP-20260814-GATES",jobId:first.job.jobId,storageRoot:value.storageRoot});
+  assert.equal(rebuilt.integrity.rebuilt,true,"the rebuild path must have run");
+
+  const after=JSON.parse(fs.readFileSync(workingFile,"utf8"));
+  assert.deepEqual(after.speakerMap.assignments,reconciled.speakerMap.assignments,"the stored parameter must survive re-derivation");
+  assert.equal(after.segments[0].speakerIdentity,"witness","re-derived segments must have the stored map re-applied");
+  assert.equal(after.segments[0].transcriptRole,"WITNESS");
+  assert.ok(after.transcript_hash,"the rewritten transcript must carry a content hash");
+  assert.notEqual(after.transcript_hash,working.transcript_hash,"applying a speaker map changes the transcript content hash");
+});
