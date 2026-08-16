@@ -174,6 +174,36 @@ export function measureGlobalAlignment(sourceSamples, derivativeSamples, { maxLa
  * changes once, e.g. at a chunk boundary) from progressive drift (lag grows with position),
  * which have very different severities.
  */
+/**
+ * Whole-file alignment, measured at two search widths and only trusted when they agree.
+ *
+ * This is the alignment test to gate on, and the stability check is the point of it.
+ *
+ * A cross-correlation argmax always returns a number. For a module that merely filters --
+ * De-hum, Voice De-noise -- input and output really are related by a time shift, and every
+ * estimator agrees: De-hum returns 0 at both +/-8192 and +/-48000, on two different fixtures,
+ * coarse and refined. For a module that reshapes the waveform -- De-click removing
+ * transients, De-reverb removing tails -- there is no true lag to find, and the estimate
+ * moves with whatever range you searched: De-click gave -90 at +/-8192 and +31931 at
+ * +/-48000; De-reverb gave 6506 and 9727.
+ *
+ * Disagreement between search widths is therefore the signal that the question has no
+ * answer for this module, and it must be reported as indeterminate rather than as a shift.
+ * Neither number is a latency.
+ */
+export function measureStableGlobalAlignment(sourceSamples, derivativeSamples, { searches = [ALIGNMENT_SEARCH_FRAMES, 48_000], decimation = 64 } = {}) {
+  const measurements = searches.map(maxLag => measureGlobalAlignment(sourceSamples, derivativeSamples, { maxLag, decimation }));
+  const distinct = [...new Set(measurements.map(item => item.offsetFrames))];
+  const stable = distinct.length === 1;
+  return {
+    measurements, stable,
+    offsetFrames: stable ? distinct[0] : null,
+    aligned: stable && distinct[0] === 0,
+    indeterminate: !stable,
+    note: stable ? null : `Whole-file correlation returned different offsets at different search widths (${measurements.map(item => `${item.offsetFrames} at +/-${item.maxLag}`).join(", ")}). The relationship between input and output is not a time shift, so no offset is being measured.`,
+  };
+}
+
 export function measureAlignmentAtPositions(sourceSamples, derivativeSamples, positionsSeconds, { sampleRate = 48_000, window = 4096, search = ALIGNMENT_SEARCH_FRAMES } = {}) {
   return positionsSeconds
     .map(seconds => ({ seconds, centre:Math.round(seconds * sampleRate) }))
@@ -298,7 +328,11 @@ export async function qualifyProfile({ fixturePath, profileIds, workRoot = fs.mk
   const sourceSamples = await decodeMonoPcm(fixturePath);
   const derivativeSamples = await decodeMonoPcm(first.derivativePath);
   const alignment = measureAlignment(sourceSamples, derivativeSamples);
-  record.results.alignment = { ...alignment, passed:alignment.aligned };
+  // Whole-file correlation decides; per-marker measurement corroborates. The markers use
+  // 2048 samples against up to 96001 candidate lags, which is underdetermined -- the global
+  // measurement uses every sample in the file.
+  const global = measureStableGlobalAlignment(sourceSamples, derivativeSamples);
+  record.results.alignment = { ...alignment, markerAligned:alignment.aligned, global, passed:global.aligned };
   if (!alignment.markers) record.results.alignment.note = "No transient markers found in the fixture; alignment was not measured.";
 
   for (const [name, result] of Object.entries(record.results)) if (result.passed === false) record.failures.push(name);
