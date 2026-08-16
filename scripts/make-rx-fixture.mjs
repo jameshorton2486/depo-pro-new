@@ -45,7 +45,12 @@ function seededNoise(seed) {
   };
 }
 
-export function buildFixtureSamples() {
+// 20ms at 3.3 kHz: long enough to localise, short enough to be a landmark, and well clear
+// of the hum harmonics and speech-band fundamentals so it stays distinctive.
+const BURST_SECONDS = 0.020;
+const BURST_FREQUENCY_HZ = 3300;
+
+export function buildFixtureSamples(markerStyle = "impulse") {
   const samples = new Float64Array(TOTAL_FRAMES);
   const noise = seededNoise(0x5eed1234);
 
@@ -86,9 +91,27 @@ export function buildFixtureSamples() {
     samples[frame] = value;
   }
 
-  // Impulse markers last, written over whatever is beneath them so each is unambiguously
-  // the local peak. Full-scale and one sample wide.
-  for (const frame of MARKER_FRAMES) samples[frame] = 0.98;
+  // Markers last, written over whatever is beneath them so each is unambiguously the local
+  // peak.
+  //
+  // Two styles, because the choice is not cosmetic. A one-sample full-scale impulse IS a
+  // click, so De-click removes it by design -- measuring a de-clicker with impulse markers
+  // destroys the landmarks and the correlation then reports noise. A short tone burst is
+  // localised in time but is not an impulse, so it survives de-clicking and still gives the
+  // correlator something distinctive to lock onto.
+  if (markerStyle === "burst") {
+    const length = Math.round(SAMPLE_RATE * BURST_SECONDS);
+    for (const frame of MARKER_FRAMES) {
+      for (let offset = 0; offset < length && frame + offset < TOTAL_FRAMES; offset += 1) {
+        // Raised-cosine envelope, so the burst has no step discontinuity at either edge --
+        // a hard edge would itself read as a click.
+        const envelope = 0.5 - 0.5 * Math.cos(2 * Math.PI * offset / length);
+        samples[frame + offset] = 0.9 * envelope * Math.sin(2 * Math.PI * BURST_FREQUENCY_HZ * offset / SAMPLE_RATE);
+      }
+    }
+  } else {
+    for (const frame of MARKER_FRAMES) samples[frame] = 0.98;
+  }
 
   return samples;
 }
@@ -129,13 +152,14 @@ function writeWav(file, samples, bitDepth) {
 }
 
 const outputDirectory = process.argv[2] ?? path.join(process.env.TEMP ?? "/tmp", "depo-rx-fixture");
-const samples = buildFixtureSamples();
+const markerStyle = process.argv[3] === "burst" ? "burst" : "impulse";
+const samples = buildFixtureSamples(markerStyle);
 // 24-bit is the primary: it exercises the M-6 native-WAV path, where the source depth
 // exceeds the canonical 16-bit derivative and precisionReduced must fire.
 const wide = writeWav(path.join(outputDirectory, "qualification-fixture-24bit.wav"), samples, 24);
 const narrow = writeWav(path.join(outputDirectory, "qualification-fixture-16bit.wav"), samples, 16);
 console.log(JSON.stringify({
   sampleRate:SAMPLE_RATE, durationSeconds:DURATION_SECONDS, frames:TOTAL_FRAMES,
-  chunksAtTenSeconds:Math.ceil(DURATION_SECONDS / 10), markerFrames:MARKER_FRAMES,
+  chunksAtTenSeconds:Math.ceil(DURATION_SECONDS / 10), markerStyle, markerFrames:MARKER_FRAMES,
   files:{ "24bit":wide, "16bit":narrow },
 }, null, 2));
