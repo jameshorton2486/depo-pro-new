@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import IntakeScreen, { type IntakeDraft } from "./IntakeScreen";
 import AdminSettings from "./AdminSettings";
 import TranscriptCreationScreen from "./TranscriptCreationScreen";
+import InsertionPagesScreen from "./InsertionPagesScreen";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
 import { formatDisplayDate } from "./date-format.mjs";
@@ -38,7 +39,7 @@ const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
 const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
-type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin";
+type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin"|"insertion-pages";
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
 function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
@@ -75,6 +76,7 @@ export default function Home() {
   const [showIntake, setShowIntake] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAudioTools, setShowAudioTools] = useState(false);
+  const [showInsertionPages, setShowInsertionPages] = useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -97,14 +99,14 @@ export default function Home() {
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
-      setShowAudioTools(resumeSession.view==="audio-tools");
+      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");
       try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showIntake,showModal]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showInsertionPages,showIntake,showModal]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -194,7 +196,8 @@ export default function Home() {
     return <IntakeScreen onCancel={() => setShowIntake(false)} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />;
   }
   if (active) {
-    return <TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} />;
+    if (showInsertionPages) return <InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />;
+    return <TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} />;
   }
 
   return (
