@@ -204,6 +204,12 @@ export async function createRxDerivative(root, audit, {
   // A chain's total latency is NOT the sum of its parts as far as this code is concerned,
   // because that sum has never been measured. Two latency-declaring profiles in one chain
   // fails closed rather than compensating by an assumed figure.
+  //
+  // This guard is currently UNREACHABLE and is deliberately kept. Only two profiles declare
+  // latency today -- Dialogue Isolate and Repair Assistant -- and Repair Assistant has
+  // chainOrder null, so resolveAudioToolChain rejects any chain containing it before this
+  // line runs. It becomes live the moment a third profile is measured with latency, or
+  // Repair Assistant becomes chainable. Do not delete it as dead code.
   const latencyProfiles = profiles.filter(item => Number.isFinite(item.measuredLatencyFrames) && item.measuredLatencyFrames > 0);
   if (latencyProfiles.length > 1) throw new RxProcessingError("Chained profiles each declare processing latency, and the chain's combined latency has not been measured.", "RX_CHAIN_LATENCY_UNMEASURED", { profileIds:latencyProfiles.map(item => item.id) });
   const latencyFrames = latencyProfiles[0]?.measuredLatencyFrames ?? 0;
