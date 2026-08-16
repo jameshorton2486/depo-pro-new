@@ -6,7 +6,7 @@ import type { AudioProfile } from "./IntakeScreen";
 
 const API = "http://127.0.0.1:4317";
 type Audit = AudioProfile;
-type Tool={id:string;version:string;engine:string;displayName:string;plainPurpose:string;riskLevel:"low"|"moderate"|"high";asrSafe:boolean;chainOrder:number|null;recommendFor:string[];excludes:string[];caution:string|null};
+type Tool={id:string;version:string;engine:string;displayName:string;plainPurpose:string;riskLevel:"low"|"moderate"|"high";asrSafe:boolean;chainOrder:number|null;recommendFor:string[];excludes:string[];caution:string|null;measuredRealTimeFactor:number|null};
 type MeasurementDelta = {id:string;label:string;unit:string;before:number|null;after:number|null;status:"resolved"|"improved"|"unchanged"|"worsened"|"concealed"|"unavailable";note?:string};
 type Derivative = { operationId: string; kind:string; profileId:string; profileIds?:string[]; sha256: string; sampleAligned: boolean; timelinePreserved:boolean; timelinePolicy:string; manufacturer?: string; product?: string; toolVersion?: string; module?: string; outputEncoding:{container:string;lossless:boolean}; measurementDelta:MeasurementDelta[] };
 type PickerWindow = Window & {
@@ -130,6 +130,7 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
         {audit&&<section className="audio-original-summary"><h2>Original recording</h2><strong>Original recording — preserved and never modified.</strong><dl><dt>File</dt><dd>{audit.originalName}</dd><dt>Duration</dt><dd>{audit.media?.durationSeconds?.toFixed(1)??"—"} seconds</dd><dt>Format</dt><dd>{audit.media?.codec??"—"}</dd><dt>Sample rate</dt><dd>{audit.media?.sampleRate?.toLocaleString()??"—"} Hz</dd><dt>Channels</dt><dd>{audit.media?.channels??"—"}</dd><dt>Size</dt><dd>{audit.storage.original.bytes.toLocaleString()} bytes</dd><dt>SHA-256</dt><dd>{audit.storage.original.sha256?"Verified":"Pending"}</dd></dl><p>Findings: {activeFindings.length?activeFindings.join(", "):"No validated concern detected."}</p></section>}
         <section className="audio-tool-menu"><h2>Recommended for this recording</h2>{recommended.length?<div className="audio-tool-grid">{recommended.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileIds.includes(tool.id)} onSelect={()=>toggleTool(tool)} trigger={tool.recommendFor.filter(code=>activeFindings.includes(code)).join(", ")}/>)}</div>:<p>No tool is automatically recommended. The original remains the default.</p>}<h2>Other tools</h2><div className="audio-tool-grid">{others.map(tool=><ToolButton key={tool.id} tool={tool} selected={profileIds.includes(tool.id)} onSelect={()=>toggleTool(tool)}/>)}</div>{selectedTools.length>0&&<p className="audio-tool-order">Execution order: {selectedTools.map(tool=>tool.displayName).join(" → ")}.</p>}</section>
         <div className="audio-tools-file"><strong>{file ? `${file.name} · ${file.size.toLocaleString()} bytes` : "No audio file selected"}</strong><span>{derivative&&file ? `Processed copy: ${outputName(file.name)} · SHA-256 verified` : file ? "No processed copy has been created yet." : "Select WAV, MP3, M4A, FLAC, OGG, AAC, or WMA."}</span></div>
+        <RenderEstimate tools={selectedTools} />
         <div className="audio-tools-actions"><button className="primary-button" disabled={!file || !profileIds.length || busy} onClick={processAudio}>{busy && !derivative ? "Processing…" : `Process with ${profileIds.length} tool${profileIds.length===1?"":"s"}`}</button><button className="audio-save-button" disabled={!derivative || busy} onClick={saveAudio}>Save processed audio</button>{derivative?.kind==="rx-review"&&<button className="secondary-button" disabled={busy} onClick={promoteForTranscription}>Promote for transcription</button>}</div>
         <p className="audio-tools-message" role="status">{message}</p>
         {processedFile&&<p className="audio-tools-replacement"><strong>Ready to replace intake audio:</strong> {processedSource?.name} → {processedFile.name}</p>}
@@ -139,4 +140,28 @@ export default function AudioToolsScreen({ onBack, initialFiles = [], onFilesCha
   </main>;
 }
 
-function ToolButton({tool,selected,onSelect,trigger}:{tool:Tool;selected:boolean;onSelect:()=>void;trigger?:string}){return <button type="button" className={`audio-tool-button ${selected?"selected":""}`} onClick={onSelect}><span><strong>{tool.displayName}</strong><em>{tool.riskLevel} risk</em></span><p>{tool.plainPurpose}</p>{trigger&&<small>Recommended for: {trigger}</small>}{tool.caution&&<small>{tool.caution}</small>}</button>}
+// Render time, expressed per hour of audio because a deposition's length is what an operator
+// actually has in mind. Dialogue Isolate and Repair Assistant run at roughly 0.19x real time,
+// so a six-hour recording is about seventy minutes of processing -- worth knowing before
+// starting, not after.
+function renderMinutesPerHour(factor:number){return factor*60}
+function formatRenderRate(factor:number){const minutes=renderMinutesPerHour(factor);return minutes<1?"under a minute per hour of audio":`about ${minutes<10?minutes.toFixed(1):Math.round(minutes)} min per hour of audio`}
+export function chainRenderEstimate(tools:{measuredRealTimeFactor:number|null}[]){
+  const measured=tools.filter(tool=>typeof tool.measuredRealTimeFactor==="number");
+  // Absent is "not measured", never "free". Saying so is the point: an unmeasured module in
+  // the chain means the total is a floor, not an estimate.
+  return {factor:measured.reduce((total,tool)=>total+(tool.measuredRealTimeFactor as number),0),measuredCount:measured.length,unmeasuredCount:tools.length-measured.length};
+}
+
+function ToolButton({tool,selected,onSelect,trigger}:{tool:Tool;selected:boolean;onSelect:()=>void;trigger?:string}){return <button type="button" className={`audio-tool-button ${selected?"selected":""}`} onClick={onSelect}><span><strong>{tool.displayName}</strong><em>{tool.riskLevel} risk</em></span><p>{tool.plainPurpose}</p><small className="audio-tool-rate">{typeof tool.measuredRealTimeFactor==="number"?`Renders ${formatRenderRate(tool.measuredRealTimeFactor)}`:"Render time not measured"}</small>{trigger&&<small>Recommended for: {trigger}</small>}{tool.caution&&<small>{tool.caution}</small>}</button>}
+
+function RenderEstimate({tools}:{tools:Tool[]}){
+  if(!tools.length)return null;
+  const {factor,unmeasuredCount}=chainRenderEstimate(tools);
+  const sixHourMinutes=Math.round(factor*6*60);
+  return <p className="audio-tools-estimate">
+    <strong>Estimated render time</strong>{" "}
+    {factor>0?<>{formatRenderRate(factor)} — about {sixHourMinutes} min for a six-hour deposition.</>:<>not measured for the selected tools.</>}
+    {unmeasuredCount>0&&factor>0&&<> {unmeasuredCount} selected tool{unmeasuredCount===1?" has":"s have"} no measured render time, so the total is a minimum.</>}
+  </p>;
+}
