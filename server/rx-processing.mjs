@@ -156,7 +156,9 @@ export async function createRxDerivative(root, audit, {
   pythonExecutable = DEFAULT_PYTHON,
   workerPath = DEFAULT_WORKER,
   pluginPath,
-  chunkSeconds = DEFAULT_CHUNK_SECONDS,
+  // Null means "take it from the profile". An explicit value overrides the pin, which is
+  // what the qualification runner needs in order to measure chunk invariance at all.
+  chunkSeconds = null,
   runWorker = runProcess,
   runDecoder = runProcess,
   runEncoder = runProcess,
@@ -186,6 +188,13 @@ export async function createRxDerivative(root, audit, {
   // Pedalboard host, and requiring the RX editor for it would be the reason a second
   // ffmpeg renderer existed in the first place.
   if (rxProfiles.length && (!rx.available || !rx.executable)) throw new Error(rx.fallback || "iZotope RX 12 is unavailable.");
+  // A profile whose output depends on the render chunk size pins it, making it part of that
+  // profile's identity rather than an implementation detail. Two pinned profiles in one
+  // chain that disagree cannot both be honoured, so that fails closed rather than silently
+  // rendering under one of them.
+  const pinnedChunkSeconds = [...new Set(profiles.map(item => item.renderChunkSeconds).filter(Number.isFinite))];
+  if (pinnedChunkSeconds.length > 1) throw new RxProcessingError("Chained profiles pin different render chunk sizes.", "RX_CHUNK_SIZE_CONFLICT", { pinnedChunkSeconds });
+  const effectiveChunkSeconds = chunkSeconds ?? pinnedChunkSeconds[0] ?? DEFAULT_CHUNK_SECONDS;
   for (const required of [pythonExecutable,workerPath,...resolvedPluginPaths]) if (!fs.existsSync(required)) throw new Error(`RX processing dependency is unavailable: ${path.basename(required)}`);
   const chainId=profiles.map(item=>item.id).join("+");
   const directory = path.dirname(path.resolve(originalPath));
@@ -241,7 +250,7 @@ export async function createRxDerivative(root, audit, {
     const sourceBitDepth = uploadedSourceMedia.bitDepth ?? null;
     const precisionReduced = Number.isFinite(sourceBitDepth) && sourceBitDepth > CANONICAL_ASR_PCM_BITS;
     fs.writeFileSync(profilePath, JSON.stringify(profiles), { flag: "wx" });
-    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath, "--chunk-seconds", String(chunkSeconds)]);
+    await runWorker(pythonExecutable, [workerPath, "--input", workerInputPath, "--output", temporaryPath,...resolvedPluginPaths.flatMap(value=>["--plugin",value]), "--profile", profilePath, "--result", resultPath, "--chunk-seconds", String(effectiveChunkSeconds)]);
     if (!fs.existsSync(temporaryPath)) throw new Error("RX worker reported success without producing output.");
     if (!fs.existsSync(resultPath)) throw new Error("RX worker reported success without a result record.");
     let worker;

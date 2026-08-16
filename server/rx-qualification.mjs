@@ -26,6 +26,15 @@ const TRANSIENT_SEPARATION_FRAMES = 2048;
 // How far either side of a source transient to look for its counterpart. Wide enough to
 // catch a plug-in's reported latency, narrow enough not to lock onto a neighbouring marker.
 const ALIGNMENT_SEARCH_FRAMES = 8192;
+// A correlation peak must stand at least this many standard deviations above the rest of the
+// search range before its lag is treated as a measurement rather than an argmax over noise.
+const MINIMUM_PROMINENCE = 6;
+// Correlation window each side of a marker. Widening this to 4096 was tried on the
+// hypothesis that more material would sharpen the peak. It did not: on real De-hum output
+// every offset stayed exactly 0 while prominence FELL from 4.7-8.65 to 4.19-5.28, and on
+// tonal synthetic signals it broke a known 512-frame shift into 6233. Kept at 1024 because
+// the evidence did not support changing it.
+const ALIGNMENT_WINDOW_FRAMES = 1024;
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -77,7 +86,7 @@ export function findTransients(samples, { threshold = TRANSIENT_THRESHOLD, separ
 // material survive, so the window still correlates even when the marker does not.
 function bestLag(sourceSamples, derivativeSamples, centre, { window = 1024, search = ALIGNMENT_SEARCH_FRAMES } = {}) {
   const from = Math.max(0, centre - window), to = Math.min(sourceSamples.length, centre + window);
-  let bestScore = -Infinity, best = 0;
+  let bestScore = -Infinity, best = 0; const scores = [];
   for (let lag = -search; lag <= search; lag += 1) {
     let dot = 0;
     for (let index = from; index < to; index += 1) {
@@ -91,9 +100,85 @@ function bestLag(sourceSamples, derivativeSamples, centre, { window = 1024, sear
     // energy term is largest exactly where the answer is right and normalising suppresses
     // it. Measured directly -- normalised scoring returned 3418 and -7841 on signals shifted
     // by a known 512 frames, while the plain dot product returned 512 in both.
+    scores.push(dot);
+    if (dot > bestScore) { bestScore = dot; best = lag; }
+  }
+  // How far the winning lag stands above the rest, in standard deviations.
+  //
+  // An argmax always returns something. When a module has altered the audio enough that no
+  // lag matches well, the correlation surface is flat and the winner is essentially noise --
+  // which is how De-click produced 0 at 5s, +7932 at 15s and -6469 at 50s on the same file,
+  // three answers that cannot all describe one time shift. Reporting the number without this
+  // is how a measurement turns into a confident fiction.
+  const mean = scores.reduce((total, value) => total + value, 0) / scores.length;
+  const variance = scores.reduce((total, value) => total + (value - mean) ** 2, 0) / scores.length;
+  const deviation = Math.sqrt(variance);
+  return { lag:best, prominence: deviation > 0 ? (bestScore - mean) / deviation : 0 };
+}
+
+function bestLagRange(sourceSamples, derivativeSamples, from, to, lagFrom, lagTo) {
+  let bestScore = -Infinity, best = lagFrom;
+  for (let lag = lagFrom; lag <= lagTo; lag += 1) {
+    let dot = 0;
+    for (let index = from; index < to; index += 1) {
+      const shifted = index + lag;
+      if (shifted < 0 || shifted >= derivativeSamples.length) continue;
+      dot += sourceSamples[index] * derivativeSamples[shifted];
+    }
     if (dot > bestScore) { bestScore = dot; best = lag; }
   }
   return best;
+}
+
+// Mean-removed amplitude envelope. The mean matters: an envelope is all-positive, so
+// without removing it every lag scores highly and the correlation peak is flat.
+function envelope(samples, factor) {
+  const length = Math.floor(samples.length / factor);
+  const out = new Float64Array(length);
+  let total = 0;
+  for (let index = 0; index < length; index += 1) {
+    let sum = 0;
+    for (let step = 0; step < factor; step += 1) sum += Math.abs(samples[index * factor + step]);
+    out[index] = sum / factor;
+    total += out[index];
+  }
+  const mean = length ? total / length : 0;
+  for (let index = 0; index < length; index += 1) out[index] -= mean;
+  return out;
+}
+
+/**
+ * Marker-free bulk alignment: correlates the whole file, coarsely on a decimated envelope
+ * and then refined at full rate.
+ *
+ * This exists because measuring a module with landmarks it is designed to destroy is
+ * circular. De-click removes isolated impulses, so per-marker alignment on its output says
+ * as much about the fixture as the plug-in. A whole-file correlation answers the question
+ * that actually matters -- is the audio bulk-shifted in time -- without depending on any
+ * single landmark surviving.
+ */
+export function measureGlobalAlignment(sourceSamples, derivativeSamples, { maxLag = ALIGNMENT_SEARCH_FRAMES, decimation = 64 } = {}) {
+  const coarseSource = envelope(sourceSamples, decimation), coarseDerivative = envelope(derivativeSamples, decimation);
+  const coarseLimit = Math.ceil(maxLag / decimation);
+  const coarse = bestLagRange(coarseSource, coarseDerivative, 0, coarseSource.length, -coarseLimit, coarseLimit) * decimation;
+  const centre = Math.floor(sourceSamples.length / 2);
+  const half = Math.min(1 << 17, Math.floor(sourceSamples.length / 4));
+  const refined = half > 0
+    ? bestLagRange(sourceSamples, derivativeSamples, centre - half, centre + half, coarse - decimation * 2, coarse + decimation * 2)
+    : coarse;
+  return { coarseOffsetFrames:coarse, offsetFrames:refined, aligned:refined === 0, decimation, maxLag };
+}
+
+/**
+ * Alignment sampled at chosen positions rather than at markers. Distinguishes a step (lag
+ * changes once, e.g. at a chunk boundary) from progressive drift (lag grows with position),
+ * which have very different severities.
+ */
+export function measureAlignmentAtPositions(sourceSamples, derivativeSamples, positionsSeconds, { sampleRate = 48_000, window = 4096, search = ALIGNMENT_SEARCH_FRAMES } = {}) {
+  return positionsSeconds
+    .map(seconds => ({ seconds, centre:Math.round(seconds * sampleRate) }))
+    .filter(item => item.centre < sourceSamples.length)
+    .map(item => { const { lag, prominence } = bestLag(sourceSamples, derivativeSamples, item.centre, { window, search }); return { atSeconds:item.seconds, offsetFrames:lag, prominence:Number(prominence.toFixed(2)), distinctive:prominence >= MINIMUM_PROMINENCE }; });
 }
 
 // For each marker in the source, reports the signed frame offset at which the surrounding
@@ -103,8 +188,8 @@ function bestLag(sourceSamples, derivativeSamples, centre, { window = 1024, sear
 export function measureAlignment(sourceSamples, derivativeSamples, { search = ALIGNMENT_SEARCH_FRAMES } = {}) {
   const markers = findTransients(sourceSamples);
   const offsets = markers.map(frame => {
-    const lag = bestLag(sourceSamples, derivativeSamples, frame, { search });
-    return { sourceFrame:frame, derivativeFrame:frame + lag, offsetFrames:lag };
+    const { lag, prominence } = bestLag(sourceSamples, derivativeSamples, frame, { search, window:ALIGNMENT_WINDOW_FRAMES });
+    return { sourceFrame:frame, derivativeFrame:frame + lag, offsetFrames:lag, prominence:Number(prominence.toFixed(2)), distinctive:prominence >= MINIMUM_PROMINENCE };
   });
   const values = offsets.map(item => item.offsetFrames);
   const distinct = [...new Set(values)];
@@ -113,6 +198,20 @@ export function measureAlignment(sourceSamples, derivativeSamples, { search = AL
     offsets,
     maxAbsoluteOffsetFrames: values.length ? Math.max(...values.map(Math.abs)) : null,
     constantOffset: distinct.length === 1 ? distinct[0] : null,
+    // Three states, not two.
+    //
+    // `indeterminate` is disagreement between markers. One time shift is one number, so five
+    // markers reporting different lags is not a measurement of anything -- it means the
+    // correlation could not resolve a lag, which must not be recorded as a shift in either
+    // direction. De-click produced [0, 0, 0, -6469, -6468]; the two outliers also carried
+    // the lowest prominence of any measurement taken.
+    //
+    // Gating on `prominence` directly was tried and abandoned: it is reported because it
+    // ranked those outliers correctly, but it is not calibrated well enough to threshold on.
+    // Widening the correlation window from 1024 to 4096 frames LOWERED it (De-hum 4.7-8.65
+    // became 4.19-5.28) while every De-hum offset stayed exactly 0. Agreement across five
+    // independent markers is the robust signal; peak sharpness is a diagnostic.
+    indeterminate: values.length > 0 && distinct.length > 1,
     aligned: values.length > 0 && values.every(value => value === 0),
   };
 }
