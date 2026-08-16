@@ -1,15 +1,41 @@
+# Every text file gets an explicit eol. Nothing is left to `* text=auto`.
+#
+# The fallback is not harmless. `* text=auto` combined with core.autocrlf=true writes CRLF
+# into the working tree on a Windows clone, and the template-integrity manifest hashes are
+# byte-exact -- that is how Slice 1B shipped a repository whose own tests failed on a fresh
+# checkout while every established working tree passed. The same gap has since been found
+# three more times, on .tmpl, on .yml, and on .css.
+#
+# So: adding a new text file type means adding it here in the same commit. An unpinned
+# extension is a latent version of that bug, not a tidiness issue.
+
 * text=auto
-*.mjs text eol=lf
-*.ts text eol=lf
-*.tsx text eol=lf
-*.json text eol=lf
-*.md text eol=lf
-*.py text eol=lf
-*.tmpl text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
-*.ps1 text eol=crlf
-*.png binary
-*.pdf binary
-*.wav binary
-*.flac binary
+
+# Source
+*.mjs   text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.py    text eol=lf
+*.css   text eol=lf
+*.svg   text eol=lf
+
+# Data, config and documentation
+*.json  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Reviewed insertion-page templates. Byte-exact: their SHA-256 is the integrity check.
+*.tmpl  text eol=lf
+
+# PowerShell is run by Windows tooling that expects CRLF.
+*.ps1   text eol=crlf
+
+# Binary
+*.png   binary
+*.pdf   binary
+*.wav   binary
+*.flac  binary
