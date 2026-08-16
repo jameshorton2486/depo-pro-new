@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTransients, measureAlignment } from "../server/rx-qualification.mjs";
+import { findTransients, measureAlignment, measureStableGlobalAlignment } from "../server/rx-qualification.mjs";
 
 // Synthetic signals, so the detection maths is covered without the audio fixture. The gated
 // suite in rx-qualification.integration.test.mjs exercises the same functions against real
@@ -59,4 +59,52 @@ test("alignment on a silent fixture reports no markers rather than a false pass"
   assert.equal(result.markers,0);
   assert.equal(result.aligned,false,"no markers must not read as aligned");
   assert.equal(result.maxAbsoluteOffsetFrames,null);
+});
+
+// The global correlator finds its coarse estimate on a decimated amplitude ENVELOPE, so the
+// signal must have envelope structure for it to work -- real room tone, table noise and
+// speech all do. A signal of constant amplitude gives a flat envelope, the coarse stage
+// lands on 0, and the fine refinement window (bounded to +/-2 decimation steps around it)
+// cannot reach a larger true lag.
+function modulated(frames, { shift = 0 } = {}) {
+  let state = 4242;
+  const noise = () => { state ^= state << 13; state >>>= 0; state ^= state >>> 17; state ^= state << 5; state >>>= 0; return (state / 0xffffffff) * 2 - 1; };
+  const base = new Float64Array(frames);
+  for (let index = 0; index < frames; index += 1) {
+    const level = 0.25 + 0.75 * Math.abs(Math.sin(index / 21000));
+    base[index] = level * (noise() * 4000 + Math.sin(index / 17) * 900);
+  }
+  const out = new Int16Array(frames);
+  for (let index = 0; index < frames; index += 1) { const from = index - shift; out[index] = from >= 0 && from < frames ? Math.round(base[from]) : 0; }
+  return out;
+}
+
+test("stable global alignment agrees across search widths for a real shift",()=>{
+  const source=modulated(400000);
+  const shifted=modulated(400000,{shift:512});
+  const same=measureStableGlobalAlignment(source,source,{searches:[8192,20000]});
+  assert.equal(same.stable,true);
+  assert.equal(same.offsetFrames,0);
+  assert.equal(same.aligned,true);
+  const moved=measureStableGlobalAlignment(source,shifted,{searches:[8192,20000]});
+  assert.equal(moved.stable,true);
+  assert.equal(moved.offsetFrames,512);
+  assert.equal(moved.aligned,false,"a real shift is a measurement, not an alignment");
+});
+
+test("an offset that moves with the search width is reported as indeterminate, not as a shift",()=>{
+  // The De-click and De-reverb case. Their whole-file correlation returned -90 at +/-8192
+  // and +31931 at +/-48000, and 6506 versus 9727 respectively. Input and output are not
+  // related by a time shift at all, so neither number is a latency and neither may be
+  // recorded as one.
+  let state=7;
+  const noise=()=>{state^=state<<13;state>>>=0;state^=state>>>17;state^=state<<5;state>>>=0;return Math.round((state/0xffffffff)*2000-1000)};
+  const source=new Int16Array(400000), unrelated=new Int16Array(400000);
+  for(let index=0;index<400000;index+=1){source[index]=noise();unrelated[index]=noise()}
+  const result=measureStableGlobalAlignment(source,unrelated,{searches:[8192,20000]});
+  assert.equal(result.stable,false);
+  assert.equal(result.indeterminate,true);
+  assert.equal(result.offsetFrames,null,"no offset may be reported when the estimate is not stable");
+  assert.equal(result.aligned,false);
+  assert.match(result.note,/not a time shift/);
 });
