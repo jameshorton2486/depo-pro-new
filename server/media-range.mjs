@@ -14,9 +14,19 @@ const BYTES = /^bytes=(\d*)-(\d*)$/;
 //
 // The deposition audio route special-cased .flac and served everything else as
 // application/octet-stream. A .wav therefore reached the Workspace player as an opaque byte
-// stream: the range request succeeded, 206 and all, and the element failed with
-// MEDIA_ERR_SRC_NOT_SUPPORTED and a duration of zero. It reads as "the audio is broken" when
-// the audio is fine and only the label was missing.
+// stream. That was wrong on its own terms and this fix stands.
+//
+// CORRECTION to what commit bbf815c claimed. It reported the player failure as "the file is
+// pcm_s24le and Chrome does not decode 24-bit PCM WAV". That is FALSE and was written down as
+// measured. Chrome decodes the 24-bit source fine -- verified by loading it directly, duration
+// 4994 s. The real cause was the origin gate in local-api.mjs: an <audio> element without a
+// crossorigin attribute issues a no-cors request carrying no Origin header, and the gate 403s
+// it. Neither this content type nor the codec was the blocker.
+//
+// The general lesson, and it cost an entire investigation: MEDIA_ERR_SRC_NOT_SUPPORTED is what
+// Chrome reports for a 403, a 404, a wrong content type AND a genuine codec failure. One
+// symptom, four causes. An error message is evidence about the reporter, not the reported --
+// confirm the request reached the resource before diagnosing the resource.
 const MEDIA_TYPES = Object.freeze({
   ".wav":"audio/wav", ".flac":"audio/flac", ".mp3":"audio/mpeg", ".m4a":"audio/mp4",
   ".aac":"audio/aac", ".ogg":"audio/ogg", ".opus":"audio/ogg", ".wma":"audio/x-ms-wma",

@@ -101,6 +101,12 @@ async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivat
   }
 }
 const server = http.createServer(async (req,res) => {
+  // The gate is correct and stays. It is also non-obvious for media, so: ANY <audio> or <video>
+  // element pointed at this server MUST carry crossOrigin="anonymous". Without it the browser
+  // issues a no-cors request, which sends no Origin header, and this line 403s it -- surfacing
+  // as MEDIA_ERR_SRC_NOT_SUPPORTED, indistinguishable from an unsupported codec. That cost an
+  // investigation once (see the correction in media-range.mjs) and will bite the next media
+  // element someone adds.
   const origin=req.headers.origin || "";
   if (!allowedOrigins.has(origin)) return json(res,403,{error:"Origin not allowed."},"null");
   if (req.method === "OPTIONS") { res.writeHead(204,{"access-control-allow-origin":origin,"access-control-allow-methods":"GET,POST","access-control-allow-headers":"content-type,x-admin-code,x-file-name,range","access-control-expose-headers":"content-range,accept-ranges,content-length"}); return res.end(); }
