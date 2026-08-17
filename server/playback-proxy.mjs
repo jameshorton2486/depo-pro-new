@@ -42,10 +42,40 @@ function run(command, args) {
 }
 
 async function probe(file) {
-  const text = await run("ffprobe", ["-v","error","-show_entries","format=duration:stream=codec_name,sample_rate,channels","-of","json",file]);
+  const text = await run("ffprobe", ["-v","error","-show_entries","format=duration:stream=codec_name,sample_rate,channels,initial_padding,start_time,bits_per_raw_sample:stream_tags=encoder","-of","json",file]);
   const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   const stream = json.streams?.find(item => item.codec_name) ?? {};
-  return { durationSeconds:Number(json.format?.duration ?? 0), codec:stream.codec_name ?? null, sampleRate:Number(stream.sample_rate ?? 0), channels:Number(stream.channels ?? 0) };
+  return {
+    durationSeconds:Number(json.format?.duration ?? 0), codec:stream.codec_name ?? null,
+    sampleRate:Number(stream.sample_rate ?? 0), channels:Number(stream.channels ?? 0),
+    bitsPerRawSample:stream.bits_per_raw_sample ? Number(stream.bits_per_raw_sample) : null,
+    // Opus pre-skip. 312 samples at 48 kHz is 6.5 ms, and it is exactly the duration delta
+    // between source and proxy. Recorded because the correlation measuring zero shift is a
+    // statement about this encoder at this version honouring it -- a bump could change that.
+    initialPaddingSamples:stream.initial_padding !== undefined ? Number(stream.initial_padding) : null,
+    startTimeSeconds:stream.start_time !== undefined ? Number(stream.start_time) : null,
+    encoder:stream.tags?.encoder ?? null,
+  };
+}
+
+/** Reads a file's media properties, for deciding whether a proxy is needed. */
+export async function probeMediaForPlayback(file) { return probe(file); }
+
+/** Browser-decodable? 24-bit PCM is the case this exists for -- Chrome handles 8- and 16-bit. */
+export function needsPlaybackProxy(media) {
+  const codec = String(media?.codec ?? "").toLowerCase();
+  if (!codec) return true;
+  if (codec === "pcm_s24le" || codec === "pcm_s32le" || codec === "pcm_f32le" || codec === "pcm_f64le" || codec === "pcm_s24be") return true;
+  if (codec.startsWith("pcm_") && Number(media?.bitsPerRawSample ?? 16) > 16) return true;
+  return !["pcm_s16le","pcm_u8","pcm_s16be","flac","mp3","aac","opus","vorbis","alac"].includes(codec);
+}
+
+async function encoderVersions() {
+  const ffmpeg = await run("ffmpeg", ["-version"]);
+  const encoders = await run("ffmpeg", ["-hide_banner","-encoders"]);
+  const ffmpegVersion = ffmpeg.trim().split(/\r?\n/)[0] || null;
+  const libopusLine = encoders.split(/\r?\n/).find(line => /\blibopus\b/.test(line))?.trim() ?? null;
+  return { ffmpeg:ffmpegVersion, libopus:libopusLine };
 }
 
 /** Decodes a window to mono 16 kHz float samples, for correlation. */
@@ -137,6 +167,7 @@ export function proxyRenderArgs({ sourceFile, targetFile, channels, profile = PR
 export async function renderPlaybackProxy({ sourceFile, targetFile, sourceSha256, profile = PROXY_PROFILE }) {
   const source = await probe(sourceFile);
   if (!source.channels) throw new Error("The source has no readable audio stream.");
+  const versions = await encoderVersions();
   fs.mkdirSync(path.dirname(targetFile), { recursive:true });
   const args = proxyRenderArgs({ sourceFile, targetFile, channels:source.channels, profile });
   await run("ffmpeg", args);
@@ -144,15 +175,38 @@ export async function renderPlaybackProxy({ sourceFile, targetFile, sourceSha256
   const alignment = await measureProxyAlignment(sourceFile, targetFile);
   return {
     kind:"playback-proxy", key:null, file:targetFile, bytes:fs.statSync(targetFile).size,
-    sourceSha256, tool:"ffmpeg", profileId:profile.id, profileVersion:profile.version,
+    sourceSha256, tool:"ffmpeg", toolVersions:versions, profileId:profile.id, profileVersion:profile.version,
     commandArguments:args.map(item => item === sourceFile ? "SOURCE" : item === targetFile ? "TARGET" : item),
-    media:{ codec:proxy.codec, sampleRate:proxy.sampleRate, channels:proxy.channels, durationSeconds:proxy.durationSeconds },
+    encoder:proxy.encoder,
+    media:{ codec:proxy.codec, sampleRate:proxy.sampleRate, channels:proxy.channels, durationSeconds:proxy.durationSeconds,
+      // 312 samples at 48 kHz is 6.5 ms, and it is exactly the source/proxy duration delta.
+      // Recorded because "shift 0" is a statement about this encoder at this version honouring
+      // its own declared pre-skip; a bump could change that, and the record is what lets someone
+      // re-check rather than re-derive.
+      initialPaddingSamples:proxy.initialPaddingSamples, startTimeSeconds:proxy.startTimeSeconds },
     sourceMedia:source,
     channelsPreserved:proxy.channels === source.channels,
     // A proxy is lossy and its timeline is only as trustworthy as the measurement below says.
     timelinePreserved:alignment.aligned === true,
     selectableForTranscription:false,
     alignment,
+    qualification:{
+      sourceSha256,
+      profile:{ id:profile.id, version:profile.version },
+      tools:versions,
+      sampleRateHz:16000,
+      windowPositionsSeconds:alignment.measurements.map(item => item.atSeconds),
+      guardBandSamples:4,
+      results:alignment.measurements.map(item => ({
+        atSeconds:item.atSeconds,
+        shiftSamples:item.shiftSamples ?? null,
+        shiftMs:item.shiftMs ?? null,
+        guardBandRatio:item.confidence ?? null,
+        indeterminate:item.indeterminate === true,
+        reason:item.reason ?? null,
+      })),
+      passed:alignment.aligned === true,
+    },
     purpose:profile.purpose,
     createdAt:new Date().toISOString(),
   };

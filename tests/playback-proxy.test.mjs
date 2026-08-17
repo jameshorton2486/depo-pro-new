@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { ASR_ELIGIBLE_KINDS, DERIVATIVE_KINDS } from "../server/audio-kinds.mjs";
-import { PROXY_PROFILE, correlate, proxyRenderArgs } from "../server/playback-proxy.mjs";
+import { PROXY_PROFILE, correlate, proxyRenderArgs, renderPlaybackProxy } from "../server/playback-proxy.mjs";
 
 // Speech-like: filtered noise under a slowly varying envelope. Aperiodic, so its
 // autocorrelation has one sharp peak.
@@ -127,4 +130,20 @@ test("silence yields no peak rather than a confident zero",()=>{
   const result = correlate(new Float32Array(24000), new Float32Array(24000));
   assert.equal(result.indeterminate,true);
   assert.equal(result.reason,"NO_CORRELATION_PEAK");
+});
+
+test("the derivative records encoder versions and alignment qualification inputs",async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"depo-playback-proxy-"));
+  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const sourceFile=path.join(directory,"source.wav"),targetFile=path.join(directory,"proxy.ogg");
+  const rate=16000,frames=rate*2,data=Buffer.alloc(frames*2);
+  for(let index=0;index<frames;index++)data.writeInt16LE(Math.round(Math.sin(2*Math.PI*440*index/rate)*8000),index*2);
+  const wav=Buffer.alloc(44+data.length);wav.write("RIFF",0);wav.writeUInt32LE(36+data.length,4);wav.write("WAVEfmt ",8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(rate,24);wav.writeUInt32LE(rate*2,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write("data",36);wav.writeUInt32LE(data.length,40);data.copy(wav,44);fs.writeFileSync(sourceFile,wav);
+  const derivative=await renderPlaybackProxy({sourceFile,targetFile,sourceSha256:"fixture-sha256"});
+  assert.match(derivative.toolVersions.ffmpeg,/^ffmpeg version /);
+  assert.match(derivative.toolVersions.libopus,/libopus/);
+  assert.equal(derivative.qualification.sourceSha256,"fixture-sha256");
+  assert.deepEqual(derivative.qualification.windowPositionsSeconds,[30,300,1200]);
+  assert.equal(derivative.qualification.guardBandSamples,4);
+  assert.deepEqual(derivative.qualification.tools,derivative.toolVersions);
 });

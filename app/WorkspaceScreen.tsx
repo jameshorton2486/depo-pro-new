@@ -32,14 +32,32 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
   // overwrite a fresh one.
   const [reloadToken,setReloadToken] = useState(0);
   const reload = useCallback(()=>setReloadToken(token=>token+1),[]);
+  const [media,setMedia] = useState<{ needsProxy:boolean; proxy:{ alignment?:{ aligned:boolean; message:string } }|null; sourceMedia:{ codec:string } }|null>(null);
+  const [building,setBuilding] = useState(false);
+  const playbackSource = media
+    ? (media.proxy ? `${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}`
+      : media.needsProxy ? null : `${API}/api/depositions/audio?id=${encodeURIComponent(depositionId)}&index=${audioIndex}`)
+    : null;
+  async function buildProxy() {
+    setBuilding(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/depositions/playback`,{ method:"POST", headers:{ "content-type":"application/json" }, body:JSON.stringify({ depositionId, index:audioIndex }) });
+      const payload = await response.json();
+      if(!response.ok) throw new Error(payload.error||"The playback copy could not be prepared.");
+      reload();
+    } catch(e){ setError(e instanceof Error?e.message:"The playback copy could not be prepared."); }
+    finally { setBuilding(false); }
+  }
   useEffect(()=>{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,candidateRes] = await Promise.all([
+        const [renderRes,candidateRes,mediaRes] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
           fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
+          fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
+        if(mediaRes.ok && !cancelled) setMedia(await mediaRes.json());
         const body = await renderRes.json();
         if(cancelled) return;
         if(!renderRes.ok) throw new Error(body.error||"Could not load the transcript.");
@@ -49,7 +67,7 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
     })();
     return ()=>{ cancelled = true; };
-  },[depositionId,examiner,reloadToken]);
+  },[depositionId,examiner,audioIndex,reloadToken]);
 
   // Deepgram speaker buckets with their word counts. The counts are what make the roles obvious:
   // in the observed run two buckets held ~5,900 words each (examiner and witness) while three
@@ -102,9 +120,22 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
     <main className="workspace">
       <header className="workspace-top">
         <button type="button" className="back-button" onClick={onBack}>← Back</button>
-        <audio ref={player} controls preload="metadata" src={`${API}/api/depositions/audio?id=${encodeURIComponent(depositionId)}&index=${audioIndex}`}>
+        {/* The proxy when the original is not browser-decodable, the original otherwise. The
+            Etminan recording is 24-bit PCM, which Chrome refuses -- it reported a format error
+            and a duration of zero, which reads as broken audio rather than an unsupported one. */}
+        {/* crossOrigin is load-bearing, not decoration. Without it the element issues a no-cors
+            request, which carries no Origin header, and the API's origin gate 403s anything
+            without one -- the element then reports MEDIA_ERR_SRC_NOT_SUPPORTED, which reads as
+            "this audio is the wrong format" and sent an entire investigation down a codec path.
+            With it the request is CORS and carries the Origin the gate expects. */}
+        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined}>
           <track kind="captions" label="No captions" src="data:text/vtt,WEBVTT" default />
         </audio>
+        {!playbackSource && media?.needsProxy && (
+          <button type="button" onClick={()=>{ void buildProxy(); }} disabled={building}>
+            {building ? "Preparing audio… (about a minute)" : "Prepare audio for playback"}
+          </button>
+        )}
         <span className="workspace-counts">
           {rendered ? `${rendered.counts.paragraphs} paragraphs · ${rendered.counts.words} words · ${rendered.counts.operations} edits` : "Loading…"}
           {busy && " · saving…"}

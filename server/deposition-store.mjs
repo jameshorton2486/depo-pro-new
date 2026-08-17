@@ -41,6 +41,16 @@ export function createDeposition(root,input,options={}){const metadata=input?.de
   atomicJson(path.join(staging,"audio","audit.json"),{schemaVersion:"1.0.0",items:audio});atomicJson(path.join(staging,"intake","canonical-deposition-record.json"),canonicalData);atomicJson(path.join(staging,"deposition.json"),record);commitDirectory(staging,finalDirectory);return record;
  }catch(error){fs.rmSync(staging,{recursive:true,force:true});throw error}}
 
+// The browser-playable copy, beside the frozen audio and never in place of it.
+//
+// It lives under audio/playback/ with a sidecar record so the alignment measurement, encoder
+// versions and declared pre-skip travel with the file. resolveDepositionAudio still returns the
+// original for every other purpose; nothing here changes what can be transcribed, and
+// PLAYBACK_PROXY is absent from ASR_ELIGIBLE_KINDS so it never could.
+export function playbackProxyPaths(root,id,index,options={}){const directory=depositionDirectory(root,id,options),base=path.join(directory,"audio","playback");return{directory,file:path.join(base,`${Number(index)}.ogg`),record:path.join(base,`${Number(index)}.json`)}}
+export function readPlaybackProxy(root,id,index,options={}){const paths=playbackProxyPaths(root,id,index,options);if(!fs.existsSync(paths.file)||!fs.existsSync(paths.record))return null;try{return{...JSON.parse(fs.readFileSync(paths.record,"utf8")),file:paths.file}}catch{return null}}
+export function writePlaybackProxyRecord(root,id,index,record,options={}){const paths=playbackProxyPaths(root,id,index,options);fs.mkdirSync(path.dirname(paths.record),{recursive:true});atomicJson(paths.record,record);return{...record,file:paths.file}}
+
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 

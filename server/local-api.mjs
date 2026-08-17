@@ -10,6 +10,7 @@ import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, ge
 import { renderTranscript } from "./transcript-render.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
+import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
 
 // Every media route answers through here so seeking behaves the same on all three. The size is
 // taken from the file on disk rather than from the recorded `bytes`: a range must be resolved
@@ -30,7 +31,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, readDepositionIntake, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -127,6 +128,32 @@ const server = http.createServer(async (req,res) => {
       const input=await body(req,10*1024*1024);
       const prepared=await prepareInsertionRenderingArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot});
       return json(res,201,{variant:prepared.variant,findings:prepared.findings,renderingSpec:prepared.renderingSpec,workspaceDocument:prepared.workspaceDocument},origin);
+    }
+    // Playback proxy. GET serves it or reports that none exists; POST renders one.
+    //
+    // Split because rendering an 83-minute source takes about half a minute, which is too long
+    // to hold a media request open -- the player asks, and if the answer is "none yet" the
+    // Workspace offers to build it rather than showing a control that silently fails.
+    if (req.url?.startsWith("/api/depositions/playback?") && req.method === "GET") {
+      const url=new URL(req.url,"http://localhost"),id=url.searchParams.get("id"),index=url.searchParams.get("index")??0;
+      const store={storageRoot:depositionStorageRoot};
+      if(url.searchParams.get("meta")==="1"){
+        const source=resolveDepositionAudio(root,id,index,store);
+        const media=await probeMediaForPlayback(source.file);
+        return json(res,200,{proxy:readPlaybackProxy(root,id,index,store),sourceMedia:media,needsProxy:needsPlaybackProxy(media)},origin);
+      }
+      const proxy=readPlaybackProxy(root,id,index,store);
+      if(!proxy) return json(res,404,{error:"No playback proxy has been rendered for this recording."},origin);
+      return sendMedia(req,res,proxy.file,{"content-type":"audio/ogg","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
+    }
+    if (req.url === "/api/depositions/playback" && req.method === "POST") {
+      const input=await body(req,64*1024),store={storageRoot:depositionStorageRoot},index=Number(input.index??0);
+      const source=resolveDepositionAudio(root,input.depositionId,index,store);
+      const paths=playbackProxyPaths(root,input.depositionId,index,store);
+      const started=Date.now();console.log("[external:playback proxy] render started",{depositionId:input.depositionId,index});
+      const record=await renderPlaybackProxy({sourceFile:source.file,targetFile:paths.file,sourceSha256:source.item.sha256});
+      console.log("[external:playback proxy] render finished",{depositionId:input.depositionId,index,elapsedMs:Date.now()-started,aligned:record.alignment?.aligned});
+      return json(res,201,{proxy:writePlaybackProxyRecord(root,input.depositionId,index,{...record,file:undefined},store)},origin);
     }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
