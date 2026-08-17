@@ -69,8 +69,14 @@ export const RX_PROFILES = Object.freeze({
     // search to +/-24000 and +/-48000 expecting it to move. It did not: 8159 at every width,
     // with the coarse envelope stage independently landing on 8128 each time. Roughly double
     // Dialogue Isolate's, which fits a composite chain summing its internal stages.
+    // measuredRealTimeFactor here is FIXTURE-MEASURED and does not predict full-deposition
+    // runtime. On an 83-minute recording 0.190 predicts about 16 minutes; an actual run exceeded
+    // the 30-minute limit and did not finish, so the true figure is at least double and unknown
+    // above that. Not re-qualified -- recorded so nobody selects this module on a real
+    // deposition expecting 16 minutes.
     version:"2.0.0", renderChunkSeconds:10, measuredLatencyFrames:8159,
-    caution:"This combined treatment is review-only and must run by itself. Introduces 170ms of processing latency, which Depo-Pro compensates and records."}),
+    realTimeFactorScope:"fixture-only",
+    caution:"This combined treatment is review-only and must run by itself. Introduces 170ms of processing latency, which Depo-Pro compensates and records. The speed estimate is fixture-measured: a full-length deposition exceeded the 30-minute processing limit without finishing."}),
 });
 
 export const AUDIO_TOOL_PROFILES=Object.freeze({

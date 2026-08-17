@@ -14,14 +14,14 @@ const MAX_AUDIO_BYTES = configuredMaxAudioBytes;
 const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function assertUploadId(value) { if (!UPLOAD_ID.test(String(value || ""))) throw new Error("Invalid audio intake identifier."); return String(value); }
 const SCHEMA_VERSION = "3.0.0";
-const ANALYSIS_VERSION = "audio-quality-v2.0.0";
+export const ANALYSIS_VERSION = "audio-quality-v2.0.0";
 // v3.0.0: `lineHum` became actionable. Under v2 a recording with measured electrical hum and
 // no low-frequency rumble routed to `original` and reported "No validated quality concern
 // requires processing" -- a false statement about audio the analyzer had already measured a
 // concern in. Major, because the same file that produced no candidate under v2 produces one
 // under v3, and two audits carrying the same routing version while the policy behaved
 // differently is the defect ADR-0018 names.
-const ROUTING_VERSION = "audio-routing-v3.0.0";
+export const ROUTING_VERSION = "audio-routing-v3.0.0";
 const auditLocks=new Map();
 export async function withAuditLock(uploadId,fn){const previous=auditLocks.get(uploadId)??Promise.resolve();const next=previous.then(fn,fn);auditLocks.set(uploadId,next.catch(()=>{}));try{return await next}finally{if(auditLocks.get(uploadId)===next)auditLocks.delete(uploadId)}}
 
