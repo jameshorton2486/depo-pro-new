@@ -37,22 +37,25 @@ export const DEEPGRAM_PLAYGROUND_OPTIONS = {
 // -v2-2: profanity_filter pinned explicitly.
 // -v2-3: diarize:"true" added on a mistaken reading of the API -- diarize_model alone is a
 //        complete request, and the extra flag risked a silent downgrade to the v1 diarizer.
-// -v2-4: that reverted. The option set is now byte-identical to -v2-2's.
+// -v2-3 reverted, and this string went back to -v2-2 with it: the option set is byte-identical
+// to what -v2-2 described, and a version identifies a configuration rather than a point in
+// history. Two runs of the same request must land on the same job identity.
 //
-// Which leaves a version alias: -v2-2 and -v2-4 describe the same request. Strictly, this
-// string should be a function of the option set, not of chronology -- otherwise the same audio
-// and keyterms transcribed under each yields two job identities, a cache miss, and a second
-// paid call producing an identical transcript filed under a different identity. Zero
-// transcripts exist at either version, so nothing is aliased in practice and this is safe
-// today. If it ever needs enforcing, derive the version from the digest the guard computes.
+// The two drift directions are not symmetric, which is why the guard below is where the effort
+// goes. Options change while the version holds means two different requests share an identity
+// -- wrong output under a false identity, and the digest guard catches it. Version changes
+// while the options hold means one request under two identities: a cache miss and a duplicate
+// paid call. Wasteful, never incorrect. Deriving the version from the digest would close the
+// second, and it is not worth building for a cost measured in money rather than correctness.
 //
 // This string is part of transcriptionIdentity, and two jobs sharing a configuration version
 // while the request differed is the ADR-0018 defect. It is hand-maintained, so a guard in
 // tests/deepgram-verbatim.test.mjs pins it to a digest of the options: change any option
 // without bumping this and the suite fails rather than silently reusing an identity.
 //
-// Both bumps happened while zero transcripts existed, so no cached job was invalidated.
-export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-4";
+// The one live bump, -v2-1 to -v2-2, happened while zero transcripts existed, so no cached job
+// was invalidated by it.
+export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-2";
 
 export class DeepgramRequestError extends Error {
   constructor(message, { status, code, request=null, rawResponseBytes=null, responseHeaders=null } = {}) {

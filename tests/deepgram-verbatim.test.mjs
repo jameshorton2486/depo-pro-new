@@ -28,9 +28,9 @@ test("the configuration version changes when the request changes",()=>{
   // while the request differed is the ADR-0018 defect: the record cannot show which parameters
   // produced which transcript. Pinning profanity_filter changed the request, so the version
   // moved with it.
-  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-4");
+  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-2");
   const base = { audioSha256:"a".repeat(64), keytermSetSha256:"b".repeat(64) };
-  const before = transcriptionIdentity({ ...base, configurationVersion:"prerecorded-nova3-diarizer-v2-3" });
+  const before = transcriptionIdentity({ ...base, configurationVersion:"prerecorded-nova3-diarizer-v2-1" });
   const after = transcriptionIdentity({ ...base, configurationVersion:DEEPGRAM_CONFIGURATION_VERSION });
   assert.notEqual(before.sha256, after.sha256, "a changed configuration version must produce a different job identity");
 });
@@ -60,7 +60,7 @@ test("changing any request option requires bumping the configuration version",()
   const sorted = Object.fromEntries(Object.entries(DEEPGRAM_PLAYGROUND_OPTIONS).sort(([a],[b])=>a.localeCompare(b)));
   const digest = crypto.createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0,16);
   assert.equal(digest,"ca2486251a2c86a3",`The Deepgram option set changed. Bump DEEPGRAM_CONFIGURATION_VERSION and update this digest together, or two different requests will share a job identity. Options are now ${JSON.stringify(sorted)}`);
-  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-4");
+  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-2");
 });
 
 test("every option that decides output is explicit, none riding a provider default",()=>{
