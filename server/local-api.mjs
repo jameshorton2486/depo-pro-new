@@ -6,7 +6,8 @@ import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
-import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
+import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
+import { renderTranscript } from "./transcript-render.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaResponse } from "./media-range.mjs";
 
@@ -180,6 +181,19 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
     if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
+      // What the Workspace reads: the projection joined to its evidence, carrying transcript
+      // labels and addressable word spans. GET only -- nothing here writes, and the render is
+      // recomputed on every read rather than stored, so it cannot drift from working.json.
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      const store={storageRoot:depositionStorageRoot};
+      return json(res,200,renderTranscript({
+        working:getWorkingTranscript(root,{depositionId,...store}),
+        evidence:readAsrEvidence(root,{depositionId,...store}),
+        speakerCandidates:getSpeakerCandidates(root,{depositionId,...store}).candidates,
+        examinerIdentity:url.searchParams.get("examinerIdentity")||null,
+      }),origin);
+    }
     if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
