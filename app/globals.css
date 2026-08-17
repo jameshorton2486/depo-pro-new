@@ -443,3 +443,38 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .term-review-table input { width:100%; min-width:140px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); font:inherit; }
 .term-review-table input:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
 .term-review-flag { color:#8a6a1f; font-size:12px; }
+
+/* --- Workspace: transcript, player, label menu --- */
+.workspace { display:flex; flex-direction:column; height:100vh; background:var(--bg); }
+.workspace-top { display:flex; align-items:center; gap:14px; padding:12px 20px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+.workspace-top audio { height:36px; flex:1 1 320px; min-width:240px; }
+.workspace-counts { font-size:12px; color:var(--muted); }
+.workspace-findings { margin:0; padding:10px 14px 10px 30px; background:#fdf3f3; border-bottom:1px solid #e5b4b4; color:#8a2b2b; font-size:13px; line-height:1.5; }
+.workspace-body { flex:1; display:flex; min-height:0; }
+.workspace-transcript { flex:1; overflow:auto; padding:24px 28px; font-family:"Courier New", Courier, monospace; font-size:14px; line-height:2; }
+.wp { display:grid; grid-template-columns:56px 132px 1fr; gap:10px; align-items:baseline; padding:2px 0; }
+.wp.selected { background:#f2f6ff; }
+.wp-time { border:0; background:transparent; color:var(--blue); font:inherit; font-size:11px; cursor:pointer; padding:0; text-align:left; }
+.wp-time:hover { text-decoration:underline; }
+.wp-label { font-weight:700; color:var(--navy); font-size:13px; }
+.wp-text { margin:0; }
+.wp-byline { color:var(--muted); font-style:italic; }
+.wp-word { border:0; background:transparent; font:inherit; padding:0 1px; cursor:pointer; color:inherit; border-radius:3px; }
+.wp-word:hover { background:#e7eefc; }
+.wp-word.picked { background:var(--blue); color:#fff; }
+.wp-word.edited { background:#fff4d6; }
+.wp-word.authored { background:#e8f6ec; font-style:italic; }
+.wp-word.struck { text-decoration:line-through; color:#9aa5b8; }
+.workspace-menu { width:262px; flex:0 0 262px; border-left:1px solid var(--line); background:#fff; padding:16px 14px; overflow:auto; display:flex; flex-direction:column; gap:7px; }
+.workspace-menu h2 { margin:10px 0 2px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.workspace-menu h3 { margin:8px 0 2px; font-size:11px; color:var(--muted); font-weight:600; }
+.workspace-menu button { text-align:left; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; font-size:13px; cursor:pointer; }
+.workspace-menu button:hover:not(:disabled) { border-color:var(--blue); color:var(--blue); }
+.workspace-menu button:disabled { opacity:.45; cursor:default; }
+.workspace-hint { margin:0; font-size:11px; color:var(--muted); line-height:1.5; }
+.workspace-edit { display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--blue); border-radius:8px; background:#f7faff; }
+.workspace-edit input { padding:7px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+.workspace-bucket { display:flex; flex-direction:column; gap:4px; padding:8px 0; border-bottom:1px solid #eef2f8; font-size:12px; }
+.workspace-bucket select { padding:6px 7px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; }
+.workspace-sample { color:var(--muted); font-size:11px; }
+@media (max-width:900px){ .workspace-body{flex-direction:column} .workspace-menu{width:auto;flex:0 0 auto;border-left:0;border-top:1px solid var(--line)} }

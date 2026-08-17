@@ -5,6 +5,7 @@ import { buildDeepgramRequest, DEEPGRAM_CONFIGURATION_VERSION, DEEPGRAM_PLAYGROU
 import { depositionDirectory } from "./deposition-store.mjs";
 import { withTranscriptContentHash } from "./transcript-content-hash.mjs";
 import { KEYTERM_API_LIMIT, KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
+import { appendOperations, undoLast, validateOverlay } from "./reporter-overlay.mjs";
 
 export { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET } from "./keyterm-limits.mjs";
 export const TRANSCRIPT_ROLES=Object.freeze(["QUESTIONING_ATTORNEY","DEFENDING_ATTORNEY","WITNESS","COURT_REPORTER","VIDEOGRAPHER","INTERPRETER","OTHER"]);
@@ -68,6 +69,15 @@ export function getWorkingTranscript(root,{depositionId,storageRoot}){const dire
 // Every completed job's asr-evidence.json, for the render join. Read-only: this never rebuilds,
 // because a rebuild rewrites working.json and the Workspace must not mutate the record simply
 // by being opened.
+// The overlay lives beside working.json, never inside it. Reading is tolerant of absence -- a
+// deposition with no edits has no overlay file -- and writing is atomic, because a half-written
+// operation list would be indistinguishable from a reporter who stopped halfway.
+function overlayFile(root,depositionId,storageRoot){return path.join(depositionDirectory(root,depositionId,{storageRoot}),"transcript","reporter-overlay.json")}
+export function readReporterOverlay(root,{depositionId,storageRoot}){const file=overlayFile(root,depositionId,storageRoot);return validateOverlay(fs.existsSync(file)?readJson(file):null,depositionId)}
+export function writeReporterOverlay(root,{depositionId,storageRoot,overlay}){const validated=validateOverlay(overlay,depositionId);atomic(overlayFile(root,depositionId,storageRoot),jsonBytes(validated));return validated}
+export function appendReporterOperations(root,{depositionId,storageRoot,operations}){return writeReporterOverlay(root,{depositionId,storageRoot,overlay:appendOperations(readReporterOverlay(root,{depositionId,storageRoot}),operations)})}
+export function undoReporterOperation(root,{depositionId,storageRoot}){const {overlay,removed}=undoLast(readReporterOverlay(root,{depositionId,storageRoot}));return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),removed}}
+
 export function readAsrEvidence(root,{depositionId,storageRoot}){const directory=depositionDirectory(root,depositionId,{storageRoot}),jobsDirectory=path.join(directory,"deepgram","jobs");if(!fs.existsSync(jobsDirectory))return[];return fs.readdirSync(jobsDirectory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{const file=path.join(jobsDirectory,item.name,"asr-evidence.json");try{return fs.existsSync(file)?readJson(file):null}catch{return null}}).filter(Boolean)}
 export function getSpeakerCandidates(root,{depositionId,storageRoot}){const directory=depositionDirectory(root,depositionId,{storageRoot}),canonical=readJson(path.join(directory,"intake","canonical-deposition-record.json")),value=field=>String(field?.value??field??"").trim(),candidates=[{id:"witness",label:value(canonical?.deposition?.witness)||"Witness",defaultRole:"WITNESS"},{id:"reporter",label:value(canonical?.reporter?.fullName)||"Court Reporter",defaultRole:"COURT_REPORTER"},...(canonical?.counsel||[]).map(item=>({id:item.id,label:value(item.fullName)||item.id,defaultRole:String(value(item.appearanceRole)||"QUESTIONING_ATTORNEY").toUpperCase().replaceAll(" ","_")})),...(canonical?.participants?.interpreters||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"INTERPRETER"})),...(canonical?.participants?.videographers||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"VIDEOGRAPHER"}))];return{candidates,roles:TRANSCRIPT_ROLES}}
 

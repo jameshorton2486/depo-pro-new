@@ -7,6 +7,7 @@ import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import InsertionPagesScreen from "./InsertionPagesScreen";
 import TranscriptComparisonScreen from "./TranscriptComparisonScreen";
 import ReporterReviewScreen from "./ReporterReviewScreen";
+import WorkspaceScreen from "./WorkspaceScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
@@ -44,7 +45,7 @@ const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
 const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
-type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin"|"insertion-pages"|"compare"|"review";
+type WorkflowView="library"|"intake"|"setup"|"transcript"|"workspace"|"audio-tools"|"admin"|"insertion-pages"|"compare"|"review";
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
 function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
@@ -84,6 +85,7 @@ export default function Home() {
   const [showInsertionPages, setShowInsertionPages] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -106,14 +108,14 @@ export default function Home() {
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
-      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowReview(resumeSession.view==="review");
+      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowReview(resumeSession.view==="review");setShowWorkspace(resumeSession.view==="workspace");
       try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showReview&&active?"review":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showReview,showModal]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showReview&&active?"review":showWorkspace&&active?"workspace":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showReview,showWorkspace,showModal]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -187,12 +189,12 @@ export default function Home() {
   }
 
 
-  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showReview?"review":"transcript"):"library";
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showReview?"review":showWorkspace?"workspace":"transcript"):"library";
   function navigate(next:NavView){
     // One place decides which screen is showing. Every entry clears the others, so two
     // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
     setShowAdmin(next==="admin"); setShowIntake(next==="intake"); setShowAudioTools(next==="audio-tools");
-    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowReview(next==="review");
+    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowReview(next==="review"); setShowWorkspace(next==="workspace");
     if(next==="library") setActive(null);
   }
   const frame=(node:React.ReactNode)=>(
@@ -224,6 +226,7 @@ export default function Home() {
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
     if (showReview) return frame(<ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />);
+    if (showWorkspace) return frame(<WorkspaceScreen depositionId={active.id} onBack={() => setShowWorkspace(false)} />);
     return frame(<TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} onCompare={() => setShowCompare(true)} onReview={() => setShowReview(true)} />);
   }
 

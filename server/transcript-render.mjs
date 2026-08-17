@@ -11,6 +11,7 @@
 // decides what the reader sees.
 import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
+import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 
 /**
  * Indexes ASR word evidence by word id. Evidence arrives per job -- a deposition with three
@@ -37,16 +38,35 @@ export function indexEvidenceWords(evidenceDocuments = []) {
  * the evidence cannot resolve is still worth showing -- refusing to render it leaves the
  * reporter with a blank screen and no way to see what is wrong.
  */
-export function renderTranscript({ working, evidence = [], speakerCandidates = [], examinerIdentity = null } = {}) {
+export function renderTranscript({ working, evidence = [], speakerCandidates = [], examinerIdentity = null, overlay = null } = {}) {
   const findings = [];
-  const segments = working?.segments || [];
+  const projected = working?.segments || [];
   const { words, duplicates } = indexEvidenceWords(evidence);
   for (const id of duplicates) findings.push({ code:"DUPLICATE_WORD_ID", wordId:id, message:`Word id ${id} appears in more than one evidence document.` });
 
   const { labels, findings:labelFindings } = buildSpeakerLabels(speakerCandidates);
   findings.push(...labelFindings);
 
-  const grouped = groupTranscriptSegments(segments);
+  // projection + overlay. The projection itself is never modified -- applyOverlay copies.
+  const applied = applyOverlay(projected, overlay ?? emptyOverlay(), { knownWordIds:new Set(words.keys()) });
+  const segments = applied.segments;
+  for (const orphan of applied.orphaned) findings.push({ code:"ORPHANED_OPERATION", index:orphan.index, operation:orphan.operation, reason:orphan.reason, message:`Overlay operation ${orphan.index + 1} (${orphan.operation.op}) no longer has an anchor: ${orphan.reason}. It was not applied.` });
+
+  // A split changes where a paragraph begins, so its text has to come from the words it now
+  // holds rather than from the utterance transcript it inherited.
+  const withText = segments.map(segment => {
+    const parts = [];
+    for (const id of segment.asrWordIds) {
+      if (applied.deleted.has(id)) { for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text); continue; }
+      const word = words.get(id);
+      parts.push(applied.replaced.get(id) ?? word?.punctuatedWord ?? word?.word ?? "");
+      for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text);
+    }
+    const rebuilt = parts.filter(Boolean).join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
+    return { ...segment, text:rebuilt || segment.text };
+  });
+
+  const grouped = groupTranscriptSegments(withText);
   const labelled = labelParagraphs(grouped, { labels, examinerIdentity });
 
   const seen = new Set();
@@ -57,10 +77,24 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       if (!word) { findings.push({ code:"WORD_NOT_IN_EVIDENCE", wordId:id, paragraphIndex:index, message:`Segment word ${id} has no matching ASR evidence.` }); continue; }
       if (seen.has(id)) { findings.push({ code:"WORD_RENDERED_TWICE", wordId:id, paragraphIndex:index, message:`Word ${id} is claimed by more than one segment.` }); continue; }
       seen.add(id);
-      resolved.push({ id:word.id, text:word.punctuatedWord ?? word.word ?? "", start:word.start, end:word.end, confidence:word.confidence, deepgramSpeaker:word.deepgramSpeaker });
+      const original = word.punctuatedWord ?? word.word ?? "";
+      const override = applied.replaced.get(id);
+      resolved.push({
+        id:word.id, text:override ?? original, start:word.start, end:word.end,
+        confidence:word.confidence, deepgramSpeaker:word.deepgramSpeaker,
+        // A deleted word keeps its id and its original text. It is struck from the reading, not
+        // removed from the record -- I1 -- so the evidence chain survives the edit.
+        ...(override === undefined ? {} : { edited:true, originalText:original }),
+        ...(applied.deleted.has(id) ? { deleted:true, originalText:original } : {}),
+      });
+      // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
+      // human-added words distinguishable at a glance.
+      for (const extra of applied.inserted.get(id) ?? []) resolved.push({ id:extra.id, text:extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true });
     }
     // `start` is what a click seeks to. It prefers the first resolved word's own timestamp over
-    // the segment's, because the segment boundary is derived and the word time is measured.
+    // the segment's, because the segment boundary is derived and the word time is measured --
+    // and after a split the second half keeps the segment's start while its first word begins
+    // seconds later, so seeking to the segment replays audio the reporter already heard.
     const start = resolved.find(word => Number.isFinite(word.start))?.start ?? paragraph.start ?? null;
     const end = [...resolved].reverse().find(word => Number.isFinite(word.end))?.end ?? paragraph.end ?? null;
     return {
@@ -82,10 +116,11 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   if (words.size && !diarized) findings.push({ code:"NO_DIARIZATION", message:"No ASR word carries a speaker number. Every paragraph will collapse into one speaker, and no speaker map can be assigned." });
 
   return {
-    schemaVersion:"1.0.0", recordType:"RENDERED_TRANSCRIPT",
+    schemaVersion:"1.1.0", recordType:"RENDERED_TRANSCRIPT",
     transcriptContentHash:working?.transcriptContentHash ?? null,
     speakerMap:working?.speakerMap ?? null, labels, examinerIdentity,
-    counts:{ segments:segments.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size },
+    counts:{ segments:segments.length, projectedSegments:projected.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size,
+      operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length },
     diarized, paragraphs, findings,
   };
 }
