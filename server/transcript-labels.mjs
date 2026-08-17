@@ -16,6 +16,20 @@ export const ELEMENT = Object.freeze({
   PARENTHETICAL_INDENTED: "PARENTHETICAL_INDENTED", HEADING: "HEADING",
 });
 
+// Two values below are CHOSEN, not measured, and diffing the exporter against the specimen
+// will show a mismatch at both. That is expected, not a regression:
+//
+//   PARENTHETICAL_INDENTED at col 15 -- the specimen's two of these carry identical encoding
+//     (four literal tabs) and printed at col 20 and col 15. Four tabs exhaust the three
+//     defined stops, so the fourth resolves against Word's default grid and its position
+//     depends on context. Col 15 is Tab Stop 3 at 2160 twips, an actually-defined stop.
+//   COLLOQUY at col 5 for every speaker -- the specimen puts attorney labels at col 5 (28x)
+//     and THE VIDEOGRAPHER:/THE REPORTER: at col 15 (7x), from two incompatible encodings for
+//     one semantic element. Normalized to the plurality.
+//
+// The runover for both IS measured: flush to col 0, no block indent. The one multi-line
+// parenthetical in the specimen wraps to col 0 exactly like testimony.
+//
 // tokenCol -- where "Q."/"A."/"NAME:" begins. textCol -- where the spoken words begin.
 // wrapCol -- where every runover line begins. `centered` computes its column from the string,
 // which is the correction that matters: nine "(Exhibit N marked)" are 18 characters and land

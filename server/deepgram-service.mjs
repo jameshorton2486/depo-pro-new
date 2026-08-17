@@ -13,15 +13,30 @@ import { Readable } from "node:stream";
 // enhanced comparison were transcribed under different parameters, a filler-word difference
 // scores as an ASR error and the conclusion reads as an RX effect. Same discipline as the RX
 // qualification protocol: hold every input constant except the one being measured.
+// Every option that reaches Deepgram lives here, including the ones whose value matches the
+// provider default. An option left out is one whose behaviour is decided elsewhere and can
+// change without a diff -- and because Compare scores original against RX-enhanced audio, any
+// parameter that differs between the two runs is measured as an RX effect.
+//
+// `diarize` is separate from `diarize_model`: the first turns diarization on, the second
+// chooses which diarizer. Only the second was ever sent. Without speakers every word returns
+// speaker:null, deriveSegments collapses the transcript into one speakerless group, and the
+// whole speaker-map and Q./A. mapping has nothing to key on.
 export const DEEPGRAM_PLAYGROUND_OPTIONS = {
-  model: "nova-3", language: "en", diarize_model: "v2", filler_words: "true", profanity_filter: "false",
-  numerals: "true", paragraphs: "true", punctuate: "true", smart_format: "true", utterances: "true",
+  model: "nova-3", language: "en", diarize: "true", diarize_model: "v2", filler_words: "true",
+  profanity_filter: "false", numerals: "true", paragraphs: "true", punctuate: "true",
+  smart_format: "true", utterances: "true",
 };
-// v2: profanity_filter pinned explicitly. The request now differs, so this version differs --
-// it is part of transcriptionIdentity, and two jobs sharing a configuration version while the
-// request differed is the ADR-0018 defect. Bumped while zero transcripts exist, so no cached
-// job is invalidated by it.
-export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-2";
+// -v2-2: profanity_filter pinned explicitly.
+// -v2-3: diarize:"true" added -- see above; diarize_model alone does not enable diarization.
+//
+// This string is part of transcriptionIdentity, and two jobs sharing a configuration version
+// while the request differed is the ADR-0018 defect. It is hand-maintained, so a guard in
+// tests/deepgram-verbatim.test.mjs pins it to a digest of the options: change any option
+// without bumping this and the suite fails rather than silently reusing an identity.
+//
+// Both bumps happened while zero transcripts existed, so no cached job was invalidated.
+export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-3";
 
 export class DeepgramRequestError extends Error {
   constructor(message, { status, code, request=null, rawResponseBytes=null, responseHeaders=null } = {}) {
@@ -64,7 +79,11 @@ export async function transcribeWithDeepgram({ apiKey, filePath, keyterms = [], 
   const normalized={
     provider:"deepgram", operationId, model:payload?.metadata?.models?.[0]||"nova-3", requestId:payload?.metadata?.request_id||"",
     transcript:alternative.transcript||"", confidence:alternative.confidence??null, words:alternative.words||[], paragraphs, utterances,
-    keyterms:terms, keytermCount:terms.length, options:DEEPGRAM_PLAYGROUND_OPTIONS, diarization:{requested:true,available:diarizationAvailable}, createdAt:new Date().toISOString(),
+    // `requested` is read from the request that was actually sent, not asserted. It was
+    // hardcoded true while `diarize` was never in the query string, so the record claimed a
+    // request nobody made -- and `available:false` would have read as a Deepgram failure
+    // rather than as our own omission.
+    keyterms:terms, keytermCount:terms.length, options:request.options, diarization:{requested:request.options?.diarize==="true",available:diarizationAvailable}, createdAt:new Date().toISOString(),
   };
   return {request,rawResponseBytes,rawResponseText,payload,response:{status:response.status,headers:responseHeaders},normalized};
 }

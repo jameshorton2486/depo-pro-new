@@ -3,7 +3,17 @@ import test from "node:test";
 import { buildDeepgramRequest, DEEPGRAM_PLAYGROUND_OPTIONS, DeepgramRequestError, isDeepgramMediaError } from "../server/deepgram-service.mjs";
 
 test("Deepgram explicitly enables speaker diarization",()=>{
-  assert.equal(DEEPGRAM_PLAYGROUND_OPTIONS.diarize,undefined);
+  // This assertion used to read `diarize, undefined` under this same name, which is the
+  // opposite of what the name claims. Git says how: 50d3f20 "Fix RX discovery, diarization,
+  // and audio provenance" added `diarize: "true"` and asserted it here; af05428 "establish
+  // transferred implementation baseline" replaced the module wholesale, dropped the option,
+  // and the assertion was flipped to match the transferred code while the name was left alone.
+  //
+  // So the guard was rewritten to accommodate a regression rather than catch it. Restored.
+  // `diarize` turns diarization on; `diarize_model` only chooses which diarizer. Without it
+  // every word returns speaker:null and the speaker map, Q./A. mapping, and the whole
+  // Workspace have nothing to key on.
+  assert.equal(DEEPGRAM_PLAYGROUND_OPTIONS.diarize,"true");
   assert.equal(DEEPGRAM_PLAYGROUND_OPTIONS.diarize_model,"v2");
 });
 
