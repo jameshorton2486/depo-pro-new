@@ -379,3 +379,28 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .admin-check-list li.ok::before { content:"✓"; color:#237050; }
 .admin-check-list li.bad::before { content:"!"; color:#a8322f; }
 .admin-check-list strong { margin-right:6px; }
+
+/* Reporter review (read-only prototype) */
+.review-screen { max-width:820px; margin:0 auto; padding:28px 24px 72px; display:flex; flex-direction:column; gap:16px; }
+.review-heading h1 { margin:6px 0 4px; }
+.review-heading p { margin:0 0 12px; color:#61738f; }
+.review-banner { border:1px solid #e0cfa8; border-left:4px solid #9c5613; border-radius:10px; background:#fdf7ec; padding:14px 16px; color:#5c4718; font-size:13px; line-height:1.55; }
+.review-status { color:#61738f; font-size:14px; }
+.review-error { color:#a8322f; }
+.review-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:#e3e9f3; border:1px solid #e3e9f3; border-radius:10px; overflow:hidden; }
+.review-meta div { background:#fff; padding:12px 14px; display:flex; flex-direction:column; gap:3px; }
+.review-meta span { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#7c89a0; }
+.review-meta strong { font-size:16px; font-variant-numeric:tabular-nums; }
+.review-flag { color:#9c5613; }
+.review-hash { font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+.review-body { display:flex; flex-direction:column; gap:2px; }
+.review-paragraph { border:1px solid transparent; border-radius:8px; padding:10px 12px; cursor:pointer; }
+.review-paragraph:hover { background:#f7f9fc; }
+.review-paragraph.focused { border-color:#cfd9e9; background:#f7f9fc; }
+.review-paragraph header { display:flex; gap:10px; align-items:baseline; margin-bottom:4px; }
+.review-speaker { font-weight:700; font-size:13px; }
+.review-role { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#61738f; }
+.review-time { margin-left:auto; font-family:ui-monospace,Consolas,monospace; font-size:11px; color:#8491a8; }
+.review-paragraph p { margin:0; font-size:15px; line-height:1.65; }
+.review-provenance { display:flex; flex-wrap:wrap; gap:14px; margin-top:8px; padding-top:8px; border-top:1px solid #e3e9f3; font-size:11px; color:#61738f; }
+.review-note { margin:4px 0 0; color:#61738f; font-size:13px; line-height:1.55; }
