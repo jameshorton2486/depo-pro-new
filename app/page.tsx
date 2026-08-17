@@ -7,6 +7,7 @@ import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import InsertionPagesScreen from "./InsertionPagesScreen";
 import TranscriptComparisonScreen from "./TranscriptComparisonScreen";
 import ReporterReviewScreen from "./ReporterReviewScreen";
+import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
 import { formatDisplayDate } from "./date-format.mjs";
@@ -180,8 +181,22 @@ export default function Home() {
   }
 
 
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showReview?"review":"transcript"):"library";
+  function navigate(next:NavView){
+    // One place decides which screen is showing. Every entry clears the others, so two
+    // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
+    setShowAdmin(next==="admin"); setShowIntake(next==="intake"); setShowAudioTools(next==="audio-tools");
+    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowReview(next==="review");
+    if(next==="library") setActive(null);
+  }
+  const frame=(node:React.ReactNode)=>(
+    <div className="app-frame">
+      <WorkspaceNav current={currentView} hasDeposition={Boolean(active)} depositionLabel={active?.witness} onNavigate={navigate} />
+      <div className="app-frame-body">{node}</div>
+    </div>
+  );
   if (showAdmin) {
-    return <AdminSettings onClose={() => setShowAdmin(false)} />;
+    return frame(<AdminSettings onClose={() => setShowAdmin(false)} />);
   }
   function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowIntake(true)}
   async function openAudioTools() {
@@ -193,20 +208,20 @@ export default function Home() {
     setShowAudioTools(true);
   }
   if (showAudioTools) {
-    return <AudioToolsScreen initialFiles={audioToolFiles} onFilesChange={setAudioToolFiles} onBack={() => setShowAudioTools(false)} />;
+    return frame(<AudioToolsScreen initialFiles={audioToolFiles} onFilesChange={setAudioToolFiles} onBack={() => setShowAudioTools(false)} />);
   }
 
   if (showIntake) {
-    return <IntakeScreen onCancel={() => setShowIntake(false)} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />;
+    return frame(<IntakeScreen onCancel={() => setShowIntake(false)} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
-    if (showInsertionPages) return <InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />;
-    if (showCompare) return <TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />;
-    if (showReview) return <ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />;
-    return <TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} onCompare={() => setShowCompare(true)} onReview={() => setShowReview(true)} />;
+    if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
+    if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
+    if (showReview) return frame(<ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />);
+    return frame(<TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} onCompare={() => setShowCompare(true)} onReview={() => setShowReview(true)} />);
   }
 
-  return (
+  return frame(
     <main className="app-shell">
       <header className="topbar">
         <button type="button" className="brand" aria-label="Depo Pro home"><span className="brand-mark">DP</span><span>DEPO<span className="brand-accent">PRO</span></span></button>

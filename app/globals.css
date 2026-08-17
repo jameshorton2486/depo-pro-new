@@ -404,3 +404,25 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .review-paragraph p { margin:0; font-size:15px; line-height:1.65; }
 .review-provenance { display:flex; flex-wrap:wrap; gap:14px; margin-top:8px; padding-top:8px; border-top:1px solid #e3e9f3; font-size:11px; color:#61738f; }
 .review-note { margin:4px 0 0; color:#61738f; font-size:13px; line-height:1.55; }
+
+/* Workspace navigation */
+.app-frame { display:flex; min-height:100vh; align-items:stretch; }
+.app-frame-body { flex:1; min-width:0; }
+.workspace-nav { width:232px; flex:0 0 232px; background:#0b1730; color:#c9d4e8; display:flex; flex-direction:column; gap:4px; padding:20px 0 16px; }
+.workspace-nav-brand { display:flex; align-items:center; gap:10px; padding:0 18px 18px; font-size:16px; letter-spacing:.03em; color:#fff; }
+.workspace-nav-brand strong { color:#6f9bff; font-weight:800; }
+.workspace-nav-mark { width:30px; height:30px; display:grid; place-items:center; border-radius:8px; background:#1c2f57; font-size:11px; font-weight:800; }
+.workspace-nav-group { padding:10px 0 4px; }
+.workspace-nav-group h2 { margin:0 0 6px; padding:0 18px; font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:#6b7d9d; font-weight:700; }
+.workspace-nav-group ul { list-style:none; margin:0; padding:0; }
+.workspace-nav-item { width:100%; text-align:left; border:0; background:transparent; color:#c9d4e8; padding:8px 18px; display:flex; flex-direction:column; gap:2px; border-left:3px solid transparent; }
+.workspace-nav-item:hover:not(:disabled) { background:#132244; color:#fff; }
+.workspace-nav-item.current { background:#152b52; border-left-color:#6f9bff; color:#fff; }
+.workspace-nav-item:disabled { color:#5d6b86; cursor:not-allowed; }
+.workspace-nav-item:focus-visible { outline:2px solid #6f9bff; outline-offset:-2px; }
+.workspace-nav-label { font-size:13px; font-weight:600; }
+.workspace-nav-note { font-size:10.5px; color:#7d8db0; line-height:1.35; }
+.workspace-nav-item:disabled .workspace-nav-note { color:#55627c; }
+.workspace-nav-footer { margin-top:auto; padding:14px 18px 0; border-top:1px solid #1a2b4d; display:flex; flex-direction:column; gap:2px; font-size:11px; color:#7d8db0; }
+.workspace-nav-footer strong { color:#c9d4e8; font-size:12px; }
+@media (max-width:900px){ .app-frame{flex-direction:column} .workspace-nav{width:auto;flex:0 0 auto;flex-direction:row;flex-wrap:wrap;gap:0;padding:10px} .workspace-nav-brand{padding:0 12px 0 6px} .workspace-nav-group{padding:0} .workspace-nav-group h2{display:none} .workspace-nav-group ul{display:flex} .workspace-nav-item{border-left:0;border-bottom:3px solid transparent;padding:6px 10px} .workspace-nav-item.current{border-left:0;border-bottom-color:#6f9bff} .workspace-nav-note{display:none} .workspace-nav-footer{display:none} }
