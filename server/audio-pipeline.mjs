@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { inspectRx } from "./rx-adapter.mjs";
 import { ASR_ELIGIBLE_KINDS, CANONICAL_ASR_PCM_BITS, DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { chooseMeasuredAsrSource } from "./asr-selection.mjs";
+import { AUDIO_TOOL_PROFILES, resolveAudioToolChain } from "./rx-profiles.mjs";
 
 const DEFAULT_MAX_AUDIO_BYTES = 12 * 1024 ** 3;
 const configuredMaxAudioBytes = Number(process.env.MAX_AUDIO_BYTES ?? DEFAULT_MAX_AUDIO_BYTES);
@@ -14,7 +15,13 @@ const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 export function assertUploadId(value) { if (!UPLOAD_ID.test(String(value || ""))) throw new Error("Invalid audio intake identifier."); return String(value); }
 const SCHEMA_VERSION = "3.0.0";
 const ANALYSIS_VERSION = "audio-quality-v2.0.0";
-const ROUTING_VERSION = "audio-routing-v2.0.0";
+// v3.0.0: `lineHum` became actionable. Under v2 a recording with measured electrical hum and
+// no low-frequency rumble routed to `original` and reported "No validated quality concern
+// requires processing" -- a false statement about audio the analyzer had already measured a
+// concern in. Major, because the same file that produced no candidate under v2 produces one
+// under v3, and two audits carrying the same routing version while the policy behaved
+// differently is the defect ADR-0018 names.
+const ROUTING_VERSION = "audio-routing-v3.0.0";
 const auditLocks=new Map();
 export async function withAuditLock(uploadId,fn){const previous=auditLocks.get(uploadId)??Promise.resolve();const next=previous.then(fn,fn);auditLocks.set(uploadId,next.catch(()=>{}));try{return await next}finally{if(auditLocks.get(uploadId)===next)auditLocks.delete(uploadId)}}
 
@@ -172,11 +179,48 @@ function classifyAudio(measurements, durationSeconds) {
     uncertain: { measured: true, detected: durationSeconds < 3 || [lowLevelDetected, clippingDetected].includes(null), confidence: 1 },
   };
 }
-function recommendProcessing(findings) {
-  if (findings.uncertain.detected || findings.clipping.detected) return { route: "review", candidateProfile: null, reason: "Insufficient certainty or possible clipping; preserve original for review." };
-  if (findings.lowFrequencyEnergy.detected) return { route: "candidate", candidateProfile: "low-frequency-rolloff-v2", reason: "Create a conservative candidate; do not assume the low-frequency energy is hum." };
-  if (findings.lowLevel.detected || findings.unevenLevels.detected) return { route: "review", candidateProfile: null, reason: "Level concerns require listening review; automatic gain is not applied to transcription evidence." };
-  return { route: "original", candidateProfile: null, reason: "No validated quality concern requires processing." };
+const FINDING_LABELS = Object.freeze({ lineHum:"electrical hum", lowFrequencyEnergy:"low-frequency energy", impulses:"impulse noise", echo:"reverberation" });
+
+// Eligibility is read from the catalog's `recommendFor`, never from a list written here.
+//
+// Two things follow. A profile added later with the right `recommendFor` becomes eligible
+// without anyone remembering that this function also needs editing -- the drift that put
+// `low-frequency-rolloff-v2` in a string literal here while `lineHum` sat measured and unread.
+// And there is no profile name to hardcode past the `asrSafe` filter: a module the catalog
+// has not marked ASR-safe cannot be reached by this path at all, whatever it recommends for.
+function eligibleProfiles(findings, catalog) {
+  return Object.values(catalog)
+    .filter(profile => profile.asrSafe === true)
+    .map(profile => ({ profile, matched:(profile.recommendFor || []).filter(name => findings[name]?.detected === true) }))
+    .filter(entry => entry.matched.length > 0);
+}
+// `candidateProfile` stays populated with the first id. Audit records written before chains
+// existed, and any reader still using the singular field, keep meaning what they meant.
+function recommend(route, profileIds, reason) { return { route, candidateProfileIds:profileIds, candidateProfile:profileIds[0] ?? null, reason }; }
+
+// The catalog and chain resolver are injected for the same reason the RX renderer injects its
+// Python interpreter: the conflict branch below cannot be reached with the shipped catalog, so
+// without a seam it would be an untestable guard describing a defect nobody had reproduced.
+// Production passes nothing and gets the real catalog.
+export function recommendProcessing(findings, { catalog = AUDIO_TOOL_PROFILES, resolveChain = resolveAudioToolChain } = {}) {
+  // Fail closed first, and nothing may be inserted above this. Clipping is destroyed data:
+  // a cleaned candidate built over it conceals the damage behind something that sounds better.
+  if (findings.uncertain.detected || findings.clipping.detected) return recommend("review", [], "Insufficient certainty or possible clipping; preserve original for review.");
+  const eligible = eligibleProfiles(findings, catalog);
+  if (eligible.length) {
+    let ordered;
+    // Deriving the chain from the catalog means the catalog can now produce a combination the
+    // resolver refuses -- two ASR-safe profiles that exclude each other, or one with no chain
+    // order. Route to review rather than let the throw escape: the outer handler would mark
+    // the whole intake analysis-failed, discarding measurements that are perfectly valid.
+    try { ordered = resolveChain(eligible.map(entry => entry.profile.id)); }
+    catch (error) { return recommend("review", [], `Matched ASR-safe profiles cannot be combined: ${error instanceof Error ? error.message : String(error)}`); }
+    const detected = [...new Set(eligible.flatMap(entry => entry.matched))].map(name => FINDING_LABELS[name] ?? name);
+    const caveat = eligible.some(entry => entry.matched.includes("lowFrequencyEnergy")) ? " The low-frequency energy is not assumed to be hum; the filter is a conservative roll-off." : "";
+    return recommend("candidate", ordered.map(profile => profile.id), `Detected ${detected.join(" and ")}. Created an ASR-safe candidate with ${ordered.map(profile => profile.displayName).join(", then ")}; the original is unchanged and stays selectable.${caveat}`);
+  }
+  if (findings.lowLevel.detected || findings.unevenLevels.detected) return recommend("review", [], "Level concerns require listening review; automatic gain is not applied to transcription evidence.");
+  return recommend("original", [], "No validated quality concern requires processing.");
 }
 // There is deliberately no second renderer here.
 //
@@ -257,21 +301,21 @@ export async function saveAndAnalyzeAudio(req, { root, originalName, contentType
     audit.media={durationSeconds:Number(probe.format?.duration||0),codec:stream.codec_name||"unknown",sampleRate:Number(stream.sample_rate||0),channels:Number(stream.channels||0)};
     const measurements=await measureAudioQuality(originalPath); audit.measurements=measurements;
     audit.findings=classifyAudio(measurements,audit.media.durationSeconds); audit.recommendation=recommendProcessing(audit.findings); appendHistory(audit,"technical-analysis-completed",{analysisVersion:ANALYSIS_VERSION});
-    if(audit.recommendation.candidateProfile){
-      const profileId=audit.recommendation.candidateProfile;
+    if(audit.recommendation.candidateProfileIds.length){
+      const profileIds=audit.recommendation.candidateProfileIds;
       if(typeof createCandidate!=="function"){
-        appendHistory(audit,"candidate-derivative-skipped",{profileId,reason:"No audited renderer was supplied to the analysis pipeline."});
+        appendHistory(audit,"candidate-derivative-skipped",{profileIds,reason:"No audited renderer was supplied to the analysis pipeline."});
       } else {
         try{
-          const derivative=await createCandidate({root,audit,originalPath,profileIds:[profileId]});
+          const derivative=await createCandidate({root,audit,originalPath,profileIds});
           audit.storage.derivatives.push(derivative);
-          appendHistory(audit,"candidate-derivative-created",{key:derivative.key,sha256:derivative.sha256,profileId:derivative.profileId});
+          appendHistory(audit,"candidate-derivative-created",{key:derivative.key,sha256:derivative.sha256,profileIds});
         }catch(error){
           // The analysis and the recommendation stand on their own. A candidate that could
           // not be rendered is recorded as absent rather than failing the whole intake --
           // the operator can still run the tool explicitly, and a silently missing
           // derivative would be indistinguishable from one that was never recommended.
-          appendHistory(audit,"candidate-derivative-failed",{profileId,error:error instanceof Error?error.message:"Candidate rendering failed."});
+          appendHistory(audit,"candidate-derivative-failed",{profileIds,error:error instanceof Error?error.message:"Candidate rendering failed."});
         }
       }
     }
