@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const API = "http://127.0.0.1:4317";
 
@@ -127,15 +127,21 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
               <span className="wp-label">{paragraph.label ?? (paragraph.unlabeledSpeaker ? `Speaker ${paragraph.deepgramSpeaker ?? "?"}` : "")}</span>
               <p className="wp-text">
                 {paragraph.byLine && <em className="wp-byline">{paragraph.byLine} </em>}
-                {paragraph.words.map(word=>(
+                {paragraph.words.map((word,index)=>(
+                  <Fragment key={word.id}>
+                  {/* A real space, not a CSS margin. Each word is its own button so it can be
+                      selected and split at, and adjacent inline-block buttons touch with no gap
+                      -- the transcript rendered as "Goodafternoon.Weareontherecord." A margin
+                      would look right and still copy and read aloud without spaces. */}
+                  {index>0 && " "}
                   <button
                     type="button"
-                    key={word.id}
                     className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${selected?.wordId===word.id?"picked":""}`}
                     aria-label={`${word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}. Select to edit or split here.`}
                     onClick={()=>{ setSelected({ paragraphId:paragraph.id, wordId:word.id }); setEditing(null); }}
                     onDoubleClick={()=>{ if(!word.authored) setEditing({ wordId:word.id, text:word.text }); }}
                   >{word.text}</button>
+                  </Fragment>
                 ))}
               </p>
             </article>
