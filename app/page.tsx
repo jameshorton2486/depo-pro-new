@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import IntakeScreen, { type IntakeDraft } from "./IntakeScreen";
+import IntakeScreen, { type IntakeAttorney, type IntakeDraft } from "./IntakeScreen";
 import AdminSettings from "./AdminSettings";
 import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import InsertionPagesScreen from "./InsertionPagesScreen";
@@ -29,6 +29,8 @@ type Deposition = {
   audioFiles: string[];
   keytermCount: number;
   keyterms: string[];
+  parties?: string[];
+  attorneys?: IntakeAttorney[];
   audioIntakeIds: string[];
   createdAt: string;
 };
@@ -147,6 +149,10 @@ export default function Home() {
       audioFiles: intakeDraft?.audioFiles.map((file) => file.name) ?? [],
       keytermCount: intakeDraft?.keyterms.length ?? 0,
       keyterms: intakeDraft?.keyterms ?? [],
+      // Read by createCanonicalDepositionRecord as input.parties / input.attorneys, which is why
+      // they must sit at the top level of the deposition object rather than inside canonicalSeed.
+      parties: intakeDraft?.parties ?? [],
+      attorneys: intakeDraft?.attorneys ?? [],
       audioIntakeIds: intakeDraft ? intakeDraft.audioFiles.map(file=>intakeDraft.audioProfiles[audioProfileKey(file)]?.uploadId).filter((value):value is string=>Boolean(value)) : [],
       createdAt: new Date().toISOString(),
     };
