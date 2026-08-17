@@ -28,28 +28,28 @@ test("the configuration version changes when the request changes",()=>{
   // while the request differed is the ADR-0018 defect: the record cannot show which parameters
   // produced which transcript. Pinning profanity_filter changed the request, so the version
   // moved with it.
-  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-3");
+  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-4");
   const base = { audioSha256:"a".repeat(64), keytermSetSha256:"b".repeat(64) };
-  const before = transcriptionIdentity({ ...base, configurationVersion:"prerecorded-nova3-diarizer-v2-2" });
+  const before = transcriptionIdentity({ ...base, configurationVersion:"prerecorded-nova3-diarizer-v2-3" });
   const after = transcriptionIdentity({ ...base, configurationVersion:DEEPGRAM_CONFIGURATION_VERSION });
   assert.notEqual(before.sha256, after.sha256, "a changed configuration version must produce a different job identity");
 });
 
-test("diarization is actually requested, not just configured",()=>{
-  // `diarize_model` picks which diarizer; `diarize` decides whether one runs. Only the second
-  // was ever sent. With no speakers, every word returns speaker:null, deriveSegments collapses
-  // the transcript into a single speakerless group, and the speaker map and Q./A. mapping have
-  // nothing to key on -- a total failure of the speaker pipeline, discovered on a paid run.
-  assert.equal(DEEPGRAM_PLAYGROUND_OPTIONS.diarize,"true");
-  assert.equal(new URL(buildDeepgramRequest().url).searchParams.get("diarize"),"true");
+test("the deprecated diarize flag never reaches the query string",()=>{
+  // Sending it alongside diarize_model risks a silent downgrade to the v1 diarizer, which is
+  // strictly worse than an error: the transcript looks correct and mislabels speakers.
+  assert.equal(new URL(buildDeepgramRequest([]).url).searchParams.has("diarize"),false);
+  assert.equal(new URL(buildDeepgramRequest([]).url).searchParams.get("diarize_model"),"v2");
 });
 
 test("the recorded diarization request is read from the request, not asserted",()=>{
-  // It was hardcoded `requested:true` while `diarize` was absent, so the record claimed a
-  // request nobody made and `available:false` would have read as a Deepgram failure.
+  // It was hardcoded `requested:true`, which would record a request as made whatever the query
+  // string actually said. It must key on diarize_model -- the parameter that enables
+  // diarization -- and not on the deprecated flag, which would report false on every correct
+  // request and read as our own omission.
   const source = fs.readFileSync(new URL("../server/deepgram-service.mjs", import.meta.url), "utf8");
   assert.equal(/diarization:\{\s*requested:\s*true/.test(source),false,"requested must be derived from the sent options");
-  assert.match(source,/requested:\s*request\.options\?\.diarize\s*===\s*"true"/);
+  assert.match(source,/requested:\s*Boolean\(request\.options\?\.diarize_model\)/);
 });
 
 test("changing any request option requires bumping the configuration version",()=>{
@@ -59,15 +59,15 @@ test("changing any request option requires bumping the configuration version",()
   // Change an option and this fails, naming the bump it needs.
   const sorted = Object.fromEntries(Object.entries(DEEPGRAM_PLAYGROUND_OPTIONS).sort(([a],[b])=>a.localeCompare(b)));
   const digest = crypto.createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0,16);
-  assert.equal(digest,"35fac5a756f064cc",`The Deepgram option set changed. Bump DEEPGRAM_CONFIGURATION_VERSION and update this digest together, or two different requests will share a job identity. Options are now ${JSON.stringify(sorted)}`);
-  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-3");
+  assert.equal(digest,"ca2486251a2c86a3",`The Deepgram option set changed. Bump DEEPGRAM_CONFIGURATION_VERSION and update this digest together, or two different requests will share a job identity. Options are now ${JSON.stringify(sorted)}`);
+  assert.equal(DEEPGRAM_CONFIGURATION_VERSION,"prerecorded-nova3-diarizer-v2-4");
 });
 
 test("every option that decides output is explicit, none riding a provider default",()=>{
   // An absent option is one whose behaviour is decided elsewhere and can change without a
   // diff. Compare scores original against RX-enhanced audio, so any parameter differing
   // between the two runs is measured as an RX effect.
-  for (const key of ["model","language","diarize","diarize_model","filler_words","profanity_filter","numerals","paragraphs","punctuate","smart_format","utterances"]) {
+  for (const key of ["model","language","diarize_model","filler_words","profanity_filter","numerals","paragraphs","punctuate","smart_format","utterances"]) {
     assert.ok(key in DEEPGRAM_PLAYGROUND_OPTIONS,`${key} must be pinned explicitly, whatever its value`);
   }
 });

@@ -18,17 +18,33 @@ import { Readable } from "node:stream";
 // change without a diff -- and because Compare scores original against RX-enhanced audio, any
 // parameter that differs between the two runs is measured as an RX effect.
 //
-// `diarize` is separate from `diarize_model`: the first turns diarization on, the second
-// chooses which diarizer. Only the second was ever sent. Without speakers every word returns
-// speaker:null, deriveSegments collapses the transcript into one speakerless group, and the
-// whole speaker-map and Q./A. mapping has nothing to key on.
+// `diarize` is deliberately absent, and must stay absent.
+//
+// `diarize_model` both enables diarization and selects the version -- it is a complete request
+// on its own. The older `diarize=true` is deprecated, and on batch it routes to the v1
+// diarizer to preserve behaviour for existing integrations. Sending both puts two conflicting
+// selectors in one request with no documented precedence: either a 400, or a silent downgrade
+// to v1. That downgrade is the dangerous one. It produces a transcript that looks correct and
+// mislabels speakers more often, on a legal record, with nothing to notice.
+//
+// Pinning `v2` rather than `latest` is the same reasoning: `latest` is v2 today and will not
+// always be, and a diarizer that changes under a stored job identity is the ADR-0018 defect.
 export const DEEPGRAM_PLAYGROUND_OPTIONS = {
-  model: "nova-3", language: "en", diarize: "true", diarize_model: "v2", filler_words: "true",
+  model: "nova-3", language: "en", diarize_model: "v2", filler_words: "true",
   profanity_filter: "false", numerals: "true", paragraphs: "true", punctuate: "true",
   smart_format: "true", utterances: "true",
 };
 // -v2-2: profanity_filter pinned explicitly.
-// -v2-3: diarize:"true" added -- see above; diarize_model alone does not enable diarization.
+// -v2-3: diarize:"true" added on a mistaken reading of the API -- diarize_model alone is a
+//        complete request, and the extra flag risked a silent downgrade to the v1 diarizer.
+// -v2-4: that reverted. The option set is now byte-identical to -v2-2's.
+//
+// Which leaves a version alias: -v2-2 and -v2-4 describe the same request. Strictly, this
+// string should be a function of the option set, not of chronology -- otherwise the same audio
+// and keyterms transcribed under each yields two job identities, a cache miss, and a second
+// paid call producing an identical transcript filed under a different identity. Zero
+// transcripts exist at either version, so nothing is aliased in practice and this is safe
+// today. If it ever needs enforcing, derive the version from the digest the guard computes.
 //
 // This string is part of transcriptionIdentity, and two jobs sharing a configuration version
 // while the request differed is the ADR-0018 defect. It is hand-maintained, so a guard in
@@ -36,7 +52,7 @@ export const DEEPGRAM_PLAYGROUND_OPTIONS = {
 // without bumping this and the suite fails rather than silently reusing an identity.
 //
 // Both bumps happened while zero transcripts existed, so no cached job was invalidated.
-export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-3";
+export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-4";
 
 export class DeepgramRequestError extends Error {
   constructor(message, { status, code, request=null, rawResponseBytes=null, responseHeaders=null } = {}) {
@@ -79,11 +95,12 @@ export async function transcribeWithDeepgram({ apiKey, filePath, keyterms = [], 
   const normalized={
     provider:"deepgram", operationId, model:payload?.metadata?.models?.[0]||"nova-3", requestId:payload?.metadata?.request_id||"",
     transcript:alternative.transcript||"", confidence:alternative.confidence??null, words:alternative.words||[], paragraphs, utterances,
-    // `requested` is read from the request that was actually sent, not asserted. It was
-    // hardcoded true while `diarize` was never in the query string, so the record claimed a
-    // request nobody made -- and `available:false` would have read as a Deepgram failure
-    // rather than as our own omission.
-    keyterms:terms, keytermCount:terms.length, options:request.options, diarization:{requested:request.options?.diarize==="true",available:diarizationAvailable}, createdAt:new Date().toISOString(),
+    // `requested` is read from the request that was actually sent, not asserted -- it was
+    // hardcoded true, which would have recorded a request as made whatever the query string
+    // said. It keys on `diarize_model`, because that is the parameter that enables
+    // diarization; keying it on the deprecated `diarize` flag would report false on every
+    // correct request.
+    keyterms:terms, keytermCount:terms.length, options:request.options, diarization:{requested:Boolean(request.options?.diarize_model),diarizerModel:request.options?.diarize_model??null,available:diarizationAvailable}, createdAt:new Date().toISOString(),
   };
   return {request,rawResponseBytes,rawResponseText,payload,response:{status:response.status,headers:responseHeaders},normalized};
 }
