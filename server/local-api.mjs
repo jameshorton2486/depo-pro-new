@@ -8,6 +8,19 @@ import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, se
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
+import { mediaResponse } from "./media-range.mjs";
+
+// Every media route answers through here so seeking behaves the same on all three. The size is
+// taken from the file on disk rather than from the recorded `bytes`: a range must be resolved
+// against what will actually be streamed, and if the two ever disagree the recorded figure is
+// the one that is wrong. Integrity of the file itself is established by SHA-256 elsewhere.
+function sendMedia(req, res, file, base) {
+  const size = fs.statSync(file).size;
+  const { status, headers, start, end, partial, unsatisfiable } = mediaResponse({ rangeHeader:req.headers?.range, size, base });
+  res.writeHead(status, headers);
+  if (unsatisfiable) return res.end();
+  return fs.createReadStream(file, partial ? { start, end } : {}).pipe(res);
+}
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
@@ -88,7 +101,7 @@ async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivat
 const server = http.createServer(async (req,res) => {
   const origin=req.headers.origin || "";
   if (!allowedOrigins.has(origin)) return json(res,403,{error:"Origin not allowed."},"null");
-  if (req.method === "OPTIONS") { res.writeHead(204,{"access-control-allow-origin":origin,"access-control-allow-methods":"GET,POST","access-control-allow-headers":"content-type,x-admin-code,x-file-name"}); return res.end(); }
+  if (req.method === "OPTIONS") { res.writeHead(204,{"access-control-allow-origin":origin,"access-control-allow-methods":"GET,POST","access-control-allow-headers":"content-type,x-admin-code,x-file-name,range","access-control-expose-headers":"content-range,accept-ranges,content-length"}); return res.end(); }
   try {
     if (req.url === "/api/audio/analyze" && req.method === "POST") {
       const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "audio.bin"));
@@ -116,7 +129,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
-      res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
+      return sendMedia(req,res,resolved.file,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/select" && req.method === "POST") {
       const input=await body(req,64*1024); return json(res,200,await selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
@@ -150,7 +163,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url?.startsWith("/api/audio/original?") && req.method === "GET") {
       const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"),audit=readAudioAudit(root,uploadId),file=resolveAudioPath(root,audit,"original");
-      res.writeHead(200,{"content-type":audit.contentType||"application/octet-stream","content-length":audit.storage.original.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(file).pipe(res);
+      return sendMedia(req,res,file,{"content-type":audit.contentType||"application/octet-stream","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url?.startsWith("/api/audio/derivative?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),audit=readAudioAudit(root,url.searchParams.get("uploadId"));
@@ -158,7 +171,7 @@ const server = http.createServer(async (req,res) => {
       if(!derivative) throw new Error("Processed audio was not found.");
       const file=path.resolve(root,"data",derivative.key),directory=path.resolve(root,"data","audio-intake",audit.uploadId)+path.sep;
       if(!file.startsWith(directory)) throw new Error("Processed audio path is invalid.");
-      res.writeHead(200,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
+      return sendMedia(req,res,file,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);
