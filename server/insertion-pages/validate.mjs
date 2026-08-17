@@ -23,7 +23,13 @@ function validateVariant(input, findings) {
     return;
   }
   const detected = captionJurisdiction(input.caption?.court);
-  if (detected && detected !== input.jurisdiction) {
+  // A caption naming a state Depo-Pro has no reviewed certificate for must block regardless
+  // of what the operator selected. The mismatch check below cannot cover this on its own: it
+  // fires only when detection disagrees, so an operator selecting texas-state for a Nebraska
+  // caption would have produced no finding at all once detection stopped calling it Texas.
+  if (detected === "unsupported") {
+    findings.push(blocking("CERT_JURISDICTION_UNSUPPORTED", "cert.jurisdiction", `Caption court '${input.caption?.court}' names a jurisdiction Depo-Pro has no reviewed certificate for. Texas state and federal are the only supported variants.`, { path: "jurisdiction" }));
+  } else if (detected && detected !== input.jurisdiction) {
     findings.push(blocking("CERT_JURISDICTION_MISMATCH", "cert.jurisdiction", `Caption court '${input.caption.court}' indicates ${detected}, but the operator selected ${input.jurisdiction}.`, { path: "jurisdiction" }));
   }
   if (!input.template?.available) {
