@@ -17,8 +17,32 @@ export function selectInsertionVariant({ jurisdiction, signatureDisposition } = 
   return SELECTIONS[`${jurisdiction}:${signatureDisposition}`] ?? null;
 }
 
+// Every US state other than Texas. A caption naming one of these is a court Depo-Pro has no
+// reviewed certificate for, and saying so is the whole point -- see UNSUPPORTED below.
+const OTHER_STATES = /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia)\b/i;
+const TEXAS = /\btex(?:as\b|\.)/i;
+const FEDERAL = /\b(united states|u\.?\s?s\.?)\s+(district|bankruptcy)\s+court\b/i;
+
+/**
+ * Returns "federal", "texas-state", "unsupported", or null.
+ *
+ * "unsupported" means the caption names a state Depo-Pro has no reviewed certificate for.
+ * null means undetermined -- the caption could not be read either way.
+ *
+ * The distinction matters because the previous version matched a bare "district court" as
+ * Texas, so `IN THE DISTRICT COURT OF DOUGLAS COUNTY, NEBRASKA` returned "texas-state". That
+ * is a confident wrong answer rather than an absent one, and the mismatch gate could not see
+ * it: the gate only fires when detection DISAGREES with the operator, so a wrong detection
+ * agreeing with a wrong selection produced no finding at all. Texas certification language
+ * would reach a Nebraska transcript with nothing raised.
+ *
+ * Texas is now required explicitly. A court type alone -- district, county, justice -- says
+ * nothing about which state it sits in.
+ */
 export function captionJurisdiction(court = "") {
-  if (/\b(united states|u\.?s\.?)\s+(district|bankruptcy|court of appeals)\s+court\b/i.test(court) || /\bunited states district court\b/i.test(court)) return "federal";
-  if (/\b(texas|district court|county court|justice court)\b/i.test(court)) return "texas-state";
+  const value = String(court || "");
+  if (FEDERAL.test(value)) return "federal";
+  if (TEXAS.test(value)) return "texas-state";
+  if (OTHER_STATES.test(value)) return "unsupported";
   return null;
 }
