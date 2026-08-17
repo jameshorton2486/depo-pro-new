@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { mediaResponse, resolveRange } from "../server/media-range.mjs";
+import { mediaContentType, mediaResponse, resolveRange } from "../server/media-range.mjs";
 
 const SIZE = 8000;
 
@@ -96,6 +96,35 @@ test("the resolved span matches the bytes a stream would actually deliver",t=>{
 
 test("size must be known before a range can be resolved",()=>{
   for (const size of [undefined, null, -1, 1.5, NaN]) assert.throws(()=>resolveRange("bytes=0-1", size));
+});
+
+test("a WAV is served as audio/wav, not as an opaque byte stream",()=>{
+  // The Workspace player showed 0:00 / 0:00 on a 1.37 GB WAV. The range layer was working --
+  // 206, Accept-Ranges, Content-Range against 1,438,262,888 bytes -- and the first bytes were a
+  // valid RIFF/WAVE header. The route special-cased .flac and labelled everything else
+  // application/octet-stream, so Chrome refused to decode it: MEDIA_ERR_SRC_NOT_SUPPORTED,
+  // duration zero. It reads as broken audio when only the label was missing.
+  assert.equal(mediaContentType("Dr_Entiminan_Audio.IXZ.wav"),"audio/wav");
+  assert.equal(mediaContentType("candidate.flac"),"audio/flac");
+  assert.equal(mediaContentType("recording.MP3"),"audio/mpeg","extension matching must be case-insensitive");
+  assert.equal(mediaContentType("clip.m4a"),"audio/mp4");
+});
+
+test("an unknown container is reported as unknown rather than guessed",()=>{
+  // Guessing audio/wav for an unrecognised container fails in exactly the same silent way as
+  // no type at all, and hides which of the two happened.
+  assert.equal(mediaContentType("mystery.xyz"),"application/octet-stream");
+  assert.equal(mediaContentType("no-extension"),"application/octet-stream");
+  assert.equal(mediaContentType(""),"application/octet-stream");
+  assert.equal(mediaContentType(null),"application/octet-stream");
+  assert.equal(mediaContentType("mystery.xyz","audio/wav"),"audio/wav","a caller may supply its own fallback");
+});
+
+test("every media route labels its content type from the filename",()=>{
+  // The .flac-only ternary is the shape that caused this. A new route copying it would be
+  // silently unplayable for every other container.
+  const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
+  assert.equal(/===\s*"\.flac"\s*\?\s*"audio\/flac"/.test(source),false,"no route may special-case one extension and mislabel the rest");
 });
 
 test("no media route streams a file outside sendMedia",()=>{

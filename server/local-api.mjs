@@ -9,7 +9,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
-import { mediaResponse } from "./media-range.mjs";
+import { mediaContentType, mediaResponse } from "./media-range.mjs";
 
 // Every media route answers through here so seeking behaves the same on all three. The size is
 // taken from the file on disk rather than from the recorded `bytes`: a range must be resolved
@@ -130,7 +130,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
-      return sendMedia(req,res,resolved.file,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
+      return sendMedia(req,res,resolved.file,{"content-type":mediaContentType(resolved.file),"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/select" && req.method === "POST") {
       const input=await body(req,64*1024); return json(res,200,await selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
@@ -172,7 +172,7 @@ const server = http.createServer(async (req,res) => {
       if(!derivative) throw new Error("Processed audio was not found.");
       const file=path.resolve(root,"data",derivative.key),directory=path.resolve(root,"data","audio-intake",audit.uploadId)+path.sep;
       if(!file.startsWith(directory)) throw new Error("Processed audio path is invalid.");
-      return sendMedia(req,res,file,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
+      return sendMedia(req,res,file,{"content-type":mediaContentType(file,"audio/wav"),"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);

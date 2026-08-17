@@ -10,6 +10,31 @@
 
 const BYTES = /^bytes=(\d*)-(\d*)$/;
 
+// Content type by extension, because a browser will not decode what it is not told.
+//
+// The deposition audio route special-cased .flac and served everything else as
+// application/octet-stream. A .wav therefore reached the Workspace player as an opaque byte
+// stream: the range request succeeded, 206 and all, and the element failed with
+// MEDIA_ERR_SRC_NOT_SUPPORTED and a duration of zero. It reads as "the audio is broken" when
+// the audio is fine and only the label was missing.
+const MEDIA_TYPES = Object.freeze({
+  ".wav":"audio/wav", ".flac":"audio/flac", ".mp3":"audio/mpeg", ".m4a":"audio/mp4",
+  ".aac":"audio/aac", ".ogg":"audio/ogg", ".opus":"audio/ogg", ".wma":"audio/x-ms-wma",
+  ".mp4":"video/mp4", ".webm":"video/webm", ".mov":"video/quicktime",
+});
+
+/**
+ * Resolves a media content type from a filename. Falls back to application/octet-stream, which
+ * is honest -- an unknown container should be reported as unknown rather than guessed at as
+ * audio/wav, because a wrong type fails in exactly the same silent way as no type.
+ */
+export function mediaContentType(fileName, fallback = "application/octet-stream") {
+  const name = String(fileName ?? "");
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return fallback;
+  return MEDIA_TYPES[name.slice(dot).toLowerCase()] ?? fallback;
+}
+
 /**
  * Resolves a Range header against a known file size.
  *
