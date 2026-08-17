@@ -76,13 +76,13 @@ export default function ReporterReviewScreen({ deposition, onBack }: { depositio
                   <button
                     type="button"
                     className="review-source-toggle"
-                    aria-expanded={focused === paragraph.segmentIds[0]}
+                    aria-expanded={focused === paragraph.segmentIds[0]} aria-controls={`source-${paragraph.segmentIds[0]}`}
                     onClick={() => setFocused(focused === paragraph.segmentIds[0] ? null : paragraph.segmentIds[0])}
                   >{focused === paragraph.segmentIds[0] ? "Hide source" : "Source"}</button>
                 </header>
                 <p>{paragraph.text}</p>
                 {focused === paragraph.segmentIds[0] && (
-                  <footer className="review-provenance">
+                  <footer className="review-provenance" id={`source-${paragraph.segmentIds[0]}`}>
                     <span>{paragraph.segmentIds.length} segment{paragraph.segmentIds.length === 1 ? "" : "s"}</span>
                     <span>{paragraph.asrWordIds.length} ASR words</span>
                     <span>Deepgram speaker {paragraph.deepgramSpeaker ?? "—"}</span>
