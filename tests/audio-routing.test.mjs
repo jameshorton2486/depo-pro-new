@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { recommendProcessing } from "../server/audio-pipeline.mjs";
 import { AUDIO_TOOL_PROFILES } from "../server/rx-profiles.mjs";
+
+const PIPELINE_SOURCE = fs.readFileSync(new URL("../server/audio-pipeline.mjs", import.meta.url), "utf8");
 
 const DE_HUM = "rx12-de-hum-dynamic-v1", HIGH_PASS = "low-frequency-rolloff-v2";
 
@@ -109,6 +112,27 @@ test("two ASR-safe profiles that exclude each other route to review, not to a fa
   assert.equal(result.route,"review");
   assert.deepEqual(result.candidateProfileIds,[]);
   assert.match(result.reason,/cannot be combined/);
+});
+
+test("the catalog injection seam is not reachable from a request",()=>{
+  // The `asrSafe` filter is what stands between automatic processing and a review-only
+  // derivative reaching Deepgram. A caller who could supply their own catalog would walk past
+  // it -- the same shape as a client narrowing term groups to weaken the selection gate.
+  //
+  // Production must call recommendProcessing with one argument and take the real catalog by
+  // default. Read from source rather than asserted once and trusted: the seam is invisible at
+  // the call site, so nothing about `recommendProcessing(audit.findings)` would look wrong if
+  // someone later threaded an options object through it.
+  const callSites = PIPELINE_SOURCE.split("\n")
+    .flatMap(line => line.includes("export function recommendProcessing") ? [] : [...line.matchAll(/recommendProcessing\(([^;]*?)\)\s*[;,)]/g)].map(match => match[1].trim()));
+  assert.equal(callSites.length,1,`expected exactly one production call site, found ${callSites.length}: ${JSON.stringify(callSites)}`);
+  assert.equal(callSites[0],"audit.findings","the production call must pass findings alone, so catalog and resolveChain fall back to the real ones");
+
+  // And the request-facing entry point must not accept them either, so there is no options
+  // object arriving from local-api that a future edit could forward.
+  const entry = /export async function saveAndAnalyzeAudio\s*\(\s*req\s*,\s*\{([^}]*)\}/.exec(PIPELINE_SOURCE);
+  assert.ok(entry,"saveAndAnalyzeAudio must keep its destructured options signature");
+  for (const forbidden of ["catalog","resolveChain"]) assert.equal(entry[1].includes(forbidden),false,`saveAndAnalyzeAudio must not accept ${forbidden} from its caller`);
 });
 
 test("the singular candidateProfile field still carries the first chained profile",()=>{
