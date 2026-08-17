@@ -79,11 +79,41 @@ export function appendReporterOperations(root,{depositionId,storageRoot,operatio
 export function undoReporterOperation(root,{depositionId,storageRoot}){const {overlay,removed}=undoLast(readReporterOverlay(root,{depositionId,storageRoot}));return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),removed}}
 
 export function readAsrEvidence(root,{depositionId,storageRoot}){const directory=depositionDirectory(root,depositionId,{storageRoot}),jobsDirectory=path.join(directory,"deepgram","jobs");if(!fs.existsSync(jobsDirectory))return[];return fs.readdirSync(jobsDirectory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{const file=path.join(jobsDirectory,item.name,"asr-evidence.json");try{return fs.existsSync(file)?readJson(file):null}catch{return null}}).filter(Boolean)}
+// Three rules here, and all three are about what a missing value must NOT become.
+//
 // A canonical field is {value,source,state,...}, so a present-but-null field is an OBJECT, not
-// null. `field?.value??field` therefore falls through to the wrapper and stringifies it: an
-// attorney with no appearanceRole came back with defaultRole "[OBJECT_OBJECT]". Read the value
-// key when it exists; only fall back to the raw field for the plain strings participants use.
-export function getSpeakerCandidates(root,{depositionId,storageRoot}){const directory=depositionDirectory(root,depositionId,{storageRoot}),canonical=readJson(path.join(directory,"intake","canonical-deposition-record.json")),value=field=>String((field&&typeof field==="object"&&"value" in field?field.value:field)??"").trim(),candidates=[{id:"witness",label:value(canonical?.deposition?.witness)||"Witness",defaultRole:"WITNESS"},{id:"reporter",label:value(canonical?.reporter?.fullName)||"Court Reporter",defaultRole:"COURT_REPORTER"},...(canonical?.counsel||[]).map(item=>({id:item.id,label:value(item.fullName)||item.id,defaultRole:String(value(item.appearanceRole)||"QUESTIONING_ATTORNEY").toUpperCase().replaceAll(" ","_")})),...(canonical?.participants?.interpreters||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"INTERPRETER"})),...(canonical?.participants?.videographers||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"VIDEOGRAPHER"}))];return{candidates,roles:TRANSCRIPT_ROLES}}
+// null. `field?.value??field` fell through to the wrapper and stringified it, so an attorney
+// with no appearanceRole came back as "[OBJECT_OBJECT]". Read the value key when it exists;
+// fall back to the raw field only for the plain strings participants carry.
+//
+// An attorney who did not appear cannot have spoken, so actualAppearance false is excluded
+// from the candidate list entirely. They stay in counsel[] for the appearance page -- being
+// absent from the proceeding is a fact about the record, not a reason to drop them from it --
+// but offering them as a selectable speaker makes them a plausible wrong assignee for turns
+// that belong to counsel who was actually there. Strictly `!== false`: an unrecorded
+// appearance keeps the candidate, because not knowing is not the same as knowing they were out.
+//
+// A missing appearanceRole emits no role rather than defaulting to QUESTIONING_ATTORNEY.
+// Defaulting a null to the most consequential role available is the same failure as the
+// stringified wrapper: a value nobody supplied, presented as though someone had. Empty string
+// rather than null because the Workspace calls .includes() on this field unguarded.
+//
+// honorific is forwarded so buildSpeakerLabels can render "MR. BENTLEY" instead of "BENTLEY".
+// It is never inferred -- absent stays absent and raises HONORIFIC_MISSING -- but it has to
+// reach the label builder at all, or the field the reporter fills has no observable effect.
+export function getSpeakerCandidates(root,{depositionId,storageRoot}){
+  const directory=depositionDirectory(root,depositionId,{storageRoot}),canonical=readJson(path.join(directory,"intake","canonical-deposition-record.json"));
+  const raw=field=>field&&typeof field==="object"&&"value" in field?field.value:field,value=field=>String(raw(field)??"").trim();
+  const counsel=(canonical?.counsel||[]).filter(item=>raw(item.actualAppearance)!==false).map(item=>({id:item.id,label:value(item.fullName)||item.id,defaultRole:value(item.appearanceRole).toUpperCase().replaceAll(" ","_"),honorific:value(item.honorific)||null}));
+  const candidates=[
+    {id:"witness",label:value(canonical?.deposition?.witness)||"Witness",defaultRole:"WITNESS"},
+    {id:"reporter",label:value(canonical?.reporter?.fullName)||"Court Reporter",defaultRole:"COURT_REPORTER"},
+    ...counsel,
+    ...(canonical?.participants?.interpreters||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"INTERPRETER"})),
+    ...(canonical?.participants?.videographers||[]).map(item=>({id:item.id,label:value(item.fullName||item.name)||item.id,defaultRole:"VIDEOGRAPHER"})),
+  ];
+  return {candidates,roles:TRANSCRIPT_ROLES};
+}
 
 export async function runTranscriptionJob(root,{depositionId,uploadId,keytermOverrideReason="",storageRoot,submit}){if(!depositionId||!uploadId)throw new Error("Deposition ID and upload ID are required.");const directory=depositionDirectory(root,depositionId,{storageRoot}),record=readJson(path.join(directory,"deposition.json")),audio=record.audio?.find(item=>item.uploadId===uploadId);if(!audio)throw new Error("The selected audio is not part of this deposition.");const audioFile=path.resolve(directory,...String(audio.path).split("/"));if(!fs.existsSync(audioFile)||hashFile(audioFile)!==audio.sha256)throw new Error("The frozen deposition audio failed SHA-256 verification.");const intake=readJson(path.join(directory,"intake","intake.json")),keyterms=authoritativeKeyterms(intake,{overrideReason:keytermOverrideReason}),identity=transcriptionIdentity({audioSha256:audio.sha256,rxOperationId:audio.operationId||null,keytermSetSha256:keyterms.sha256}),paths=jobPaths(directory,identity.sha256);
   if(fs.existsSync(paths.jobFile)){const existing=getTranscriptionJob(root,{depositionId,jobId:identity.sha256,storageRoot});if(existing.job.status==="completed"&&existing.integrity.valid)return{cached:true,...existing};if(existing.job.status==="completed")throw new Error(`Stored transcription integrity verification failed: ${existing.integrity.issues.join("; ")}`)}if(ACTIVE_JOBS.has(identity.sha256))throw new Error("This transcription job is already processing.");const unlock=lockJob(paths.jobDirectory,identity.sha256),existing=fs.existsSync(paths.jobFile)?readJson(paths.jobFile):null,attemptNumber=(existing?.attempts||0)+1,attemptDirectory=path.join(paths.jobDirectory,"attempts",String(attemptNumber).padStart(4,"0")),request=buildDeepgramRequest(keyterms.wire),requestArtifact={schemaVersion:"1.1.0",configurationVersion:DEEPGRAM_CONFIGURATION_VERSION,url:request.url,options:request.options,keyterms:request.keyterms,submittedAt:new Date().toISOString(),audioIdentity:identity.input,sourceAudio:{...audio,path:relative(directory,audioFile),bytes:fs.statSync(audioFile).size}},requestBytes=jsonBytes(requestArtifact);atomic(paths.requestFile,requestBytes);atomic(path.join(attemptDirectory,"request.json"),requestBytes);const now=new Date().toISOString(),job={schemaVersion:"1.1.0",jobId:identity.sha256,depositionId,uploadId,status:"processing",identity:identity.input,keyterms:{count:keyterms.wire.length,estimatedTokens:keyterms.estimatedTokens,sha256:keyterms.sha256,overrideReason:keyterms.overrideReason},sourceAudio:audio,request:{path:relative(directory,paths.requestFile),sha256:sha(requestBytes)},attempts:attemptNumber,createdAt:existing?.createdAt||now,startedAt:now,completedAt:null,failure:null};atomic(paths.jobFile,jsonBytes(job));ACTIVE_JOBS.add(identity.sha256);
