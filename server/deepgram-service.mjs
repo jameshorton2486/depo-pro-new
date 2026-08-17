@@ -1,11 +1,27 @@
 import fs from "node:fs";
 import { Readable } from "node:stream";
 
+// Verbatim fidelity is decided here, before anything downstream can recover it.
+//
+// The reporter-verified Etminan transcript contains 134 "um", 100 "uh" and 2 "mm-hmm". A
+// Texas deposition record is verbatim: disfluencies and profanity are evidence, not noise.
+// So `filler_words` is not a preference, and `profanity_filter` off is not a default to lean
+// on -- Deepgram's default happens to be off today, but an unpinned default is one that can
+// change under us and start censoring a record with no diff to show for it.
+//
+// Pinning it also has to happen before Compare runs. If the two sides of an original-versus-
+// enhanced comparison were transcribed under different parameters, a filler-word difference
+// scores as an ASR error and the conclusion reads as an RX effect. Same discipline as the RX
+// qualification protocol: hold every input constant except the one being measured.
 export const DEEPGRAM_PLAYGROUND_OPTIONS = {
-  model: "nova-3", language: "en", diarize_model: "v2", filler_words: "true", numerals: "true",
-  paragraphs: "true", punctuate: "true", smart_format: "true", utterances: "true",
+  model: "nova-3", language: "en", diarize_model: "v2", filler_words: "true", profanity_filter: "false",
+  numerals: "true", paragraphs: "true", punctuate: "true", smart_format: "true", utterances: "true",
 };
-export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-1";
+// v2: profanity_filter pinned explicitly. The request now differs, so this version differs --
+// it is part of transcriptionIdentity, and two jobs sharing a configuration version while the
+// request differed is the ADR-0018 defect. Bumped while zero transcripts exist, so no cached
+// job is invalidated by it.
+export const DEEPGRAM_CONFIGURATION_VERSION = "prerecorded-nova3-diarizer-v2-2";
 
 export class DeepgramRequestError extends Error {
   constructor(message, { status, code, request=null, rawResponseBytes=null, responseHeaders=null } = {}) {
