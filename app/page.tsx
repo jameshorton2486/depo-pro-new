@@ -48,7 +48,17 @@ const API = "http://127.0.0.1:4317";
 type WorkflowView="library"|"intake"|"setup"|"transcript"|"workspace"|"audio-tools"|"admin"|"insertion-pages"|"compare"|"review";
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
-function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
+// One list, because two drifted. The session writer persists every view; the reader accepted six
+// of the ten and silently reset the rest to the library with no deposition open -- so reloading
+// the Workspace, Compare, Read-through or Certification pages threw the reporter back to the
+// start. Deriving the guard from the same constant is what stops the next view being added to one
+// and not the other.
+// The views that mean nothing without an open deposition. Restoring the flag without restoring
+// the deposition is why widening the guard above is not on its own enough: showWorkspace would be
+// true, active would be null, and `if (active)` would drop to the library anyway.
+const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","compare","review","insertion-pages"];
+const WORKFLOW_VIEWS:readonly WorkflowView[]=["library","intake","setup","transcript","workspace","audio-tools","admin","insertion-pages","compare","review"];
+function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&WORKFLOW_VIEWS.includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
 function makeId() {
   const date = new Date();
@@ -109,7 +119,7 @@ export default function Home() {
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
       setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowReview(resumeSession.view==="review");setShowWorkspace(resumeSession.view==="workspace");
-      try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
+      try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(DEPOSITION_VIEWS.includes(resumeSession.view)&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};

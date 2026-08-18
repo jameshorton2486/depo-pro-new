@@ -256,8 +256,16 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .audio-sequence { flex:0 0 32px; height:32px; display:grid; place-items:center; border-radius:9px; background:var(--navy); color:#fff; font-size:11px; font-weight:800; }
 .transcript-ready,.transcript-empty { padding:42px 24px; text-align:center; color:#7a879b; }.transcript-ready p,.transcript-empty p { margin:6px 0 0; font-size:11px; }.transcript-empty { border:1px dashed #cbd5e3; border-radius:15px; background:#fff; }
 .deepgram-result { padding:20px 28px 34px; }.deepgram-result-meta { display:flex; gap:15px; padding-bottom:17px; color:#78859a; font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
-.dg-paragraph { display:grid; grid-template-columns:120px 1fr; gap:20px; padding:17px 0; border-top:1px solid #edf0f5; }.dg-paragraph header { display:flex; flex-direction:column; gap:5px; color:#2457d6; font-size:10px; font-weight:800; text-transform:uppercase; }.dg-paragraph time { color:#8a96a8; font-weight:500; }.dg-paragraph p,.plain-transcript { margin:0; color:#26334b; font:15px/1.75 Georgia,serif; }
-@media(max-width:700px){.transcript-topbar{grid-template-columns:1fr auto}.transcript-topbar>span{display:none}.transcript-file>header{align-items:stretch;flex-direction:column}.transcript-file>header .primary-button{width:100%}.dg-paragraph{grid-template-columns:1fr;gap:7px}.dg-paragraph header{flex-direction:row}.deepgram-result{padding:16px}.transcript-hero h1{font-size:29px}}
+
+/* The speaker map is the one control on the transcript screen that cannot move elsewhere, and
+   it was the only block on that screen with no rules at all -- which is most of why the screen
+   read as unfinished. Matches the form-row treatment used everywhere else. */
+.speaker-map-grid { display:grid; gap:14px; padding:16px 0 4px; }
+.speaker-map-grid .form-row { align-items:end; padding:12px 14px; border:1px solid #e3e8f0; border-radius:8px; background:#fbfcfe; }
+.speaker-map-grid label { display:grid; gap:5px; font-size:.82rem; font-weight:600; color:#41506b; }
+.speaker-map-grid select { font:inherit; padding:7px 9px; border:1px solid #cbd4e2; border-radius:6px; background:#fff; color:inherit; }
+@media(max-width:700px){ .speaker-map-grid .form-row { grid-template-columns:1fr; } }
+@media(max-width:700px){.transcript-topbar{grid-template-columns:1fr auto}.transcript-topbar>span{display:none}.transcript-file>header{align-items:stretch;flex-direction:column}.transcript-file>header .primary-button{width:100%}.deepgram-result{padding:16px}.transcript-hero h1{font-size:29px}}
 
 /* Standalone audio tools screen */
 .audio-tools-shell { min-height:100vh; background:#eef2f7; }
