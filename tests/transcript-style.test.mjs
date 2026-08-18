@@ -121,3 +121,21 @@ test("a capitalised vocative Doctor is still not a title",()=>{
   assert.equal(styleWord("Doctor.",{ next:"can" }),"Doctor.");
   assert.equal(styleWord("Doctor",{ next:"" }),"Doctor");
 });
+
+test("an exhibit reference is capitalised, the common noun is not",()=>{
+  // The specimen capitalises all 18 of its exhibit references; Deepgram emits all nine of
+  // ETM01's lowercase. The following digit is what separates a named exhibit from the noun.
+  assert.equal(styleWord("exhibit",{ next:"1" }),"Exhibit");
+  assert.equal(styleWord("exhibit",{ next:"4." }),"Exhibit");
+  assert.equal(styleWord("exhibit,",{ next:"9" }),"Exhibit,");
+  assert.equal(styleWord("exhibit",{ next:"you" }),"exhibit");
+  assert.equal(styleWord("exhibit",{ next:"" }),"exhibit");
+});
+
+test("capitalising the exhibit still leaves its number a digit",()=>{
+  // The two rules meet on the same pair and must not fight: "exhibit 1" becomes "Exhibit 1",
+  // never "Exhibit one". The number rule reads the raw previous word, so it is unaffected by
+  // the capitalisation applied to that same word.
+  assert.equal(joinStyled(styleWords([{text:"exhibit"},{text:"1"},{text:"marked"}])),"Exhibit 1 marked");
+  assert.equal(joinStyled(styleWords([{text:"exhibit"},{text:"4."},{text:"What's"}])),"Exhibit 4.  What's");
+});

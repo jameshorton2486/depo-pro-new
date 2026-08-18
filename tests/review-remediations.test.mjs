@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertUploadId, parseAudioMeasurements, readAudioAudit, readStoredTranscript, recordTranscription } from "../server/audio-pipeline.mjs";
-import { compareTranscripts } from "../server/transcript-quality.mjs";
+import { compareTranscripts, DEFAULT_MAX_COMPARISON_WORDS } from "../server/transcript-quality.mjs";
 
 test("clipping remains unmeasured when ffmpeg omits histogram_0db", () => {
   const result=parseAudioMeasurements("Peak level dB: -1.0\nmean_volume: -20.0 dB");
@@ -23,9 +23,19 @@ test("transcript comparison retains edit counts with rolling memory", () => {
   assert.deepEqual({substitutions:result.substitutions,deletions:result.deletions,insertions:result.insertions,errors:result.errors},{substitutions:1,deletions:0,insertions:1,errors:2});
 });
 
-test("transcript comparison rejects unsafe input scale", () => {
-  const oversized=Array.from({length:5001},()=>"word").join(" ");
-  assert.throws(()=>compareTranscripts(oversized,"word"),/limited to 5000 words/);
+test("transcript comparison refuses past its bound rather than truncating", () => {
+  // Sized from the constant, so raising the bound cannot leave this asserting a stale number --
+  // it did assert 5000 until the bound moved. The refusal matters more than the number: a WER
+  // measured over a truncated prefix and reported as the transcript's would be a quality claim
+  // about text the comparison never saw.
+  const oversized=Array.from({length:DEFAULT_MAX_COMPARISON_WORDS+1},()=>"word").join(" ");
+  assert.throws(()=>compareTranscripts(oversized,"word"),new RegExp(`limited to ${DEFAULT_MAX_COMPARISON_WORDS} words`));
+});
+
+test("a full deposition is inside the comparison bound", () => {
+  // The bound exists to stop a runaway, not to stop the job the reporter actually has. A
+  // four-hour deposition is about 12,200 words per side.
+  assert.ok(DEFAULT_MAX_COMPARISON_WORDS >= 25_000, "a four-hour deposition must compare without an override");
 });
 
 test("Deepgram payload is immutable and external to the audit record", async t => {

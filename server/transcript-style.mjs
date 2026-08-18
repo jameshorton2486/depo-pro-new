@@ -75,6 +75,12 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
   // long is a smaller wrong than turning an address to the witness into an abbreviation.
   if (/^Doctor$/.test(body) && /^[A-Z]/.test(String(next))) return `Dr.`;
 
+  // An exhibit is a named thing, and the specimen capitalises all 18 of its references. Deepgram
+  // emits every one of ETM01's nine lowercase. Conditioned on a following digit so the common
+  // noun is untouched -- "the exhibit you were shown" stays as it is, and only the reference to
+  // a specific numbered exhibit is a proper name.
+  if (/^exhibit$/.test(body) && /^[1-9]\d*[.,;:!?]*$/.test(String(next))) return `Exhibit${tail}`;
+
   // Small numbers are written out, with the two exceptions the specimen actually contains: all
   // 18 of its bare digits that follow "Exhibit", and one "6 o'clock".
   if (/^[1-9]$/.test(body) && bare(previous) !== "exhibit" && bare(next) !== "o'clock") return `${SMALL_NUMBERS[Number(body)]}${tail}`;

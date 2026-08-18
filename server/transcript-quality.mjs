@@ -49,7 +49,14 @@ function automaticTermGroups(referenceText) {
   };
 }
 
-const DEFAULT_MAX_COMPARISON_WORDS = 5_000;
+// Measured, not chosen: a full four-hour deposition against another run of the same audio --
+// 12,185 reference words against 12,174 -- compares in 1,064 ms. `distance` keeps two rows
+// rather than the whole matrix, so memory is O(hypothesis) and only time is quadratic; at these
+// sizes that is about 148M inner iterations. 5,000 refused a comparison the machine does in a
+// second. The bound still exists because the cost is quadratic and a long enough transcript
+// would eventually hurt, and it still refuses rather than truncating: a WER over the first
+// 5,000 words, reported as the transcript's, would be a quality claim about text nobody read.
+export const DEFAULT_MAX_COMPARISON_WORDS = 25_000;
 function comparisonWordLimit() {
   const value = Number(process.env.MAX_TRANSCRIPT_COMPARISON_WORDS ?? DEFAULT_MAX_COMPARISON_WORDS);
   return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_MAX_COMPARISON_WORDS;
