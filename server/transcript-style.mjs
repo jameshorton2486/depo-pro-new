@@ -73,7 +73,13 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
   // Keyed on the ASR's own capitalisation plus a capitalised next word, which under-corrects
   // rather than over-corrects: three lowercase "doctor Lee" are left alone, and leaving a title
   // long is a smaller wrong than turning an address to the witness into an abbreviation.
-  if (/^Doctor$/.test(body) && /^[A-Z]/.test(String(next))) return `Dr.`;
+  // A trailing comma marks the vocative and a trailing period marks the abbreviation Deepgram
+  // heard as a sentence end. Measured across every capital "Doctor" in ETM01: 21 carry a period
+  // or nothing and are followed by a name -- Lee, Etminan, Mohammad, Kenley, Morrison, Oishi --
+  // and the single comma is "Doctor, I'm gonna", the examiner addressing the witness. Without
+  // this the capitalised-next-word test admitted it, because "I'm" is capitalised mid-sentence,
+  // and the returned "Dr." dropped the comma as well as inventing a title.
+  if (/^Doctor$/.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Dr.`;
 
   // An exhibit is a named thing, and the specimen capitalises all 18 of its references. Deepgram
   // emits every one of ETM01's nine lowercase. Conditioned on a following digit so the common
@@ -81,9 +87,23 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
   // a specific numbered exhibit is a proper name.
   if (/^exhibit$/.test(body) && /^[1-9]\d*[.,;:!?]*$/.test(String(next))) return `Exhibit${tail}`;
 
-  // Small numbers are written out, with the two exceptions the specimen actually contains: all
-  // 18 of its bare digits that follow "Exhibit", and one "6 o'clock".
-  if (/^[1-9]$/.test(body) && bare(previous) !== "exhibit" && bare(next) !== "o'clock") return `${SMALL_NUMBERS[Number(body)]}${tail}`;
+  // Small numbers are written out, with the exceptions the specimen actually contains: all 18 of
+  // its bare digits that follow "Exhibit", one "6 o'clock", and any digit standing next to
+  // another number.
+  //
+  // That last one was a defect before it was a rule. Deepgram splits numeric expressions across
+  // tokens, and spelling out the orphan turns a numeral into prose: "4 64th" became "four 64th"
+  // where the specimen writes "464th", and "c 5 6, c 6 7" became "c five six, c six seven" where
+  // the specimen writes C5-, C6-, C7 -- vertebral levels, in a spine-injury deposition, reading
+  // as words. "9 15 23" is the crash date. Joining those back together needs two tokens to
+  // become one and is out of reach here; not making them worse is not.
+  //
+  // A single-digit ordinal is the exception to the exception, and it is the one place these two
+  // rules meet: "1 2nd" is Deepgram hearing "one second", which the specimen writes out in full.
+  // "2nd" spells to a word, so a digit beside it is part of a phrase; "64th" and "15" stay
+  // numerals, so a digit beside them is part of a number.
+  const numericNeighbour = value => { const neighbour = split(String(value ?? "")).body; return /^\d/.test(neighbour) && !/^[1-9](st|nd|rd|th)$/i.test(neighbour); };
+  if (/^[1-9]$/.test(body) && bare(previous) !== "exhibit" && bare(next) !== "o'clock" && !numericNeighbour(previous) && !numericNeighbour(next)) return `${SMALL_NUMBERS[Number(body)]}${tail}`;
 
   // Ordinals likewise, except as a day of the month: the specimen's single "1st" is in
   // "February 1st, 2024".

@@ -61,9 +61,12 @@ test("ordinals are written out except as a day of the month",()=>{
 test("a word the reporter has corrected is never restyled",()=>{
   // An explicit correction outranks a convention. If the reporter typed "2" they meant "2", and
   // a style rule quietly overriding that would make their own edit un-keepable.
-  const words=[{ id:"w1", text:"2", edited:true },{ id:"w2", text:"2", authored:true },{ id:"w3", text:"2", deleted:true },{ id:"w4", text:"2" }];
-  assert.deepEqual(styleWords(words).map(word=>word.display),["2","2","2","two"]);
-  assert.deepEqual(styleWords(words).map(word=>Boolean(word.styled)),[false,false,false,true]);
+  // Separated by ordinary words on purpose. Four adjacent digits would be suppressed by the
+  // split-number guard instead, and the test would pass or fail for a reason that has nothing
+  // to do with who touched the word.
+  const words=[{ id:"w1", text:"2", edited:true },{ id:"w2", text:"of" },{ id:"w3", text:"2", authored:true },{ id:"w4", text:"or" },{ id:"w5", text:"2", deleted:true },{ id:"w6", text:"and" },{ id:"w7", text:"2" }];
+  assert.deepEqual(styleWords(words).map(word=>word.display),["2","of","2","or","2","and","two"]);
+  assert.deepEqual(styleWords(words).map(word=>Boolean(word.styled)),[false,false,false,false,false,false,true]);
 });
 
 test("styling is a projection: the evidence text and the word id both survive",()=>{
@@ -138,4 +141,62 @@ test("capitalising the exhibit still leaves its number a digit",()=>{
   // the capitalisation applied to that same word.
   assert.equal(joinStyled(styleWords([{text:"exhibit"},{text:"1"},{text:"marked"}])),"Exhibit 1 marked");
   assert.equal(joinStyled(styleWords([{text:"exhibit"},{text:"4."},{text:"What's"}])),"Exhibit 4.  What's");
+});
+
+test("a digit standing next to another number is left alone",()=>{
+  // Deepgram splits numeric expressions across tokens. Spelling out the orphan turned "4 64th"
+  // into "four 64th" where the certified transcript writes "464th", and "c 5 6, c 6 7" into
+  // "c five six, c six seven" where it writes C5-, C6-, C7. Vertebral levels, in a spine-injury
+  // deposition, reading as prose. Joining them back is out of reach; corrupting them is not.
+  assert.equal(styleWord("4",{ previous:"court,", next:"64th" }),"4");
+  assert.equal(styleWord("5",{ previous:"c", next:"6" }),"5");
+  assert.equal(styleWord("6",{ previous:"5", next:"7" }),"6");
+  assert.equal(styleWord("1",{ previous:"5", next:"level" }),"1");
+  // The crash date, split three ways.
+  assert.equal(styleWord("9",{ previous:"accent", next:"15" }),"9");
+});
+
+test("the neighbour is checked on both sides",()=>{
+  // "4 64th" carries the orphan first and "5 6" carries it second. Looking only forward would
+  // catch the first digit of a pair and spell the second.
+  assert.equal(styleWord("6",{ previous:"5", next:"disc" }),"6","a preceding number must suppress");
+  assert.equal(styleWord("5",{ previous:"c", next:"6" }),"5","a following number must suppress");
+});
+
+test("one second survives, which is where the number and ordinal rules meet",()=>{
+  // "1 2nd" is Deepgram hearing "one second", and the specimen writes "One second, doctor."
+  // spelled out. A single-digit ordinal spells to a word, so a digit beside it belongs to a
+  // phrase rather than to a split numeral -- the one case the neighbour rule must not swallow.
+  assert.equal(styleWord("1",{ previous:"Give", next:"2nd" }),"one");
+  assert.equal(styleWord("2nd",{ previous:"1", next:"doctor." }),"second");
+  assert.equal(joinStyled(styleWords([{text:"Give"},{text:"1"},{text:"2nd."},{text:"According"}])),
+    "Give one second.  According");
+});
+
+test("a quantity beside an ordinary word is still written out",()=>{
+  // The guard must not disable the rule it qualifies.
+  assert.equal(styleWord("2",{ previous:"have", next:"offices" }),"two");
+  assert.equal(styleWord("1",{ previous:"and", next:"in" }),"one");
+});
+
+test("a vocative Doctor with a comma is neither abbreviated nor stripped of its comma",()=>{
+  // "Doctor, I'm gonna show you" is the examiner addressing the witness. The capitalised-next
+  // test admitted it, because "I'm" is capitalised mid-sentence, and the conversion dropped the
+  // comma on the way out -- a title invented and punctuation lost in one word.
+  assert.equal(styleWord("Doctor,",{ next:"I'm" }),"Doctor,");
+  assert.equal(styleWord("Doctor,",{ next:"Lee" }),"Doctor,");
+});
+
+test("a title keeps converting whether or not the ASR punctuated it",()=>{
+  // 21 of ETM01's capital "Doctor" carry a period or nothing and precede a name.
+  assert.equal(styleWord("Doctor.",{ next:"Lee" }),"Dr.");
+  assert.equal(styleWord("Doctor",{ next:"Kenley," }),"Dr.");
+});
+
+test("no style rule loses punctuation the word arrived with",()=>{
+  // The class of defect, not the instance: a rule that rebuilds a word from parts can drop the
+  // tail. Every form below carries a comma in and must carry one out.
+  for (const [text, next] of [["MD.,",""],["01:27PM,",""],["04/24/2026,",""],["2,","offices"],["1st,","of"],["exhibit,","9"]]) {
+    assert.match(styleWord(text,{ next }),/,$/,`${text} lost its comma`);
+  }
 });
