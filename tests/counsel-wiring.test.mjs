@@ -175,3 +175,25 @@ test("typed counsel reaches the speaker candidates",()=>{
     assert.equal(candidates.find(item=>item.id==="attorney-2").defaultRole,"DEFENDING_ATTORNEY");
   }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });
+
+test("counsel of record and counsel who appeared are both kept, and only one can speak",()=>{
+  // The Heath Thomas case. The Notice named Karen M. Alvarado for Home Depot; Lucia D. Zhan
+  // appeared in her place and stated her appearance on the record. Writing the Notice's roster
+  // alone would have put an attorney who was not there into the speaker list and left out the
+  // one who defended the deposition. Both belong in counsel[]; only one is a candidate.
+  const value=depositionFixture();
+  try{
+    writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot, counsel:[
+      { name:"Steven A. Nunez", appearanceRole:"QUESTIONING_ATTORNEY", actualAppearance:true },
+      { name:"Lucia D. Zhan", appearanceRole:"DEFENDING_ATTORNEY", actualAppearance:true },
+      { name:"Karen M. Alvarado", appearanceRole:null, actualAppearance:false },
+    ]});
+    const written=JSON.parse(fs.readFileSync(path.join(value.directory,"intake","canonical-deposition-record.json"),"utf8"));
+    assert.equal(written.counsel.length,3,"all three stay in the record for the appearance page");
+    assert.equal(written.counsel[2].actualAppearance.value,false);
+
+    const { candidates }=getSpeakerCandidates(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot });
+    assert.deepEqual(candidates.map(item=>item.label),["Heath Thomas","Court Reporter","Steven A. Nunez","Lucia D. Zhan"],
+      "the attorney of record who did not appear is not offered as a speaker");
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});

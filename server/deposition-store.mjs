@@ -63,7 +63,19 @@ const APPEARANCE_ROLES = Object.freeze(["QUESTIONING_ATTORNEY", "DEFENDING_ATTOR
  *
  * Entries are written REPORTER_ENTERED / REPORTER_ADDED. Counsel that came off the Notice keep
  * NOD_EXTRACTED, so the record shows which attorneys the document supplied and which a person
- * typed. Ids are regenerated as attorney-1..n: a speaker map keyed to an id that this call
+ * typed.
+ *
+ * Attorney of record and attorney who appeared are separate facts, and actualAppearance is where
+ * they part company. A Notice seeds the roster; the transcript settles who was in the room, and
+ * they disagree more often than the roster suggests. On DEP-20260814-LQ9R6 the Notice named Karen
+ * M. Alvarado for Home Depot and Lucia D. Zhan appeared in her place, stating her appearance on
+ * the record -- a substitution within the same firm. Writing the Notice's roster alone would have
+ * recorded an attorney who was not there and omitted the one who defended the deposition.
+ *
+ * So both go in. Counsel who did not appear stay in counsel[] because the appearance page names
+ * counsel of record, and getSpeakerCandidates filters them out because someone who was not there
+ * cannot have spoken. That is the whole reason the two facts are stored separately rather than
+ * one being inferred from the other. Ids are regenerated as attorney-1..n: a speaker map keyed to an id that this call
  * removes would be reconciling against someone who is no longer in the record, and
  * reconcileSpeakerMap already refuses an identity the canonical record does not contain.
  */
