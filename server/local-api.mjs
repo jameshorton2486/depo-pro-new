@@ -31,7 +31,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionIntake, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -240,6 +240,16 @@ const server = http.createServer(async (req,res) => {
       const input=await body(req,64*1024);
       const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
       return json(res,200,{overlay,removed},origin);
+    }
+    // Counsel only. The one write the canonical record has outside intake, and it stays narrow
+    // on purpose: without it the Label panel offers no attorneys on any deposition whose Notice
+    // extraction missed them, and the alternative is editing the record by hand.
+    if(req.url==="/api/deposition/counsel"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const written=writeDepositionCounsel(root,{depositionId:input.depositionId,counsel:input.counsel,storageRoot:depositionStorageRoot});
+      // The candidate list is returned with it so the caller never has to guess whether the
+      // roster it is about to label against reflects what was just saved.
+      return json(res,200,{...written,candidates:getSpeakerCandidates(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}).candidates},origin);
     }
     if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}

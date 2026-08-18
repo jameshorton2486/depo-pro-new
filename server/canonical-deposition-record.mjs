@@ -10,6 +10,39 @@ export function field(value=null,{source="REPORTER_ENTERED",state=value===null||
 const extracted=value=>field(value,{source:"NOD_EXTRACTED"});
 const missing=(source="REPORTER_ENTERED")=>field(null,{source,state:"MISSING"});
 
+/**
+ * One counsel entry, carrying the provenance of whoever supplied it.
+ *
+ * The source is a parameter because it is a claim about a court record. Counsel read off the
+ * Notice are NOD_EXTRACTED; counsel a reporter typed are REPORTER_ENTERED, and a record has to
+ * be able to show which is which. Writing typed names as extracted would assert the Notice said
+ * something it never said -- worse than the hand-edit an endpoint replaces, because a hand-edit
+ * at least leaves a modification time.
+ *
+ * REPORTER_ENTERED and REPORTER_ADDED are not new vocabulary; both were already declared in
+ * FIELD_SOURCES and FIELD_STATES and simply unused on counsel.
+ */
+export function counselEntry(attorney = {}, index = 0, { source = "NOD_EXTRACTED" } = {}) {
+  const supplied = value => {
+    const present = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
+    if (source === "NOD_EXTRACTED") return field(value ?? null, { source });
+    return field(value ?? null, { source, state:present ? "REPORTER_ADDED" : "MISSING" });
+  };
+  const represents = Array.isArray(attorney.represents) ? attorney.represents : [attorney.represents].filter(Boolean);
+  return {
+    id:attorney.id || `attorney-${index + 1}`,
+    fullName:supplied(attorney.name || attorney.fullName), honorific:supplied(attorney.honorific),
+    barNumber:supplied(attorney.barNumber), firm:supplied(attorney.firm), address:supplied(attorney.address),
+    phone:supplied(attorney.phone), fax:supplied(attorney.fax), email:supplied(attorney.email),
+    represents:supplied(represents), appearanceRole:supplied(attorney.appearanceRole),
+    // Appearance is the reporter's observation whatever the Notice said, so it is never extracted.
+    actualAppearance:attorney.actualAppearance === undefined || attorney.actualAppearance === null
+      ? missing("REPORTER_ENTERED")
+      : field(attorney.actualAppearance, { source:"REPORTER_ENTERED", state:"REPORTER_ADDED" }),
+    remoteAppearance:missing("REPORTER_ENTERED"),
+  };
+}
+
 export function createCanonicalDepositionRecord(input={}){
   const partyValues=Array.isArray(input.parties)?input.parties:[];
   const attorneyValues=Array.isArray(input.attorneys)?input.attorneys:[];
@@ -21,7 +54,7 @@ export function createCanonicalDepositionRecord(input={}){
     case:{jurisdictionType:extracted(input.jurisdictionType||input.jurisdiction),court:extracted(input.court),district:extracted(input.district),division:extracted(input.division),county:extracted(input.county),judicialDistrict:extracted(input.judicialDistrict),causeNumber:extracted(input.causeNumber),caseStyle:extracted(input.caseStyle),governingRules:extracted(input.governingRules||[])},
     parties:partyValues.map((party,index)=>typeof party==="string"?{id:`party-${index+1}`,name:extracted(party),normalizedName:missing("SYSTEM_GENERATED"),role:missing(),entityType:missing(),aliases:[],captionDisplayName:extracted(party)}:{id:party.id||`party-${index+1}`,name:extracted(party.name),normalizedName:extracted(party.normalizedName),role:extracted(party.role),entityType:extracted(party.entityType),aliases:(party.aliases||[]).map(alias=>({qualifier:extracted(alias.qualifier),name:extracted(alias.name)})),captionDisplayName:extracted(party.captionDisplayName||party.name)}),
     deposition:{witness:extracted(input.witness),representativeCapacity:extracted(input.representativeCapacity||input.deponentType),representedOrganization:extracted(input.representedOrganization),corporateTopics:extracted(input.corporateTopics||[]),proceedingType:extracted(input.proceedingType||"Oral deposition"),volumeNumber:missing("WORKFLOW_DERIVED"),depositionDate:extracted(input.depositionDate),scheduledStart:extracted(input.scheduledStart),actualStart:missing("TRANSCRIPT_DERIVED"),actualEnd:missing("TRANSCRIPT_DERIVED"),timeZone:extracted(input.timeZone),location:extracted(input.location),remote:extracted(input.remote??null),remotePlatform:extracted(input.remotePlatform),telephone:extracted(input.telephone??null),videotaped:extracted(input.videotaped??null),interpreted:extracted(input.interpreted??null),corporateRepresentative:extracted(input.corporateRepresentative??null),witnessSworn:missing("REPORTER_ENTERED"),reportingMethod:missing("REPORTER_PROFILE")},
-    counsel:attorneyValues.map((attorney,index)=>({id:attorney.id||`attorney-${index+1}`,fullName:extracted(attorney.name||attorney.fullName),honorific:extracted(attorney.honorific),barNumber:extracted(attorney.barNumber),firm:extracted(attorney.firm),address:extracted(attorney.address),phone:extracted(attorney.phone),fax:extracted(attorney.fax),email:extracted(attorney.email),represents:extracted(Array.isArray(attorney.represents)?attorney.represents:[attorney.represents].filter(Boolean)),appearanceRole:extracted(attorney.appearanceRole),actualAppearance:missing("REPORTER_ENTERED"),remoteAppearance:missing("REPORTER_ENTERED")})),
+    counsel:attorneyValues.map((attorney,index)=>counselEntry(attorney,index)),
     reporter:{profileId:reporterField(reporter.id),fullName:reporterField(reporter.name||input.courtReporterName),designations:reporterField(reporter.designations),csrNumber:reporterField(reporter.licenseNumber),csrState:reporterField(reporter.csrState),csrExpiration:reporterField(reporter.csrExpiration),notaryStatus:reporterField(reporter.notaryStatus),notaryState:reporterField(reporter.notaryState),firm:reporterField(reporter.company),firmRegistrationNumber:reporterField(reporter.firmRegistrationNumber),address:reporterField(reporter.address),phone:reporterField(reporter.phone),email:reporterField(reporter.email),officialStatus:reporterField(reporter.officialStatus)},
     participants:{otherAttendees:[],interpreters:[],videographers:[]},
     transcript:{volumes:[],pageCount:missing("TRANSCRIPT_DERIVED"),examinations:[],chronologicalEvents:[],requestedDocuments:[],certifiedQuestions:[]},

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
 import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
-import { createCanonicalDepositionRecord } from "./canonical-deposition-record.mjs";
+import { counselEntry, createCanonicalDepositionRecord } from "./canonical-deposition-record.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
 function base(_root,{storageRoot}={}){return storageRoot?path.resolve(storageRoot):depositionStorageRoot()}
@@ -50,6 +50,44 @@ export function createDeposition(root,input,options={}){const metadata=input?.de
 export function playbackProxyPaths(root,id,index,options={}){const directory=depositionDirectory(root,id,options),base=path.join(directory,"audio","playback");return{directory,file:path.join(base,`${Number(index)}.ogg`),record:path.join(base,`${Number(index)}.json`)}}
 export function readPlaybackProxy(root,id,index,options={}){const paths=playbackProxyPaths(root,id,index,options);if(!fs.existsSync(paths.file)||!fs.existsSync(paths.record))return null;try{return{...JSON.parse(fs.readFileSync(paths.record,"utf8")),file:paths.file}}catch{return null}}
 export function writePlaybackProxyRecord(root,id,index,record,options={}){const paths=playbackProxyPaths(root,id,index,options);fs.mkdirSync(path.dirname(paths.record),{recursive:true});atomicJson(paths.record,record);return{...record,file:paths.file}}
+
+const APPEARANCE_ROLES = Object.freeze(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY", "OTHER"]);
+
+/**
+ * Replaces counsel[] on an existing deposition with reporter-typed entries.
+ *
+ * Deliberately narrow. It reads the canonical record, replaces one key, and writes it back --
+ * it never touches the transcript, the overlay, the audio audit or any other field of the
+ * record. That narrowness is the whole reason this is safer than the hand-edits it replaces:
+ * a counsel entry cannot orphan a word id or invalidate a transcript hash.
+ *
+ * Entries are written REPORTER_ENTERED / REPORTER_ADDED. Counsel that came off the Notice keep
+ * NOD_EXTRACTED, so the record shows which attorneys the document supplied and which a person
+ * typed. Ids are regenerated as attorney-1..n: a speaker map keyed to an id that this call
+ * removes would be reconciling against someone who is no longer in the record, and
+ * reconcileSpeakerMap already refuses an identity the canonical record does not contain.
+ */
+export function writeDepositionCounsel(root, { depositionId, counsel, storageRoot } = {}) {
+  if (!Array.isArray(counsel)) throw new Error("Counsel must be an array.");
+  const entries = counsel.map((attorney, index) => {
+    const name = String(attorney?.name ?? attorney?.fullName ?? "").trim();
+    if (!name) throw new Error("Every counsel entry requires a name.");
+    const role = String(attorney?.appearanceRole ?? "").trim().toUpperCase().replaceAll(" ", "_");
+    if (role && !APPEARANCE_ROLES.includes(role)) throw new Error(`Unsupported appearance role: ${attorney.appearanceRole}`);
+    return counselEntry({ ...attorney, name, appearanceRole:role || null }, index, { source:"REPORTER_ENTERED" });
+  });
+  const seen = new Set();
+  for (const entry of entries) {
+    if (seen.has(entry.id)) throw new Error(`Counsel id ${entry.id} appears more than once.`);
+    seen.add(entry.id);
+  }
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, counsel:entries });
+  return { depositionId, counsel:entries };
+}
 
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}

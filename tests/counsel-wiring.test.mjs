@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { getSpeakerCandidates } from "../server/transcription-jobs.mjs";
 import { extractionTool } from "../server/extraction-schema.mjs";
 import { buildSpeakerLabels } from "../server/transcript-labels.mjs";
 
@@ -89,4 +90,88 @@ test("the intake draft and the deposition payload both carry parties and attorne
   assert.match(intake,/parties:analysis\.parties\|\|\[\],attorneys:analysis\.attorneys\|\|\[\]/,"onContinue must carry both");
   assert.match(page,/parties: intakeDraft\?\.parties \?\? \[\]/);
   assert.match(page,/attorneys: intakeDraft\?\.attorneys \?\? \[\]/);
+});
+
+import os from "node:os";
+import path from "node:path";
+import { counselEntry } from "../server/canonical-deposition-record.mjs";
+import { writeDepositionCounsel } from "../server/deposition-store.mjs";
+
+function depositionFixture(){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"depo-counsel-")),storageRoot=path.join(root,"depos");
+  const directory=path.join(storageRoot,"reporter","cause","deposition");
+  fs.mkdirSync(path.join(directory,"intake"),{recursive:true});
+  fs.writeFileSync(path.join(directory,"deposition.json"),JSON.stringify({id:"DEP-20260814-ABCDE"}));
+  fs.writeFileSync(path.join(directory,"intake","canonical-deposition-record.json"),
+    JSON.stringify(createCanonicalDepositionRecord({ witness:"Heath Thomas", attorneys:[], parties:[] })));
+  return { root, storageRoot, directory };
+}
+const written = value => JSON.parse(fs.readFileSync(path.join(value.directory,"intake","canonical-deposition-record.json"),"utf8"));
+
+test("reporter-typed counsel is never recorded as having come off the Notice",()=>{
+  // The requirement this endpoint exists to satisfy. createCanonicalDepositionRecord stamps every
+  // counsel field NOD_EXTRACTED, so routing typed names through it unchanged would assert the
+  // Notice said something it never said -- worse than the hand-edit it replaces, because a
+  // hand-edit at least leaves a modification time. Asserted on every field, not just the name.
+  const value=depositionFixture();
+  try{
+    writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot,
+      counsel:[{ name:"Dennis J. Bentley", firm:"Marco Crawford Law, PLLC", represents:"Plaintiff", appearanceRole:"QUESTIONING_ATTORNEY" }] });
+    const [entry]=written(value).counsel;
+    for(const [key,field] of Object.entries(entry)){
+      if(key==="id") continue;
+      assert.equal(field.source,"REPORTER_ENTERED",`${key} must be REPORTER_ENTERED, not ${field.source}`);
+      assert.ok(["REPORTER_ADDED","MISSING"].includes(field.state),`${key} state was ${field.state}`);
+    }
+    assert.equal(entry.fullName.state,"REPORTER_ADDED");
+    assert.equal(entry.honorific.state,"MISSING","an absent field is missing, not added");
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("counsel that did come off the Notice still says so",()=>{
+  // The other half: narrowing the typed path must not relabel extraction.
+  const record=createCanonicalDepositionRecord({ attorneys:[{ name:"Dennis J. Bentley", firm:"F", represents:"Plaintiff" }] });
+  assert.equal(record.counsel[0].fullName.source,"NOD_EXTRACTED");
+  assert.equal(record.counsel[0].fullName.state,"EXTRACTED");
+  assert.equal(counselEntry({ name:"X" },0).fullName.source,"NOD_EXTRACTED");
+});
+
+test("the counsel write touches counsel and nothing else",()=>{
+  // Narrowness is the safety property. A counsel entry must not be able to disturb a witness, a
+  // reporter profile, or anything else a certified record is built from.
+  const value=depositionFixture();
+  try{
+    const before=written(value);
+    writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot, counsel:[{ name:"Dennis J. Bentley" }] });
+    const after=written(value);
+    for(const key of Object.keys(before)){
+      if(key==="counsel") continue;
+      assert.deepEqual(after[key],before[key],`${key} must be untouched`);
+    }
+    assert.equal(after.counsel.length,1);
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("a nameless entry and an unsupported role are both refused",()=>{
+  const value=depositionFixture();
+  try{
+    const call=counsel=>()=>writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot, counsel });
+    assert.throws(call([{ firm:"F" }]),/requires a name/);
+    assert.throws(call([{ name:"X", appearanceRole:"EXAMINER" }]),/Unsupported appearance role/);
+    // Refused means nothing was written, not partly written.
+    assert.equal(written(value).counsel.length,0);
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("typed counsel reaches the speaker candidates",()=>{
+  // The reason the endpoint exists: without counsel the Label panel offers only the witness and
+  // the reporter, and no attorney line can be assigned.
+  const value=depositionFixture();
+  try{
+    writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot,
+      counsel:[{ name:"Dennis J. Bentley", appearanceRole:"QUESTIONING_ATTORNEY" },{ name:"Christian R. Ramon", appearanceRole:"DEFENDING_ATTORNEY" }] });
+    const { candidates }=getSpeakerCandidates(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot });
+    assert.deepEqual(candidates.map(item=>item.id),["witness","reporter","attorney-1","attorney-2"]);
+    assert.equal(candidates.find(item=>item.id==="attorney-2").defaultRole,"DEFENDING_ATTORNEY");
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });
