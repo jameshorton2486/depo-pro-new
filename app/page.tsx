@@ -236,7 +236,7 @@ export default function Home() {
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
     if (showReview) return frame(<ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />);
-    if (showWorkspace) return frame(<WorkspaceScreen depositionId={active.id} onBack={() => setShowWorkspace(false)} />);
+    if (showWorkspace) return frame(<WorkspaceScreen deposition={active} onBack={() => setShowWorkspace(false)} />);
     return frame(<TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} onCompare={() => setShowCompare(true)} onReview={() => setShowReview(true)} />);
   }
 

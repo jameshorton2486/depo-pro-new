@@ -489,3 +489,15 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-bucket select { padding:6px 7px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; }
 .workspace-sample { color:var(--muted); font-size:11px; }
 @media (max-width:900px){ .workspace-body{flex-direction:column} .workspace-menu{width:auto;flex:0 0 auto;border-left:0;border-top:1px solid var(--line)} }
+
+/* The transcribe step, in the Workspace. Above the transcript because that is its order: without
+   a transcript there is nothing else on this screen, and with one there is still a preserved
+   result to verify or a failed job to retry. */
+.workspace-transcribe { display:grid; gap:10px; padding:14px 20px; border-bottom:1px solid #e3e8f0; background:#fbfcfe; }
+.workspace-transcribe-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 14px; border:1px solid #e3e8f0; border-radius:8px; background:#fff; }
+.workspace-transcribe-row > div { display:grid; gap:2px; min-width:0; }
+.workspace-transcribe-row strong { font-size:.92rem; }
+.workspace-transcribe-row small { color:#5b6880; font-size:.78rem; }
+.workspace-transcribe-failure { color:#a3283a; }
+.workspace-transcribe label { display:grid; gap:5px; }
+@media(max-width:700px){ .workspace-transcribe-row { flex-direction:column; align-items:stretch; } }

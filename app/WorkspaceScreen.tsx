@@ -9,11 +9,15 @@ type Finding = { code:string; message:string };
 type Rendered = { paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
 type Operation = Record<string,unknown>;
+type Audit = { uploadId:string; originalName:string; selectedSource:string };
+type Job = { jobId:string; uploadId:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
+export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[] };
 
 const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
 function clock(seconds:number|null){ if(seconds===null||!Number.isFinite(seconds))return "--:--"; const total=Math.floor(seconds); return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`; }
 
-export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }:{ depositionId:string; audioIndex?:number; onBack:()=>void }) {
+export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{ deposition:WorkspaceDeposition; audioIndex?:number; onBack:()=>void }) {
+  const depositionId = deposition.id;
   const [rendered,setRendered] = useState<Rendered|null>(null);
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
@@ -32,6 +36,14 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
   // fired here, because two source jobs left the map "partially_reconciled" however many
   // speakers were assigned. Two causes, one symptom: a button that looked dead.
   const [savedNote,setSavedNote] = useState("");
+  // Transcription state, moved here from the Transcript screen. The Workspace is where a
+  // deposition is worked, so it is where the transcript gets made -- and until one exists there
+  // is nothing else for this screen to show.
+  const [audits,setAudits] = useState<Audit[]>([]);
+  const [jobs,setJobs] = useState<Job[]>([]);
+  const [overrideReason,setOverrideReason] = useState("");
+  const [transcribing,setTranscribing] = useState("");
+  const [notice,setNotice] = useState("");
   const [assignments,setAssignments] = useState<Record<string,{ speakerIdentity:string; transcriptRole:string }>>({});
   const player = useRef<HTMLAudioElement|null>(null);
 
@@ -77,6 +89,50 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
     })();
     return ()=>{ cancelled = true; };
   },[depositionId,examiner,audioIndex,reloadToken]);
+
+  // Audio and job state load independently of the transcript. When there is no transcript the
+  // render effect above fails by design, and this is the only thing left to show -- so it must
+  // not share that failure.
+  useEffect(()=>{
+    let cancelled=false;
+    void (async ()=>{
+      const uploads=deposition.audioIntakeIds||[];
+      const [auditValues,jobResult]=await Promise.all([
+        Promise.all(uploads.map(async uploadId=>{
+          try{ const response=await fetch(`${API}/api/audio/audit?uploadId=${encodeURIComponent(uploadId)}`); return response.ok?await response.json():null; }
+          catch{ return null; }
+        })),
+        (async()=>{ try{ const response=await fetch(`${API}/api/transcription/jobs?depositionId=${encodeURIComponent(depositionId)}`); return response.ok?await response.json():{ jobs:[] }; }catch{ return { jobs:[] }; } })(),
+      ]);
+      if(cancelled) return;
+      setAudits(auditValues.filter(Boolean) as Audit[]);
+      setJobs(jobResult.jobs||[]);
+    })();
+    return ()=>{ cancelled=true; };
+  },[depositionId,deposition.audioIntakeIds,reloadToken]);
+
+  const jobByUpload = useMemo(()=>{
+    // Newest job wins. Building this with new Map() over a newest-first list keeps the OLDEST,
+    // because a duplicate key overwrites -- which is exactly the bug that made the Transcript
+    // screen show a superseded job beside a current transcript.
+    const found=new Map<string,Job>();
+    for(const job of [...jobs].reverse()) found.set(job.uploadId,job);
+    return found;
+  },[jobs]);
+
+  async function createTranscript(audit:Audit) {
+    setTranscribing(audit.uploadId); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/audio/transcribe`,{ method:"POST", headers:{ "content-type":"application/json" },
+        body:JSON.stringify({ depositionId, uploadId:audit.uploadId, keytermOverrideReason:overrideReason }) });
+      const body = await response.json();
+      if(!response.ok) throw new Error(body.error||"Deepgram transcription failed.");
+      setNotice(body.cached ? "Loaded the preserved, integrity-verified transcription. No Deepgram request was made."
+        : "Deepgram evidence was preserved and the transcript was updated.");
+      reload();
+    } catch(e){ setError(e instanceof Error?e.message:"Deepgram transcription failed."); }
+    finally { setTranscribing(""); }
+  }
 
   // Deepgram speaker buckets with their word counts. The counts are what make the roles obvious:
   // in the observed run two buckets held ~5,900 words each (examiner and witness) while three
@@ -197,6 +253,47 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
         <ul className="workspace-findings" role="alert">
           {rendered.findings.slice(0,6).map((finding,index)=><li key={`${finding.code}:${index}`}>{finding.message}</li>)}
         </ul>
+      )}
+
+      {notice && <p className="analysis-note" role="status">{notice}</p>}
+
+      {/* The transcribe step, moved here from the Transcript screen. It sits above the transcript
+          because that is its order: a deposition with no transcript has nothing else on this
+          screen, and one with a transcript still needs a way to verify the preserved result or
+          retry a failed job. */}
+      {audits.length > 0 && (
+        <section className="workspace-transcribe" aria-label="Transcription">
+          {(deposition.keyterms?.length||0) > 50 && (
+            <label className="workspace-hint" htmlFor="workspace-keyterm-override">
+              Required keyterm override reason
+              <input id="workspace-keyterm-override" value={overrideReason} onChange={event=>setOverrideReason(event.target.value)}
+                placeholder="Record why more than 50 terms are necessary" />
+            </label>
+          )}
+          {audits.map((audit,index)=>{
+            const job = jobByUpload.get(audit.uploadId);
+            return (
+              <div className="workspace-transcribe-row" key={audit.uploadId}>
+                <div>
+                  <strong>{deposition.audioFiles[index] || audit.originalName}</strong>
+                  <small>
+                    {job ? `Job ${job.status} · ${job.jobId.slice(0,12)}…` : `Frozen ${audit.selectedSource} source ready`}
+                    {job?.keyterms?.count !== undefined && ` · ${job.keyterms.count} keyterms`}
+                    {job?.response?.deliveredAudio?.converted ? " · lossless WAV fallback" : job ? " · frozen deposition audio" : ""}
+                  </small>
+                  {job?.failure && <small className="workspace-transcribe-failure">{job.failure.message}</small>}
+                </div>
+                <button type="button" className="primary-button" disabled={transcribing===audit.uploadId||job?.status==="processing"}
+                  onClick={()=>{ void createTranscript(audit); }}>
+                  {transcribing===audit.uploadId ? "Transcribing…"
+                    : job?.status==="completed" ? "Verify preserved result"
+                    : job?.status==="failed" ? "Retry failed job"
+                    : "Create transcript"}
+                </button>
+              </div>
+            );
+          })}
+        </section>
       )}
 
       <div className="workspace-body">
