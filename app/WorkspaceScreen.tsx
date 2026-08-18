@@ -31,6 +31,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const [selected,setSelected] = useState<{ paragraphId:string; wordId:string; extentWordId:string|null }|null>(null);
   const [editing,setEditing] = useState<{ wordId:string; text:string }|null>(null);
   const [error,setError] = useState("");
+  const [errorCode,setErrorCode] = useState("");
   const [busy,setBusy] = useState(false);
   const [showSpeakers,setShowSpeakers] = useState(false);
   // Saving the map changed the transcript and said nothing. The only existing signal was the
@@ -83,10 +84,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         if(mediaRes.ok && !cancelled) setMedia(await mediaRes.json());
         const body = await renderRes.json();
         if(cancelled) return;
-        if(!renderRes.ok) throw new Error(body.error||"Could not load the transcript.");
+        if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
         setRendered(body);
         if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
-        if(!cancelled) setError("");
+        if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
     })();
     return ()=>{ cancelled = true; };
@@ -114,7 +115,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   },[depositionId,deposition.audioIntakeIds,reloadToken]);
 
   const uploads = useMemo(()=>deposition.audioIntakeIds ?? [],[deposition.audioIntakeIds]);
-  const notTranscribedYet = !rendered && uploads.length > 0 && !jobs.some(job=>job.status==="completed");
+  // Keyed on the server's own code for this one condition, not on a proxy for it. The first
+  // version suppressed whenever audio was present and no job had completed, which also swallowed
+  // a genuine read failure on an existing transcript -- the reporter would have seen a clean
+  // transcribe control and no sign that a stored transcript could not be read. Anything other
+  // than WORKING_TRANSCRIPT_NOT_CREATED now surfaces.
+  const notTranscribedYet = errorCode === "WORKING_TRANSCRIPT_NOT_CREATED";
   const auditByUpload = useMemo(()=>new Map(audits.map(audit=>[audit.uploadId,audit])),[audits]);
 
   const jobByUpload = useMemo(()=>{

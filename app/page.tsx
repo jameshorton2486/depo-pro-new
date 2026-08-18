@@ -44,7 +44,7 @@ const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
 const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
-type WorkflowView="library"|"intake"|"setup"|"transcript"|"workspace"|"audio-tools"|"admin"|"insertion-pages"|"compare"|"review";
+
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
 // One list, because two drifted. The session writer persists every view; the reader accepted six
@@ -56,8 +56,14 @@ const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionI
 // the deposition is why widening the guard above is not on its own enough: the view flag would be
 // restored, active would be null, and `if (active)` would drop to the library anyway.
 const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","compare","review","insertion-pages"];
-const WORKFLOW_VIEWS:readonly WorkflowView[]=["library","intake","setup","transcript","workspace","audio-tools","admin","insertion-pages","compare","review"];
-function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&WORKFLOW_VIEWS.includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
+// The one list. The type is derived from it rather than declared beside it, so a view added to
+// the union without being added here is a type error at the assignment below -- which is the
+// drift that let the writer persist ten views while the reader accepted six. "transcript" stays
+// on the list although its screen is gone: a session stored before the deletion must still be
+// readable, and it falls through to the Workspace.
+const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","audio-tools","admin","insertion-pages","compare","review"] as const;
+type WorkflowView=typeof WORKFLOW_VIEWS[number];
+function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&(WORKFLOW_VIEWS as readonly string[]).includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
 function makeId() {
   const date = new Date();

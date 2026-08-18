@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { authoritativeKeyterms, getSpeakerCandidates, listTranscriptionJobs, reconcileSpeakerMap, runTranscriptionJob, transcriptionIdentity, TRANSCRIPT_ROLES } from "../server/transcription-jobs.mjs";
+import { authoritativeKeyterms, getSpeakerCandidates, getWorkingTranscript, listTranscriptionJobs, reconcileSpeakerMap, runTranscriptionJob, transcriptionIdentity, TRANSCRIPT_ROLES } from "../server/transcription-jobs.mjs";
 import { buildDeepgramRequest } from "../server/deepgram-service.mjs";
 import { buildSpeakerLabels } from "../server/transcript-labels.mjs";
 
@@ -163,4 +163,23 @@ test("a failed job for the same audio does not block a new transcription", async
   const retry=await completeJob(value,{uploadId:value.uploadId,keyterms:["Alpha","Beta"]});
   assert.equal(retry.cached,false);
   assert.equal(retry.job.status,"completed");
+});
+
+test("a transcript that was never made is distinguishable from one that will not read",()=>{
+  // The Workspace suppresses its error banner for the first case, because a deposition awaiting
+  // transcription has not failed at anything. It must not suppress the second: a stored
+  // transcript that cannot be read is exactly what a reporter needs told, and the first version
+  // of that suppression keyed on whether audio was present, which swallowed both.
+  const value=fixture();
+  try{
+    const file=path.join(value.directory,"transcript","working.json");
+    const absent=(()=>{ try{ getWorkingTranscript(value.root,{depositionId:"DEP-20260814-ABCDE",storageRoot:value.storageRoot}); return null }catch(error){ return error } })();
+    assert.ok(absent,"a missing working transcript must throw");
+    assert.equal(absent.code,"WORKING_TRANSCRIPT_NOT_CREATED");
+
+    fs.writeFileSync(file,"{ this is not json");
+    const unreadable=(()=>{ try{ getWorkingTranscript(value.root,{depositionId:"DEP-20260814-ABCDE",storageRoot:value.storageRoot}); return null }catch(error){ return error } })();
+    assert.ok(unreadable,"an unreadable working transcript must throw");
+    assert.notEqual(unreadable.code,"WORKING_TRANSCRIPT_NOT_CREATED","a corrupt transcript must not report as one that was never made");
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });
