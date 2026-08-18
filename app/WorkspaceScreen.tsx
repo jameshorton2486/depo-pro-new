@@ -27,6 +27,11 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
   const [error,setError] = useState("");
   const [busy,setBusy] = useState(false);
   const [showSpeakers,setShowSpeakers] = useState(false);
+  // Saving the map changed the transcript and said nothing. The only existing signal was the
+  // toggle's own label flipping to "Speakers assigned" on status "reconciled" -- which never
+  // fired here, because two source jobs left the map "partially_reconciled" however many
+  // speakers were assigned. Two causes, one symptom: a button that looked dead.
+  const [savedNote,setSavedNote] = useState("");
   const [assignments,setAssignments] = useState<Record<string,{ speakerIdentity:string; transcriptRole:string }>>({});
   const player = useRef<HTMLAudioElement|null>(null);
 
@@ -119,6 +124,22 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
   }
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  const speakerMapStatus = rendered?.speakerMap?.status ?? "unreconciled";
+  // The panel held only the reporter's unsaved changes and never the saved map, so every select
+  // read "Unassigned" against a fully reconciled transcript -- and "Save speaker map" then sent
+  // an empty array and un-reconciled it. A destructive click that looked idempotent. Local state
+  // stays an overlay of changes; the displayed and submitted value is the change when there is
+  // one and the saved assignment otherwise. Matched on job as well as speaker index, because the
+  // map is keyed by both and a bucket already knows which job it came from.
+  const savedAssignment = useCallback((speaker:number, jobIdentity:string) =>
+    rendered?.speakerMap?.assignments.find(item => item.deepgramSpeaker===speaker && item.sourceJobIdentity===jobIdentity) ?? null,
+  [rendered]);
+  const effectiveAssignment = useCallback((speaker:number, jobIdentity:string) => {
+    const saved = savedAssignment(speaker,jobIdentity), local = assignments[speaker];
+    // ?? not ||: choosing "Unassigned" stores "", which must override the saved value rather
+    // than falling through to it, or the reporter could never clear an assignment.
+    return { speakerIdentity: local?.speakerIdentity ?? saved?.speakerIdentity ?? "", transcriptRole: local?.transcriptRole ?? saved?.transcriptRole ?? "" };
+  },[assignments,savedAssignment]);
 
   // Transcript order across every paragraph, so a range can be resolved without caring which
   // paragraph either end lives in. Rebuilt only when the render changes.
@@ -260,27 +281,47 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
               <div key={speaker} className="workspace-bucket">
                 <strong>Speaker {speaker}</strong> <small>{info.words} words</small>
                 <label htmlFor={`bucket-identity-${speaker}`} className="visually-hidden">Identity for Deepgram speaker {speaker}</label>
-                <select id={`bucket-identity-${speaker}`} value={assignments[speaker]?.speakerIdentity??""} onChange={event=>{
+                <select id={`bucket-identity-${speaker}`} value={effectiveAssignment(speaker,info.jobIdentity).speakerIdentity} onChange={event=>{
                   const candidate=candidates.find(item=>item.id===event.target.value);
-                  setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:event.target.value, transcriptRole:candidate?.defaultRole ?? current[speaker]?.transcriptRole ?? "" } }));
+                  setSavedNote("");
+                  setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:event.target.value, transcriptRole:candidate?.defaultRole ?? effectiveAssignment(speaker,info.jobIdentity).transcriptRole } }));
                 }}>
                   <option value="">Unassigned</option>
                   {candidates.map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
                 </select>
                 <label htmlFor={`bucket-role-${speaker}`} className="visually-hidden">Transcript role for Deepgram speaker {speaker}</label>
-                <select id={`bucket-role-${speaker}`} value={assignments[speaker]?.transcriptRole??""} onChange={event=>setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:current[speaker]?.speakerIdentity??"", transcriptRole:event.target.value } }))}>
+                <select id={`bucket-role-${speaker}`} value={effectiveAssignment(speaker,info.jobIdentity).transcriptRole} onChange={event=>{ setSavedNote(""); setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:effectiveAssignment(speaker,info.jobIdentity).speakerIdentity, transcriptRole:event.target.value } })); }}>
                   <option value="">Role</option>
                   {roles.map(role=><option key={role} value={role}>{ROLE_FOR(role)}</option>)}
                 </select>
                 <small className="workspace-sample">{info.sample}…</small>
               </div>
             ))}
-            <button type="button" className="primary-button" disabled={busy} onClick={()=>{
-              const jobIdentity = rendered?.paragraphs.find(paragraph=>paragraph.segmentIds.length)?.segmentIds[0]?.split(":")[0] ?? "";
-              const payload = Object.entries(assignments).filter(([,value])=>value.speakerIdentity&&value.transcriptRole)
-                .map(([speaker,value])=>({ sourceJobIdentity:jobIdentity, deepgramSpeaker:Number(speaker), ...value }));
-              void post("/api/transcript/speaker-map",{ depositionId, assignments:payload });
-            }}>Save speaker map</button>
+            <button type="button" className="primary-button" disabled={busy} onClick={()=>{ void (async ()=>{
+              // Each bucket carries the job its paragraphs came from. The previous payload took
+              // one job identity from the first rendered paragraph and stamped it on every
+              // assignment, which is right only while a single job is in the transcript.
+              const payload = buckets
+                .map(([speaker,info])=>({ sourceJobIdentity:info.jobIdentity, deepgramSpeaker:speaker, ...effectiveAssignment(speaker,info.jobIdentity) }))
+                .filter(item=>item.speakerIdentity&&item.transcriptRole);
+              setSavedNote("");
+              // The count comes from what was sent, not from the reload: post() throws on a
+              // non-ok response, so reaching here means the server accepted exactly these.
+              // Reading it back off `rendered` would race the refetch and could report the
+              // previous save as though it were this one.
+              if(await post("/api/transcript/speaker-map",{ depositionId, assignments:payload })) {
+                setSavedNote(`Saved ${payload.length} of ${buckets.length} Deepgram speakers.`);
+              }
+            })(); }}>Save speaker map</button>
+            {/* One element, and the server's answer rather than the app's hope: the transient
+                note while it stands, the persisted state otherwise. The note is cleared by any
+                change to an assignment, so "Saved" is never displayed next to an unsaved edit. */}
+            <p className="workspace-hint" role="status">
+              {savedNote ? savedNote
+                : speakerMapStatus==="reconciled" ? `Speaker map saved. All ${rendered?.speakerMap?.assignments.length ?? 0} Deepgram speakers are assigned.`
+                : speakerMapStatus==="partially_reconciled" ? `Speaker map partly saved: ${rendered?.speakerMap?.assignments.length ?? 0} assigned, some Deepgram speakers still unassigned.`
+                : "Speaker map not saved yet."}
+            </p>
             <label htmlFor="workspace-examiner">Examining attorney</label>
             <select id="workspace-examiner" value={examiner} onChange={event=>setExaminer(event.target.value)}>
               <option value="">Not set</option>
