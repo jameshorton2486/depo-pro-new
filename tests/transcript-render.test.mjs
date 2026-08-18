@@ -193,3 +193,18 @@ test("the rendered word carries a styled display alongside its evidence text",()
   assert.equal(paragraph.words[1].display,"okay");
   assert.equal(paragraph.words[1].styled,undefined);
 });
+
+test("the rendered transcript reports its own content hash",()=>{
+  // withTranscriptContentHash writes `transcript_hash`; this field read `transcriptContentHash`
+  // and so reported null for every transcript ever rendered. It went unnoticed because nothing
+  // displayed it -- and it is the transcript's identity, the value a correction pass invalidates
+  // against and the one a reporter would cite for a certified page.
+  const evidence=[{ jobIdentity:"job", words:[{ id:"job:word:1", punctuatedWord:"Yes.", start:0, end:1, deepgramSpeaker:0 }] }];
+  const working={ derivedFrom:["job"], transcript_hash:"abc123", speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"s1", sourceJobIdentity:"job", asrWordIds:["job:word:1"], text:"Yes.", deepgramSpeaker:0, start:0, end:1 }] };
+  const result=renderTranscript({ working, evidence });
+  assert.equal(result.transcriptContentHash,"abc123");
+  assert.deepEqual(result.derivedFrom,["job"]);
+  // A transcript with no hash reports none rather than inventing one.
+  assert.equal(renderTranscript({ working:{ ...working, transcript_hash:undefined }, evidence }).transcriptContentHash,null);
+});

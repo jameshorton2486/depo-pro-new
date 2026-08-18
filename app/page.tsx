@@ -5,7 +5,6 @@ import IntakeScreen, { type IntakeAttorney, type IntakeDraft } from "./IntakeScr
 import AdminSettings from "./AdminSettings";
 import InsertionPagesScreen from "./InsertionPagesScreen";
 import TranscriptComparisonScreen from "./TranscriptComparisonScreen";
-import ReporterReviewScreen from "./ReporterReviewScreen";
 import WorkspaceScreen from "./WorkspaceScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
@@ -99,7 +98,6 @@ export default function Home() {
   const [showAudioTools, setShowAudioTools] = useState(false);
   const [showInsertionPages, setShowInsertionPages] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  const [showReview, setShowReview] = useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -122,14 +120,14 @@ export default function Home() {
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
-      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowReview(resumeSession.view==="review");
+      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");
       try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(DEPOSITION_VIEWS.includes(resumeSession.view)&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showReview&&active?"review":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showReview,showModal]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showModal]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -203,12 +201,12 @@ export default function Home() {
   }
 
 
-  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showReview?"review":"workspace"):"library";
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":"workspace"):"library";
   function navigate(next:NavView){
     // One place decides which screen is showing. Every entry clears the others, so two
     // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
     setShowAdmin(next==="admin"); setShowIntake(next==="intake"); setShowAudioTools(next==="audio-tools");
-    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowReview(next==="review");
+    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare");
     if(next==="library") setActive(null);
   }
   const frame=(node:React.ReactNode)=>(
@@ -239,7 +237,6 @@ export default function Home() {
   if (active) {
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
-    if (showReview) return frame(<ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />);
     // The Workspace is the default for an open deposition. It was the Transcript screen, whose
     // only irreplaceable control -- the transcribe step -- now lives here, and whose speaker map
     // is keyed by job here too. A stored session naming the retired "transcript" view lands here

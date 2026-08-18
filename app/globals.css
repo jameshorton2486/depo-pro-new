@@ -501,3 +501,8 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-transcribe-failure { color:#a3283a; }
 .workspace-transcribe label { display:grid; gap:5px; }
 @media(max-width:700px){ .workspace-transcribe-row { flex-direction:column; align-items:stretch; } }
+
+/* Carried from the retired Read-through metadata strip. The hash is monospaced because it is an
+   identifier a reporter may need to read character by character or copy into a filing. */
+.workspace-flag { color:#a3283a; }
+.workspace-hash { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78em; color:#5b6880; }

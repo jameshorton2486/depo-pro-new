@@ -7,7 +7,7 @@ const API = "http://127.0.0.1:4317";
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string };
-type Rendered = { paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
 type Operation = Record<string,unknown>;
 type Bucket = { key:string; jobIdentity:string; deepgramSpeaker:number; words:number; sample:string };
@@ -193,6 +193,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
   const speakerMapStatus = rendered?.speakerMap?.status ?? "unreconciled";
+  const unassignedSpeakers = useMemo(()=>(rendered?.paragraphs ?? []).filter(paragraph=>paragraph.unlabeledSpeaker).length,[rendered]);
   // The panel held only the reporter's unsaved changes and never the saved map, so every select
   // read "Unassigned" against a fully reconciled transcript -- and "Save speaker map" then sent
   // an empty array and un-reconciled it. A destructive click that looked idempotent. Local state
@@ -256,6 +257,15 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <span className="workspace-counts">
           {rendered ? `${rendered.counts.paragraphs} paragraphs · ${rendered.counts.words} words · ${rendered.counts.operations} edits` : "Loading…"}
           {busy && " · saving…"}
+          {/* Carried over when the Read-through screen was retired. The content hash is the
+              transcript's identity -- what a correction pass invalidates against and what a
+              reporter would cite for a certified page -- and it was shown on no other surface.
+              The unassigned count is here because a transcript with unlabelled speakers is not
+              finished, and the source-job count because more than one is how a duplicate
+              transcription became visible. */}
+          {rendered && unassignedSpeakers > 0 && <span className="workspace-flag"> · {unassignedSpeakers} unassigned</span>}
+          {rendered && (rendered.derivedFrom?.length ?? 0) > 1 && <span className="workspace-flag"> · {rendered.derivedFrom?.length} source jobs</span>}
+          {rendered?.transcriptContentHash && <span className="workspace-hash" title={rendered.transcriptContentHash}> · {rendered.transcriptContentHash.slice(0,12)}</span>}
         </span>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit</button>
       </header>

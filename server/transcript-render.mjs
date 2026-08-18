@@ -133,7 +133,14 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
 
   return {
     schemaVersion:"1.1.0", recordType:"RENDERED_TRANSCRIPT",
-    transcriptContentHash:working?.transcriptContentHash ?? null,
+    // withTranscriptContentHash writes transcript_hash; this read asked for a key the working
+    // transcript has never carried, so the rendered payload reported null for every transcript
+    // since the field was added. Nothing consumed it, which is why nothing caught it -- and it
+    // is the transcript's identity, the value OI-3 uses to invalidate a correction pass.
+    transcriptContentHash:working?.transcript_hash ?? working?.transcriptContentHash ?? null,
+    // The jobs this transcript derives from, carried so a reader can see how many sources are
+    // behind it without opening the working file.
+    derivedFrom:working?.derivedFrom ?? [],
     speakerMap:working?.speakerMap ?? null, labels, examinerIdentity,
     counts:{ segments:segments.length, projectedSegments:projected.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size,
       operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length },
