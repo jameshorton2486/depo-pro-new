@@ -117,19 +117,27 @@ function renderedProjection(rendered) {
       id:paragraph.id, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, text:paragraph.text, start:paragraph.start, end:paragraph.end,
       segmentIds:paragraph.segmentIds, asrWordIds:paragraph.asrWordIds,
+      sourceJobIdentity:paragraph.sourceJobIdentity, deepgramSpeaker:paragraph.deepgramSpeaker,
     })),
   };
 }
 
 function previewParagraphs(rendered) {
-  return renderedProjection(rendered).paragraphs;
+  const fallbackLabels=new Map();
+  return renderedProjection(rendered).paragraphs.map(paragraph=>{
+    if(paragraph.label)return paragraph;
+    const speaker=paragraph.deepgramSpeaker;
+    const key=speaker===null||speaker===undefined?null:`${paragraph.sourceJobIdentity??"unknown-job"}:${speaker}`;
+    if(key&&!fallbackLabels.has(key))fallbackLabels.set(key,`SPEAKER ${fallbackLabels.size+1}:`);
+    return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:"};
+  });
 }
 
 export function buildTranscriptPrintModel({ rendered, reviewStateHash, deposition, profile=TRANSCRIPT_BODY_LAYOUT_PROFILE }={}) {
   if (!rendered?.paragraphs) throw new Error("PRINT_RENDERED_TRANSCRIPT_REQUIRED: Print Model consumes the canonical rendered transcript.");
   if (!reviewStateHash) throw new Error("PRINT_REVIEW_STATE_REQUIRED: Preview requires the canonical review-state hash.");
   const printFindings=[];
-  if(!isLayoutProfileVerified(profile)) printFindings.push({ code:"PRINT_LAYOUT_PROFILE_UNVERIFIED", severity:"warning", target:"layoutProfile", message:"The 25-line body grid and 62-character transcript width are available, but final page margins and gutter geometry have not been signed off." });
+  if(!isLayoutProfileVerified(profile)) printFindings.push({ code:"PRINT_LAYOUT_PROFILE_UNVERIFIED", severity:"warning", target:"layoutProfile", message:"This is a simple readable preview. Its 25-line reading pages are not verified court-transcript geometry and are not intended for certified production output." });
   const projection=renderedProjection(rendered),paragraphs=previewParagraphs(rendered),renderedProjectionHash=hash(projection),pages=paginate(paragraphs,printFindings,profile);
   const unsigned={
     schemaVersion:TRANSCRIPT_PRINT_MODEL_VERSION, recordType:"TRANSCRIPT_PRINT_MODEL",

@@ -21,6 +21,7 @@ test("Print Model consumes canonical paragraphs and exposes a 25-position body g
     id:paragraph.id, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
     layout:paragraph.layout, text:paragraph.text, start:paragraph.start, end:paragraph.end,
     segmentIds:paragraph.segmentIds, asrWordIds:paragraph.asrWordIds,
+    sourceJobIdentity:paragraph.sourceJobIdentity, deepgramSpeaker:paragraph.deepgramSpeaker,
   })),"Print Model projects canonical rendered paragraphs without rebuilding testimony");
   assert.equal(printed.paragraphs.some(paragraph=>Object.hasOwn(paragraph,"words")),false,"Print Model retains references, not copied evidence word objects");
   assert.equal(printed.pages.every(page=>page.lines.length===25),true);
@@ -29,6 +30,17 @@ test("Print Model consumes canonical paragraphs and exposes a 25-position body g
   const traced=printed.pages.flatMap(page=>page.lines).find(line=>line.occupied&&line.trace?.sourceWordIds.length);
   assert.ok(traced.trace.sourceSegmentIds.length);
   assert.ok(traced.trace.sourceWordIds.length);
+});
+
+test("Preview preserves fillers and supplies stable display-only labels for unreconciled speakers",()=>{
+  const unreconciled={...WORKING,speakerMap:{status:"pending",assignments:[]},segments:WORKING.segments.map(segment=>({...segment,speakerIdentity:null,transcriptRole:null}))};
+  const rendered=renderTranscript({working:unreconciled,evidence:[EVIDENCE],speakerCandidates:SPEAKER_CANDIDATES,overlay:overlayOf()});
+  const printed=buildTranscriptPrintModel({rendered,reviewStateHash:computeReviewStateHash({transcript:unreconciled,overlay:overlayOf()}),deposition:DEPOSITION});
+  assert.equal(printed.paragraphs.every(paragraph=>paragraph.label),true);
+  assert.match(visible(printed),/SPEAKER \d+:/);
+  assert.match(visible(printed),/\bUh\b/);
+  assert.match(visible(printed),/\bum\b/);
+  assert.equal(printed.paragraphs.map(paragraph=>paragraph.text).join("\n"),rendered.paragraphs.map(paragraph=>paragraph.text).join("\n"));
 });
 
 const cases=[
