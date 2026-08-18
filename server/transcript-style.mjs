@@ -167,7 +167,14 @@ export function styleWords(words = []) {
     const text = String(word?.text ?? "");
     if (word?.edited || word?.authored || word?.deleted) return { ...word, display:text };
     const display = styleWord(text, { previous:words[index - 1]?.text ?? "", next:words[index + 1]?.text ?? "", exhibitNumber:isExhibitNumber(words, index) });
-    return display === text ? { ...word, display } : { ...word, display, styled:true };
+    if (display === text) return { ...word, display };
+    // Flagged, not refused. Every other rule here writes the same word differently; this one
+    // chooses between Miss, Ms. and Mrs., which a certified record distinguishes and the
+    // recording does not settle. The ruling is that all of them are Ms., and it stands -- but a
+    // reporter should be able to see where that choice was made rather than have it disappear
+    // into the reading, which is what HONORIFIC_MISSING exists to prevent for the same word.
+    const honorificAssumed = /^miss$/i.test(split(text).body) && display === "Ms.";
+    return honorificAssumed ? { ...word, display, styled:true, honorificAssumed:true } : { ...word, display, styled:true };
   });
 }
 

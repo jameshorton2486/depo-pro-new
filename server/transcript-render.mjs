@@ -145,6 +145,12 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   const unclaimed = [...words.keys()].filter(id => !seen.has(id));
   if (unclaimed.length) findings.push({ code:"EVIDENCE_NOT_RENDERED", count:unclaimed.length, wordIds:unclaimed.slice(0, 10), message:`${unclaimed.length} ASR word(s) exist in evidence but appear in no paragraph.` });
 
+  // One finding, not 53. The reporter needs a list to scan, and a finding per word would bury
+  // every other finding on the screen.
+  const assumed = paragraphs.flatMap(paragraph => paragraph.words.filter(word => word.honorificAssumed));
+  if (assumed.length) findings.push({ code:"HONORIFIC_ASSUMED", count:assumed.length, wordIds:assumed.slice(0, 10).map(word => word.id),
+    message:`${assumed.length} spoken "miss" written as "Ms." A certified record distinguishes Miss, Ms. and Mrs., and the recording does not; each of these is the standard form applied, not a title heard.` });
+
   const diarized = [...words.values()].some(word => Number.isInteger(word?.deepgramSpeaker));
   if (words.size && !diarized) findings.push({ code:"NO_DIARIZATION", message:"No ASR word carries a speaker number. Every paragraph will collapse into one speaker, and no speaker map can be assigned." });
 

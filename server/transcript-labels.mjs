@@ -33,6 +33,15 @@ export const ELEMENT = Object.freeze({
 //     show 28 mismatches at colloquy, and they must not be reconciled back. That is the whole
 //     reason this paragraph exists.
 //
+//   NEW_PARAGRAPH at col 15 -- ALSO A REPORTER RULING, under Texas UFM 2.11: the first line of
+//     any new paragraph, including a continuation inside a long answer, begins at the third stop
+//     and wraps flush to the left margin. This was col 5, which aligned a continuation with the
+//     Q./A. designations rather than with the body of the testimony it continues.
+//
+//     Like the colloquy move, this is a deliberate divergence and a pinned test was updated by
+//     ruling rather than by defect. Both changes are traceable to a decision recorded here, and
+//     neither should be "corrected" back by someone diffing against the specimen.
+//
 // The runover for both IS measured: flush to col 0, no block indent. The one multi-line
 // parenthetical in the specimen wraps to col 0 exactly like testimony.
 //

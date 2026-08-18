@@ -270,3 +270,39 @@ test("the job identity comes from the segment, not from the shape of its id",()=
   assert.equal(paragraph.sourceJobIdentity,"job","the carried value, not the id prefix");
   assert.notEqual(paragraph.sourceJobIdentity,"a-segment-id-that-encodes-nothing");
 });
+
+test("choosing Ms. is reported, not silent",()=>{
+  // The ruling converts every spoken "miss" to "Ms." That is right, and it is also the one rule
+  // here that chooses between forms a certified record distinguishes -- Miss, Ms. and Mrs. --
+  // where the recording does not settle which was said. HONORIFIC_MISSING exists to make exactly
+  // that visible for a speaker label; a silent conversion in the body would remove the same
+  // signal. The conversion still happens; the reporter gets a list.
+  const evidence=[{ jobIdentity:"job", words:[
+    { id:"job:word:1", punctuatedWord:"miss", start:1, end:1.5, deepgramSpeaker:0 },
+    { id:"job:word:2", punctuatedWord:"Vargas", start:2, end:2.5, deepgramSpeaker:0 },
+  ]}];
+  const working={ derivedFrom:["job"], speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"job:segment:1", sourceJobIdentity:"job", sourceUploadId:"u", sourceOrdinal:0,
+      asrWordIds:["job:word:1","job:word:2"], text:"miss Vargas", deepgramSpeaker:0, speakerIdentity:null, transcriptRole:null, start:1, end:2.5 }] };
+  const result=renderTranscript({ working, evidence });
+  assert.equal(result.paragraphs[0].text,"Ms. Vargas","the conversion still happens");
+  const finding=result.findings.find(item => item.code === "HONORIFIC_ASSUMED");
+  assert.ok(finding,"and it is reported");
+  assert.equal(finding.count,1);
+  assert.deepEqual(finding.wordIds,["job:word:1"]);
+  assert.match(finding.message,/Miss, Ms\. and Mrs\./);
+});
+
+test("a word Deepgram already wrote as Ms. is not reported as a choice",()=>{
+  // 32 of ETM01's 53 rendered "Ms." were already "Ms." in the ASR; only 21 are conversions. A
+  // finding that counted the rendered form rather than the change would overstate by half.
+  const evidence=[{ jobIdentity:"job", words:[
+    { id:"job:word:1", punctuatedWord:"Ms.", start:1, end:1.5, deepgramSpeaker:0 },
+    { id:"job:word:2", punctuatedWord:"Vargas", start:2, end:2.5, deepgramSpeaker:0 },
+  ]}];
+  const working={ derivedFrom:["job"], speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"job:segment:1", sourceJobIdentity:"job", sourceUploadId:"u", sourceOrdinal:0,
+      asrWordIds:["job:word:1","job:word:2"], text:"Ms. Vargas", deepgramSpeaker:0, speakerIdentity:null, transcriptRole:null, start:1, end:2.5 }] };
+  const result=renderTranscript({ working, evidence });
+  assert.equal(result.findings.some(item => item.code === "HONORIFIC_ASSUMED"),false,"nothing was chosen, so nothing is reported");
+});
