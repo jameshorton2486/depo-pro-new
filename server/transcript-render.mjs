@@ -42,7 +42,19 @@ export function indexEvidenceWords(evidenceDocuments = []) {
 export function renderTranscript({ working, evidence = [], speakerCandidates = [], examinerIdentity = null, overlay = null } = {}) {
   const findings = [];
   const projected = working?.segments || [];
-  const { words, duplicates } = indexEvidenceWords(evidence);
+  // The evidence store for a transcript is the evidence that transcript derives from, not every
+  // job on disk. A superseded run leaves its asr-evidence.json in place -- immutable, hashed and
+  // rebuildable -- and reading it here put 12,185 words into the store that appear in no
+  // paragraph. That is not merely noise: OI-3 V1 admits a proposal whose word_id "exists in the
+  // canonical Deepgram store", and an unscoped store would let a correction anchor to a word
+  // that is not in the transcript at all while passing the check meant to catch exactly that.
+  //
+  // Narrows only when derivedFrom says something. A record without it keeps every document,
+  // because not knowing which job a transcript came from is a reason to show the reader
+  // everything, not a reason to show them nothing.
+  const derivedFrom = new Set(working?.derivedFrom ?? []);
+  const scopedEvidence = derivedFrom.size ? evidence.filter(document => derivedFrom.has(document?.jobIdentity)) : evidence;
+  const { words, duplicates } = indexEvidenceWords(scopedEvidence);
   for (const id of duplicates) findings.push({ code:"DUPLICATE_WORD_ID", wordId:id, message:`Word id ${id} appears in more than one evidence document.` });
 
   const { labels, findings:labelFindings } = buildSpeakerLabels(speakerCandidates);

@@ -144,3 +144,33 @@ test("a missing honorific reaches the reader as a finding",()=>{
   assert.ok(codes(result).includes("HONORIFIC_MISSING"));
   assert.ok(result.paragraphs.some(paragraph => paragraph.label === "RAMON:"),"the label degrades to the surname rather than guessing a title");
 });
+
+test("evidence from a superseded job is not part of this transcript's store",()=>{
+  // DEP-20260815-ETM01 held two completed jobs for one audio. After the working transcript was
+  // collapsed onto one of them, the other job's 12,185 words were still being indexed, and every
+  // one of them reported as evidence that appears in no paragraph.
+  const kept="jobA", dropped="jobB";
+  const evidence=[
+    { jobIdentity:kept, words:[{ id:`${kept}:word:1`, punctuatedWord:"Yes.", start:0, end:1, deepgramSpeaker:0 }] },
+    { jobIdentity:dropped, words:[{ id:`${dropped}:word:1`, punctuatedWord:"Yes.", start:0, end:1, deepgramSpeaker:0 }] },
+  ];
+  const working={ derivedFrom:[kept], speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"s1", sourceJobIdentity:kept, asrWordIds:[`${kept}:word:1`], text:"Yes.", deepgramSpeaker:0, start:0, end:1 }] };
+  const result=renderTranscript({ working, evidence });
+  assert.equal(result.counts.evidenceWords,1,"only the derived job's words are in the store");
+  assert.equal(result.findings.some(finding=>finding.code==="EVIDENCE_NOT_RENDERED"),false);
+});
+
+test("a transcript that does not say what it derives from keeps every document",()=>{
+  // Failing open is deliberate. Narrowing on an absent derivedFrom would empty the store and
+  // render nothing, which is a worse answer than showing the reader more than they asked for.
+  const evidence=[
+    { jobIdentity:"jobA", words:[{ id:"jobA:word:1", punctuatedWord:"Yes.", start:0, end:1, deepgramSpeaker:0 }] },
+    { jobIdentity:"jobB", words:[{ id:"jobB:word:1", punctuatedWord:"No.", start:0, end:1, deepgramSpeaker:0 }] },
+  ];
+  const working={ speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"s1", sourceJobIdentity:"jobA", asrWordIds:["jobA:word:1"], text:"Yes.", deepgramSpeaker:0, start:0, end:1 }] };
+  const result=renderTranscript({ working, evidence });
+  assert.equal(result.counts.evidenceWords,2);
+  assert.equal(result.findings.find(finding=>finding.code==="EVIDENCE_NOT_RENDERED")?.count,1);
+});
