@@ -54,6 +54,51 @@ export function writePlaybackProxyRecord(root,id,index,record,options={}){const 
 const APPEARANCE_ROLES = Object.freeze(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY", "OTHER"]);
 
 /**
+ * Adds audio to a deposition that already exists.
+ *
+ * Until this, audio[] could only be written by createDeposition, which meant a recording made for
+ * a deposition could never reach it -- the same structural defect counsel had before
+ * writeDepositionCounsel, and fixed the same way: a narrow endpoint rather than a wider intake.
+ * Losing a recording is a lost record, not an inconvenience, so this is the seam that matters.
+ *
+ * The file is registered where it already lies rather than copied. A capture session writes inside
+ * the deposition folder, resolveDepositionAudio resolves any path within that folder, and copying
+ * would double the disk cost of every deposition to gain nothing.
+ *
+ * The SHA-256 is recomputed here rather than taken from the caller. The hash recorded when the
+ * recording was finalized says what was captured; recomputing it at registration says the bytes on
+ * disk are still those. A caller that supplies a hash is checked against the file and refused on
+ * mismatch -- registering audio is exactly the moment to find out, not the moment to assume.
+ */
+export function appendDepositionAudio(root, { depositionId, entries, storageRoot } = {}) {
+  if (!Array.isArray(entries) || !entries.length) throw new Error("At least one audio entry is required.");
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "deposition.json");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const known = new Set((record.audio ?? []).map(item => item.uploadId));
+  const added = [];
+
+  for (const entry of entries) {
+    const uploadId = String(entry?.uploadId ?? "").trim();
+    if (!uploadId) throw new Error("Every audio entry requires an upload id.");
+    if (known.has(uploadId)) throw new Error(`Audio ${uploadId} is already part of this deposition.`);
+    const relative = String(entry?.path ?? "").replaceAll("\\", "/");
+    if (!relative) throw new Error("Every audio entry requires a path.");
+    const target = path.resolve(directory, ...relative.split("/"));
+    if (!within(target, directory)) throw new Error("Audio path escaped the deposition folder.");
+    if (!fs.existsSync(target)) throw new Error(`Audio file was not found: ${relative}`);
+    const sha256 = crypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex");
+    if (entry.sha256 && entry.sha256 !== sha256) throw new Error(`Audio ${relative} failed SHA-256 verification; the file on disk is not the one that was recorded.`);
+    known.add(uploadId);
+    added.push({ uploadId, source: String(entry.source ?? "original"), operationId: entry.operationId ?? null, sha256, path: relative, name: String(entry.name ?? path.basename(target)) });
+  }
+
+  const audio = [...(record.audio ?? []), ...added];
+  atomicJson(file, { ...record, audio, audioFiles: audio.map(item => item.name), audioIntakeIds: audio.map(item => item.uploadId), updatedAt: new Date().toISOString() });
+  return { depositionId, added };
+}
+
+/**
  * Replaces parties[] on an existing deposition, and touches nothing else.
  *
  * Narrow for the same reason writeDepositionCounsel is narrow: a party entry cannot orphan a word

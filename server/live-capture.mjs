@@ -2,9 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {spawn,spawnSync} from "node:child_process";
-import {depositionDirectory} from "./deposition-store.mjs";
+import {appendDepositionAudio,depositionDirectory} from "./deposition-store.mjs";
 
 export const LIVE_CAPTURE_SCHEMA_VERSION="1.0.0";
+// Deterministic, so re-registering a channel collides with itself and is refused, and shaped as
+// a UUID because that is what every other uploadId in a deposition record is.
+function uploadIdForChannel(sessionId,channelId){const hex=crypto.createHash("sha256").update(`${sessionId}:${channelId}`).digest("hex");return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`}
 const active=new Map(),SOURCE_ID=/^[a-z][a-z0-9-]{0,63}$/;
 const now=()=>new Date().toISOString();
 function atomicJson(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`,fd=fs.openSync(temp,"wx");try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}fs.renameSync(temp,file)}
@@ -24,5 +27,37 @@ export function startCaptureSession(root,{depositionId,sessionId,storageRoot,spa
 async function stopChild(item){return await new Promise(resolve=>{let settled=false;const done=()=>{if(settled)return;settled=true;resolve()};item.child.once("exit",done);try{item.child.stdin.write("q\n")}catch{/* process already closed */}setTimeout(()=>{try{item.child.kill()}catch{/* process already closed */}done()},5000)})}
 function probe(file){const result=spawnSync("ffprobe",["-v","error","-select_streams","a:0","-show_entries","stream=sample_rate,channels,bits_per_sample,duration_ts","-of","json",file],{encoding:"utf8",windowsHide:true,timeout:15000});if(result.status!==0)return null;return JSON.parse(result.stdout).streams?.[0]??null}
 export async function stopCaptureSession(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("The local capture process is not active in this application instance.");await Promise.all(runtime.children.map(stopChild));const end=process.hrtime.bigint();for(const source of runtime.session.sources){const file=recordPath(runtime.paths,source),child=runtime.children.find(item=>item.sourceId===source.id),media=fs.existsSync(file)?probe(file):null;source.state=fs.existsSync(file)?"FINALIZED":"FAILED";source.timing.captureEndMonotonicNs=(end-runtime.origin).toString();if(child?.stderr&&/device|buffer|overrun|lost|error/i.test(child.stderr))source.health.errors.push({at:now(),message:child.stderr.slice(-2000)});if(fs.existsSync(file)){source.format.sampleRate=Number(media?.sample_rate)||null;source.format.channels=Number(media?.channels)||null;source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true}}}runtime.session.state=runtime.session.sources.every(source=>source.state==="FINALIZED")?"FINALIZED":"DEGRADED";runtime.session.events.push({type:"LOCAL_RECORDING_STOPPED",at:now()});runtime.session.updatedAt=now();atomicJson(runtime.paths.manifest,runtime.session);active.delete(sessionId);return publicSession(runtime.session)}
+/**
+ * Registers a finished capture session's channels as this deposition's audio.
+ *
+ * This is the seam between the two halves of the application: the live screen makes the recording,
+ * and the existing pipeline turns a recording into a certified transcript. Without it a capture
+ * lived inside the deposition folder and was still invisible to the deposition.
+ *
+ * The upload id is derived from the session and channel rather than random, so registering the
+ * same channel twice is refused by the duplicate check instead of silently adding it again under a
+ * new name.
+ *
+ * Finalized channels are registered even when the session as a whole is DEGRADED. A channel that
+ * failed must not take the surviving recordings down with it -- that would turn one device fault
+ * into the loss of the record, which is the outcome the per-channel design exists to prevent. What
+ * was skipped is returned rather than passed over.
+ */
+export function registerCaptureAudio(root,{depositionId,sessionId,storageRoot}={}){
+  const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
+  if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before adding it to the deposition.");
+  const finalized=session.sources.filter(source=>source.state==="FINALIZED"&&source.artifact?.finalized&&source.artifact.sha256);
+  const skipped=session.sources.filter(source=>!finalized.includes(source)).map(source=>({id:source.id,role:source.role,state:source.state}));
+  if(!finalized.length)throw new Error("This capture session has no finalized channels to add.");
+  const entries=finalized.map(source=>({
+    uploadId:uploadIdForChannel(sessionId,source.id),
+    sha256:source.artifact.sha256,
+    path:source.artifact.relativePath,
+    name:`${sessionId}-${source.id}.wav`,
+    source:"original",
+  }));
+  return {...appendDepositionAudio(root,{depositionId,entries,storageRoot}),sessionId,skipped};
+}
+
 export function getCaptureSession(root,{depositionId,sessionId,storageRoot}={}){const paths=sessionPaths(root,depositionId,sessionId,storageRoot);return publicSession(active.get(sessionId)?.session??readManifest(paths))}
 export const _testing={active,observeHealth,validateSources};
