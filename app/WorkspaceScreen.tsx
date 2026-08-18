@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 const API = "http://127.0.0.1:4317";
@@ -9,6 +9,67 @@ type Paragraph = { id:string; elementType:string; label:string|null; byLine:stri
 type Finding = { code:string; message:string };
 type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
+
+// One paragraph, memoized, because without this a single word click reconciles every word in the
+// deposition -- measured at 150-200ms of blocked main thread per click on ETM01's 12,174 words.
+//
+// Every prop here is a primitive or an identity that only changes when this paragraph's appearance
+// actually changes. That is the whole trick, and it is easy to get wrong: passing `selected` or an
+// `inRange` closure would be correct-looking and would re-render all 306 paragraphs on every click,
+// because both change identity whenever the selection moves anywhere in the transcript.
+//
+//   selectedWordId is null for every paragraph except the one holding the selection, so moving the
+//   selection re-renders exactly two paragraphs: the one losing it and the one gaining it.
+//
+//   rangeFirst/rangeLast are -1 unless the range actually overlaps this paragraph's words, so a
+//   range selection re-renders the paragraphs it spans rather than all of them.
+//
+// wordOrder is a Map memoized on `rendered`, so its identity is stable between renders.
+const TranscriptParagraph = memo(function TranscriptParagraph({
+  paragraph, wordOrder, isSelected, selectedWordId, rangeFirst, rangeLast, onSeek, onSelect, onEdit,
+}:{
+  paragraph:Paragraph; wordOrder:Map<string,number>; isSelected:boolean; selectedWordId:string|null;
+  rangeFirst:number; rangeLast:number;
+  onSeek:(seconds:number|null)=>void;
+  onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;
+  onEdit:(wordId:string,text:string)=>void;
+}){
+  const inRange = (wordId:string)=>{ if(rangeFirst<0)return false; const index=wordOrder.get(wordId); return index!==undefined&&index>=rangeFirst&&index<=rangeLast; };
+  return (
+    <article className={`wp ${paragraph.elementType.toLowerCase()} ${isSelected?"selected":""}`}>
+      <button type="button" className="wp-time" onClick={()=>onSeek(paragraph.start)} aria-label={`Play from ${clock(paragraph.start)}`}>{clock(paragraph.start)}</button>
+      <span className="wp-label">{paragraph.label ?? (paragraph.unlabeledSpeaker ? `Speaker ${paragraph.deepgramSpeaker ?? "?"}` : "")}</span>
+      <p className="wp-text">
+        {paragraph.byLine && <em className="wp-byline">{paragraph.byLine} </em>}
+        {paragraph.words.map((word,index)=>(
+          <Fragment key={word.id}>
+          {/* A real space, not a CSS margin. Each word is its own button so it can be
+              selected and split at, and adjacent inline-block buttons touch with no gap
+              -- the transcript rendered as "Goodafternoon.Weareontherecord." A margin
+              would look right and still copy and read aloud without spaces. */}
+          {index>0 && " "}
+          {/* shiftKey rather than a separate control: the click event carries it for
+              Enter and Space on a focused button too, so extending the selection works
+              from the keyboard without a second affordance to find. */}
+          {/* display, not text: the styled form is what the certified transcript shows --
+              "April 24, 2026" for "04/24/2026". Editing below still seeds from word.text,
+              because the reporter corrects the word the recording produced, not its
+              styling; a correction typed over a display form would be a correction to
+              something the evidence never contained. */}
+          <button
+            type="button"
+            className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selectedWordId===word.id?"picked":""}`}
+            aria-label={`${word.display ?? word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
+            onClick={event=>onSelect(paragraph.id,word.id,event.shiftKey)}
+            onDoubleClick={()=>{ if(!word.authored) onEdit(word.id,word.text); }}
+          >{word.display ?? word.text}</button>
+          </Fragment>
+        ))}
+      </p>
+    </article>
+  );
+});
+
 type Operation = Record<string,unknown>;
 type Bucket = { key:string; jobIdentity:string; deepgramSpeaker:number; words:number; sample:string };
 type Audit = { uploadId:string; originalName:string; selectedSource:string };
@@ -173,7 +234,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   }
   const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
 
-  function seek(seconds:number|null){ if(seconds===null||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); }
+  // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
+  // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
+  // entirely -- the component would still be "memoized" and still re-render everything.
+  const seek = useCallback((seconds:number|null)=>{ if(seconds===null||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[]);
+  // The functional form of setSelected is what keeps this stable: reading `selected` directly would
+  // make the callback depend on the selection, which changes on exactly the interaction this is
+  // meant to make cheap.
+  const selectWord = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>{
+    setSelected(previous=>shiftKey&&previous?{...previous,extentWordId:wordId}:{paragraphId,wordId,extentWordId:null});
+    setEditing(null);
+  },[]);
+  const editWord = useCallback((wordId:string,text:string)=>setEditing({wordId,text}),[]);
 
   // The reporter's core move: pick the word a new paragraph should start at, then choose what
   // that paragraph is. Splitting at the first word would produce an empty half, so the label is
@@ -232,11 +304,6 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(from===undefined || to===undefined) return null;
     return { first:Math.min(from,to), last:Math.max(from,to) };
   },[selected,wordOrder]);
-  const inRange = useCallback((wordId:string)=>{
-    if(!range) return false;
-    const index = wordOrder.get(wordId);
-    return index!==undefined && index>=range.first && index<=range.last;
-  },[range,wordOrder]);
   const rangeWords = range ? range.last-range.first+1 : 0;
 
   return (
@@ -338,39 +405,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
 
       <div className="workspace-body">
         <section className="workspace-transcript" aria-label="Transcript">
-          {rendered?.paragraphs.map(paragraph=>(
-            <article key={paragraph.id} className={`wp ${paragraph.elementType.toLowerCase()} ${selected?.paragraphId===paragraph.id?"selected":""}`}>
-              <button type="button" className="wp-time" onClick={()=>seek(paragraph.start)} aria-label={`Play from ${clock(paragraph.start)}`}>{clock(paragraph.start)}</button>
-              <span className="wp-label">{paragraph.label ?? (paragraph.unlabeledSpeaker ? `Speaker ${paragraph.deepgramSpeaker ?? "?"}` : "")}</span>
-              <p className="wp-text">
-                {paragraph.byLine && <em className="wp-byline">{paragraph.byLine} </em>}
-                {paragraph.words.map((word,index)=>(
-                  <Fragment key={word.id}>
-                  {/* A real space, not a CSS margin. Each word is its own button so it can be
-                      selected and split at, and adjacent inline-block buttons touch with no gap
-                      -- the transcript rendered as "Goodafternoon.Weareontherecord." A margin
-                      would look right and still copy and read aloud without spaces. */}
-                  {index>0 && " "}
-                  {/* shiftKey rather than a separate control: the click event carries it for
-                      Enter and Space on a focused button too, so extending the selection works
-                      from the keyboard without a second affordance to find. */}
-                  {/* display, not text: the styled form is what the certified transcript shows --
-                      "April 24, 2026" for "04/24/2026". Editing below still seeds from word.text,
-                      because the reporter corrects the word the recording produced, not its
-                      styling; a correction typed over a display form would be a correction to
-                      something the evidence never contained. */}
-                  <button
-                    type="button"
-                    className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selected?.wordId===word.id?"picked":""}`}
-                    aria-label={`${word.display ?? word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
-                    onClick={event=>{ if(event.shiftKey && selected) setSelected({ ...selected, extentWordId:word.id }); else setSelected({ paragraphId:paragraph.id, wordId:word.id, extentWordId:null }); setEditing(null); }}
-                    onDoubleClick={()=>{ if(!word.authored) setEditing({ wordId:word.id, text:word.text }); }}
-                  >{word.display ?? word.text}</button>
-                  </Fragment>
-                ))}
-              </p>
-            </article>
-          ))}
+          {rendered?.paragraphs.map(paragraph=>{
+            // Only the paragraphs the range actually touches are told about it. Comparing the
+            // range against this paragraph's own span is what keeps a range selection from
+            // re-rendering the paragraphs it does not cover.
+            const first=wordOrder.get(paragraph.words[0]?.id ?? ""), last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? "");
+            const touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last);
+            const mine=selected?.paragraphId===paragraph.id;
+            return <TranscriptParagraph
+              key={paragraph.id}
+              paragraph={paragraph}
+              wordOrder={wordOrder}
+              isSelected={mine}
+              selectedWordId={mine?selected!.wordId:null}
+              rangeFirst={touches?range!.first:-1}
+              rangeLast={touches?range!.last:-1}
+              onSeek={seek}
+              onSelect={selectWord}
+              onEdit={editWord}
+            />;
+          })}
         </section>
 
         <aside className="workspace-menu" aria-label="Paragraph labels">
