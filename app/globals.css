@@ -463,3 +463,7 @@ dd { margin:0; font-size:13px; font-weight:650; }
    identifier a reporter may need to read character by character or copy into a filing. */
 .workspace-flag { color:#a3283a; }
 .workspace-hash { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78em; color:#5b6880; }
+
+/* Shown when a transcript has paragraphs but no speaker map. Informational rather than an error:
+   the transcript is correct, it just cannot show Q./A. until the speakers are assigned. */
+.workspace-awaiting { margin:0; padding:11px 20px; background:#fff8e6; border-bottom:1px solid #e8d9a8; color:#6b551d; font-size:.9rem; }

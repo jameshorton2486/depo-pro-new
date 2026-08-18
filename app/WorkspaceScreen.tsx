@@ -193,6 +193,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
   const speakerMapStatus = rendered?.speakerMap?.status ?? "unreconciled";
+  // A transcript with paragraphs and no speaker map renders entirely as colloquy. That is
+  // correct -- Q. and A. require knowing who is examining, and nothing should infer it from the
+  // presence of a roster -- but on screen it is indistinguishable from labelling being broken.
+  // Saying so is the difference between working-as-designed and apparently-failing.
+  const awaitingSpeakerMap = Boolean(rendered?.counts.paragraphs) && speakerMapStatus === "unreconciled";
   const unassignedSpeakers = useMemo(()=>(rendered?.paragraphs ?? []).filter(paragraph=>paragraph.unlabeledSpeaker).length,[rendered]);
   // The panel held only the reporter's unsaved changes and never the saved map, so every select
   // read "Unassigned" against a fully reconciled transcript -- and "Save speaker map" then sent
@@ -288,6 +293,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           because that is its order: a deposition with no transcript has nothing else on this
           screen, and one with a transcript still needs a way to verify the preserved result or
           retry a failed job. */}
+      {awaitingSpeakerMap && (
+        <p className="workspace-awaiting" role="status">
+          No speakers assigned yet, so every paragraph reads as colloquy. Assign the Deepgram
+          speakers below and the Q. and A. structure appears.
+        </p>
+      )}
+
       {uploads.length > 0 && (
         <section className="workspace-transcribe" aria-label="Transcription">
           {(deposition.keyterms?.length||0) > 50 && (
