@@ -53,3 +53,33 @@ export function groupTranscriptSegments(segments) {
   }
   return paragraphs;
 }
+
+/**
+ * Deepgram speaker buckets for the bulk speaker map, keyed by job AND speaker number.
+ *
+ * Deepgram numbers speakers per request, so speaker 0 in one job and speaker 0 in another are
+ * two different people who happen to share an index. Keying the buckets by index alone merges
+ * them into one row, and whichever identity the reporter picks is then applied to both -- no
+ * error, no warning, and the wrong person attributed in a certified record. A deposition
+ * recorded in three volumes has three unrelated speaker 0s.
+ *
+ * The composite key is the same one reconcileSpeakerMap uses server-side
+ * (`${sourceJobIdentity}:${deepgramSpeaker}`), so what the panel offers and what the server
+ * accepts cannot drift apart.
+ *
+ * Sorted by word count because that is what makes the roles obvious: the examiner and the
+ * witness hold thousands of words each, the videographer and reporter a few hundred.
+ */
+export function speakerBuckets(paragraphs = []) {
+  const buckets = new Map();
+  for (const paragraph of paragraphs) {
+    const speaker = paragraph?.deepgramSpeaker;
+    if (speaker === null || speaker === undefined) continue;
+    const jobIdentity = String(paragraph.segmentIds?.[0] ?? "").split(":")[0];
+    const key = `${jobIdentity}:${speaker}`;
+    const bucket = buckets.get(key) ?? { key, jobIdentity, deepgramSpeaker:speaker, words:0, sample:String(paragraph.text ?? "").slice(0, 60) };
+    bucket.words += paragraph.words?.length ?? 0;
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()].sort((a, b) => b.words - a.words);
+}

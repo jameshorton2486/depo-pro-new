@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 const API = "http://127.0.0.1:4317";
 
@@ -9,8 +10,9 @@ type Finding = { code:string; message:string };
 type Rendered = { paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
 type Operation = Record<string,unknown>;
+type Bucket = { key:string; jobIdentity:string; deepgramSpeaker:number; words:number; sample:string };
 type Audit = { uploadId:string; originalName:string; selectedSource:string };
-type Job = { jobId:string; uploadId:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
+type Job = { jobId:string; uploadId:string; startedAt?:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
 export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[] };
 
 const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
@@ -111,20 +113,29 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return ()=>{ cancelled=true; };
   },[depositionId,deposition.audioIntakeIds,reloadToken]);
 
+  const uploads = useMemo(()=>deposition.audioIntakeIds ?? [],[deposition.audioIntakeIds]);
+  const notTranscribedYet = !rendered && uploads.length > 0 && !jobs.some(job=>job.status==="completed");
+  const auditByUpload = useMemo(()=>new Map(audits.map(audit=>[audit.uploadId,audit])),[audits]);
+
   const jobByUpload = useMemo(()=>{
-    // Newest job wins. Building this with new Map() over a newest-first list keeps the OLDEST,
-    // because a duplicate key overwrites -- which is exactly the bug that made the Transcript
-    // screen show a superseded job beside a current transcript.
+    // Newest job wins, chosen by startedAt rather than by position. Building this with new Map()
+    // over the list keeps whichever entry comes last, which made the Transcript screen show a
+    // superseded job beside a current transcript. Reversing the list fixes that only while the
+    // server keeps sorting newest-first -- an invisible contract that would fail silently and in
+    // the same direction if that sort ever changed. Comparing the timestamp depends on nothing.
     const found=new Map<string,Job>();
-    for(const job of [...jobs].reverse()) found.set(job.uploadId,job);
+    for(const job of jobs){
+      const held=found.get(job.uploadId);
+      if(!held || String(job.startedAt ?? "") > String(held.startedAt ?? "")) found.set(job.uploadId,job);
+    }
     return found;
   },[jobs]);
 
-  async function createTranscript(audit:Audit) {
-    setTranscribing(audit.uploadId); setError(""); setNotice("");
+  async function createTranscript(uploadId:string) {
+    setTranscribing(uploadId); setError(""); setNotice("");
     try {
       const response = await fetch(`${API}/api/audio/transcribe`,{ method:"POST", headers:{ "content-type":"application/json" },
-        body:JSON.stringify({ depositionId, uploadId:audit.uploadId, keytermOverrideReason:overrideReason }) });
+        body:JSON.stringify({ depositionId, uploadId, keytermOverrideReason:overrideReason }) });
       const body = await response.json();
       if(!response.ok) throw new Error(body.error||"Deepgram transcription failed.");
       setNotice(body.cached ? "Loaded the preserved, integrity-verified transcription. No Deepgram request was made."
@@ -137,16 +148,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // Deepgram speaker buckets with their word counts. The counts are what make the roles obvious:
   // in the observed run two buckets held ~5,900 words each (examiner and witness) while three
   // held a few hundred or fewer (videographer, reporter, defending counsel).
-  const buckets = useMemo(()=>{
-    const counts = new Map<number,{ words:number; jobIdentity:string; sample:string }>();
-    for(const paragraph of rendered?.paragraphs??[]){
-      if(paragraph.deepgramSpeaker===null) continue;
-      const entry = counts.get(paragraph.deepgramSpeaker) ?? { words:0, jobIdentity:paragraph.segmentIds[0]?.split(":")[0] ?? "", sample:paragraph.text.slice(0,60) };
-      entry.words += paragraph.words.length;
-      counts.set(paragraph.deepgramSpeaker,entry);
-    }
-    return [...counts.entries()].sort((a,b)=>b[1].words-a[1].words);
-  },[rendered]);
+  // Keyed by job AND speaker number, not by speaker number alone. Deepgram numbers speakers per
+  // request, so a deposition recorded in several volumes has an unrelated speaker 0 in each, and
+  // collapsing them merged three people into one row that assigned one identity to all of them.
+  // The key matches the one reconcileSpeakerMap validates against server-side.
+  const buckets = useMemo(()=>speakerBuckets(rendered?.paragraphs ?? []) as Bucket[],[rendered]);
 
   async function post(path:string, payload:Record<string,unknown>) {
     setBusy(true); setError("");
@@ -187,11 +193,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // stays an overlay of changes; the displayed and submitted value is the change when there is
   // one and the saved assignment otherwise. Matched on job as well as speaker index, because the
   // map is keyed by both and a bucket already knows which job it came from.
-  const savedAssignment = useCallback((speaker:number, jobIdentity:string) =>
-    rendered?.speakerMap?.assignments.find(item => item.deepgramSpeaker===speaker && item.sourceJobIdentity===jobIdentity) ?? null,
+  const savedAssignment = useCallback((bucket:Bucket) =>
+    rendered?.speakerMap?.assignments.find(item => item.deepgramSpeaker===bucket.deepgramSpeaker && item.sourceJobIdentity===bucket.jobIdentity) ?? null,
   [rendered]);
-  const effectiveAssignment = useCallback((speaker:number, jobIdentity:string) => {
-    const saved = savedAssignment(speaker,jobIdentity), local = assignments[speaker];
+  const effectiveAssignment = useCallback((bucket:Bucket) => {
+    const saved = savedAssignment(bucket), local = assignments[bucket.key];
     // ?? not ||: choosing "Unassigned" stores "", which must override the saved value rather
     // than falling through to it, or the reporter could never clear an assignment.
     return { speakerIdentity: local?.speakerIdentity ?? saved?.speakerIdentity ?? "", transcriptRole: local?.transcriptRole ?? saved?.transcriptRole ?? "" };
@@ -248,7 +254,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit</button>
       </header>
 
-      {error && <p className="analysis-error" role="alert">{error}</p>}
+      {/* A deposition that has not been transcribed yet is not a deposition that failed. The
+          render endpoint reports a missing working transcript as an error because for every
+          other caller it is one; here it is the ordinary starting state, and the panel below
+          already says what to do about it. Suppressed only when there is audio waiting -- with
+          no audio at all, something really is wrong and the reporter should see it. */}
+      {error && !notTranscribedYet && <p className="analysis-error" role="alert">{error}</p>}
       {rendered && rendered.findings.length>0 && (
         <ul className="workspace-findings" role="alert">
           {rendered.findings.slice(0,6).map((finding,index)=><li key={`${finding.code}:${index}`}>{finding.message}</li>)}
@@ -261,7 +272,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           because that is its order: a deposition with no transcript has nothing else on this
           screen, and one with a transcript still needs a way to verify the preserved result or
           retry a failed job. */}
-      {audits.length > 0 && (
+      {uploads.length > 0 && (
         <section className="workspace-transcribe" aria-label="Transcription">
           {(deposition.keyterms?.length||0) > 50 && (
             <label className="workspace-hint" htmlFor="workspace-keyterm-override">
@@ -270,22 +281,23 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 placeholder="Record why more than 50 terms are necessary" />
             </label>
           )}
-          {audits.map((audit,index)=>{
-            const job = jobByUpload.get(audit.uploadId);
+          {uploads.map((uploadId,index)=>{
+            const audit = auditByUpload.get(uploadId);
+            const job = jobByUpload.get(uploadId);
             return (
-              <div className="workspace-transcribe-row" key={audit.uploadId}>
+              <div className="workspace-transcribe-row" key={uploadId}>
                 <div>
-                  <strong>{deposition.audioFiles[index] || audit.originalName}</strong>
+                  <strong>{deposition.audioFiles[index] || audit?.originalName || "Audio file"}</strong>
                   <small>
-                    {job ? `Job ${job.status} · ${job.jobId.slice(0,12)}…` : `Frozen ${audit.selectedSource} source ready`}
+                    {job ? `Job ${job.status} · ${job.jobId.slice(0,12)}…` : audit ? `Frozen ${audit.selectedSource} source ready` : "Ready to transcribe"}
                     {job?.keyterms?.count !== undefined && ` · ${job.keyterms.count} keyterms`}
                     {job?.response?.deliveredAudio?.converted ? " · lossless WAV fallback" : job ? " · frozen deposition audio" : ""}
                   </small>
                   {job?.failure && <small className="workspace-transcribe-failure">{job.failure.message}</small>}
                 </div>
-                <button type="button" className="primary-button" disabled={transcribing===audit.uploadId||job?.status==="processing"}
-                  onClick={()=>{ void createTranscript(audit); }}>
-                  {transcribing===audit.uploadId ? "Transcribing…"
+                <button type="button" className="primary-button" disabled={transcribing===uploadId||job?.status==="processing"}
+                  onClick={()=>{ void createTranscript(uploadId); }}>
+                  {transcribing===uploadId ? "Transcribing…"
                     : job?.status==="completed" ? "Verify preserved result"
                     : job?.status==="failed" ? "Retry failed job"
                     : "Create transcript"}
@@ -379,24 +391,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 throughout; a label op corrects one paragraph. Collapsing them would make the two
                 indistinguishable in the record. */}
             <p className="workspace-hint">Mapping applies to every paragraph from that Deepgram speaker. To fix a single paragraph, use the labels above instead.</p>
-            {buckets.map(([speaker,info])=>(
-              <div key={speaker} className="workspace-bucket">
-                <strong>Speaker {speaker}</strong> <small>{info.words} words</small>
-                <label htmlFor={`bucket-identity-${speaker}`} className="visually-hidden">Identity for Deepgram speaker {speaker}</label>
-                <select id={`bucket-identity-${speaker}`} value={effectiveAssignment(speaker,info.jobIdentity).speakerIdentity} onChange={event=>{
+            {buckets.map(bucket=>(
+              <div key={bucket.key} className="workspace-bucket">
+                {/* Labelled by job as well as number, because two buckets can both be "Speaker 0"
+                    and the reporter has to be able to tell which recording each belongs to. */}
+                <strong>Speaker {bucket.deepgramSpeaker}</strong> <small>{bucket.words} words{buckets.some(other=>other.deepgramSpeaker===bucket.deepgramSpeaker&&other.key!==bucket.key)?` · job ${bucket.jobIdentity.slice(0,8)}`:""}</small>
+                <label htmlFor={`bucket-identity-${bucket.key}`} className="visually-hidden">Identity for Deepgram speaker {bucket.deepgramSpeaker} in job {bucket.jobIdentity.slice(0,8)}</label>
+                <select id={`bucket-identity-${bucket.key}`} value={effectiveAssignment(bucket).speakerIdentity} onChange={event=>{
                   const candidate=candidates.find(item=>item.id===event.target.value);
                   setSavedNote("");
-                  setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:event.target.value, transcriptRole:candidate?.defaultRole ?? effectiveAssignment(speaker,info.jobIdentity).transcriptRole } }));
+                  setAssignments(current=>({ ...current, [bucket.key]:{ speakerIdentity:event.target.value, transcriptRole:candidate?.defaultRole ?? effectiveAssignment(bucket).transcriptRole } }));
                 }}>
                   <option value="">Unassigned</option>
                   {candidates.map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
                 </select>
-                <label htmlFor={`bucket-role-${speaker}`} className="visually-hidden">Transcript role for Deepgram speaker {speaker}</label>
-                <select id={`bucket-role-${speaker}`} value={effectiveAssignment(speaker,info.jobIdentity).transcriptRole} onChange={event=>{ setSavedNote(""); setAssignments(current=>({ ...current, [speaker]:{ speakerIdentity:effectiveAssignment(speaker,info.jobIdentity).speakerIdentity, transcriptRole:event.target.value } })); }}>
+                <label htmlFor={`bucket-role-${bucket.key}`} className="visually-hidden">Transcript role for Deepgram speaker {bucket.deepgramSpeaker} in job {bucket.jobIdentity.slice(0,8)}</label>
+                <select id={`bucket-role-${bucket.key}`} value={effectiveAssignment(bucket).transcriptRole} onChange={event=>{ setSavedNote(""); setAssignments(current=>({ ...current, [bucket.key]:{ speakerIdentity:effectiveAssignment(bucket).speakerIdentity, transcriptRole:event.target.value } })); }}>
                   <option value="">Role</option>
                   {roles.map(role=><option key={role} value={role}>{ROLE_FOR(role)}</option>)}
                 </select>
-                <small className="workspace-sample">{info.sample}…</small>
+                <small className="workspace-sample">{bucket.sample}…</small>
               </div>
             ))}
             <button type="button" className="primary-button" disabled={busy} onClick={()=>{ void (async ()=>{
@@ -404,7 +418,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               // one job identity from the first rendered paragraph and stamped it on every
               // assignment, which is right only while a single job is in the transcript.
               const payload = buckets
-                .map(([speaker,info])=>({ sourceJobIdentity:info.jobIdentity, deepgramSpeaker:speaker, ...effectiveAssignment(speaker,info.jobIdentity) }))
+                .map(bucket=>({ sourceJobIdentity:bucket.jobIdentity, deepgramSpeaker:bucket.deepgramSpeaker, ...effectiveAssignment(bucket) }))
                 .filter(item=>item.speakerIdentity&&item.transcriptRole);
               setSavedNote("");
               // The count comes from what was sent, not from the reload: post() throws on a
