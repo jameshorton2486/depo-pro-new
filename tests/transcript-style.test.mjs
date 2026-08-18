@@ -196,7 +196,53 @@ test("a title keeps converting whether or not the ASR punctuated it",()=>{
 test("no style rule loses punctuation the word arrived with",()=>{
   // The class of defect, not the instance: a rule that rebuilds a word from parts can drop the
   // tail. Every form below carries a comma in and must carry one out.
-  for (const [text, next] of [["MD.,",""],["01:27PM,",""],["04/24/2026,",""],["2,","offices"],["1st,","of"],["exhibit,","9"]]) {
+  for (const [text, next] of [["MD.,",""],["mister,","Heath"],["01:27PM,",""],["04/24/2026,",""],["2,","offices"],["1st,","of"],["exhibit,","9"]]) {
     assert.match(styleWord(text,{ next }),/,$/,`${text} lost its comma`);
   }
+});
+
+test("mister before a name becomes Mr., in either case",()=>{
+  // 22 across both depositions, every one before a personal name. Case-insensitive because
+  // "mister" is not an ordinary noun the way "doctor" is -- there is no vocative to protect.
+  assert.equal(styleWord("mister",{ next:"Heath" }),"Mr.");
+  assert.equal(styleWord("Mister",{ next:"Nunez," }),"Mr.");
+  assert.equal(styleWord("mister",{ next:"Thomas." }),"Mr.");
+  assert.equal(styleWord("mister",{ next:"you" }),"mister","without a name following it is not a title");
+});
+
+test("miss is never resolved to an honorific",()=>{
+  // The one that must not convert. The ASR's "miss" may be Miss, Ms. or Mrs.; the certified
+  // record distinguishes them, and picking one would do by inference exactly what
+  // HONORIFIC_MISSING was built to refuse. 45 occurrences, all left alone.
+  assert.equal(styleWord("miss",{ next:"Garza" }),"miss");
+  assert.equal(styleWord("Miss",{ next:"Vargas" }),"Miss");
+  assert.equal(styleWord("miss",{ next:"Vargas," }),"miss");
+  // And the ordinary verb, which a looser rule would have mangled into a title.
+  assert.equal(styleWord("miss,",{ next:"based" }),"miss,");
+});
+
+const line = text => joinStyled(styleWords(text.split(" ").map((word,index)=>({ id:`w${index}`, text:word }))));
+
+test("an exhibit number survives however the question phrases it",()=>{
+  // ETM01 says "exhibit 1"; the Thomas deposition says "exhibit number 2", "exhibit number, uh,
+  // 2?" and "exhibit number, I believe, 3". Reading only the previous word spelled six of them
+  // out, against a specimen that writes Exhibit 1 through 9 as digits and never spells one.
+  assert.match(line("as plaintiff's exhibit number 2. I"),/exhibit number 2\./);
+  assert.match(line("on exhibit number, uh, 2? I"),/exhibit number, uh, 2\?/);
+  assert.match(line("exhibit number, I believe, 3 today"),/exhibit number, I believe, 3 today/);
+});
+
+test("the exhibit lookback cannot reach an unrelated number",()=>{
+  // Only the first number after "exhibit" is the exhibit's, so a later quantity is still written
+  // out. A sentence boundary ends the reach entirely, and four words is the limit.
+  assert.match(line("exhibit 5, this window, 2 panes"),/Exhibit 5, this window, two panes/);
+  assert.match(line("Okay. Do you see 3 there"),/Do you see three there/);
+  assert.match(line("exhibit number was the one we saw 4 times"),/saw four times/);
+});
+
+test("a sentence ending at the word 'exhibit' ends the lookback with it",()=>{
+  // "marked as an exhibit. Do you see 3 pages" is a new sentence, and its 3 is a quantity. The
+  // check has to run before the word is matched, or "exhibit." claims the next sentence's number.
+  assert.match(line("marked as an exhibit. Do you see 3 pages"),/see three pages/);
+  assert.match(line("exhibit 4. Okay. Do you have 2 copies"),/have two copies/);
 });

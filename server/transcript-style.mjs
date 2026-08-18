@@ -45,7 +45,7 @@ const afterAbbreviation = tail => tail.replace(/^\./, "");
  * `previous` and `next` are the adjacent words' raw text. Both are needed: an exhibit number and
  * a quantity are the same token and differ only by what precedes them.
  */
-export function styleWord(text, { previous = "", next = "" } = {}) {
+export function styleWord(text, { previous = "", next = "", exhibitNumber = false } = {}) {
   const { body, tail } = split(String(text ?? ""));
   if (!body) return String(text ?? "");
 
@@ -81,6 +81,19 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
   // and the returned "Dr." dropped the comma as well as inventing a title.
   if (/^Doctor$/.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Dr.`;
 
+  // "mister" before a name is "Mr." Case-insensitive, unlike the title above: "doctor" is an
+  // ordinary English noun and needed the capital to tell a title from a vocative, while every
+  // one of the 22 "mister" tokens across both depositions precedes a personal name.
+  //
+  // "miss" is deliberately NOT here, and it is the more common of the two -- 45 occurrences
+  // against 22. It cannot be resolved by inference: the ASR's "miss" may be Miss, Ms. or Mrs.,
+  // the certified record distinguishes all three, and choosing one would do silently what
+  // HONORIFIC_MISSING exists to refuse. The roster cannot settle it either, measured rather
+  // than assumed: every recorded honorific in both depositions is null, and the people these
+  // tokens name -- Vargas, Garza -- are in no roster at all, both parties[] being empty. A
+  // "miss" therefore stays as it was until a person says which form it is.
+  if (/^mister$/i.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Mr.`;
+
   // An exhibit is a named thing, and the specimen capitalises all 18 of its references. Deepgram
   // emits every one of ETM01's nine lowercase. Conditioned on a following digit so the common
   // noun is untouched -- "the exhibit you were shown" stays as it is, and only the reference to
@@ -103,7 +116,7 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
   // "2nd" spells to a word, so a digit beside it is part of a phrase; "64th" and "15" stay
   // numerals, so a digit beside them is part of a number.
   const numericNeighbour = value => { const neighbour = split(String(value ?? "")).body; return /^\d/.test(neighbour) && !/^[1-9](st|nd|rd|th)$/i.test(neighbour); };
-  if (/^[1-9]$/.test(body) && bare(previous) !== "exhibit" && bare(next) !== "o'clock" && !numericNeighbour(previous) && !numericNeighbour(next)) return `${SMALL_NUMBERS[Number(body)]}${tail}`;
+  if (/^[1-9]$/.test(body) && !(exhibitNumber || bare(previous) === "exhibit") && bare(next) !== "o'clock" && !numericNeighbour(previous) && !numericNeighbour(next)) return `${SMALL_NUMBERS[Number(body)]}${tail}`;
 
   // Ordinals likewise, except as a day of the month: the specimen's single "1st" is in
   // "February 1st, 2024".
@@ -117,11 +130,36 @@ export function styleWord(text, { previous = "", next = "" } = {}) {
  * Style a word list in place of its display text, leaving reporter-touched words alone.
  * Returns a new array; each word gains `display`, and `styled` when it differs from `text`.
  */
+// "exhibit" is not always the word immediately before its number. ETM01 says "exhibit 1", but
+// the Thomas deposition says "exhibit number 2", "exhibit number, uh, 2?" and "exhibit number,
+// I believe, 3" -- and a rule reading only the previous word spelled six of them out, against a
+// specimen that writes Exhibit 1 through Exhibit 9 as digits every time and never spells one.
+//
+// Bounded three ways so it cannot reach across into an unrelated number: at most four words
+// back, stopping at a sentence end, and stopping at any earlier number, because only the first
+// number after "exhibit" is the exhibit's. "exhibit 5, this window, 2 panes" protects the 5 and
+// leaves the 2 a quantity.
+const EXHIBIT_LOOKBACK = 4;
+function isExhibitNumber(words, index) {
+  for (let step = 1; step <= EXHIBIT_LOOKBACK; step++) {
+    const candidate = words[index - step];
+    if (!candidate) return false;
+    const text = String(candidate.text ?? ""), body = split(text).body;
+    // The sentence end is checked before the word itself, because "exhibit." ends a sentence at
+    // "exhibit": a number in the next sentence is not its number. Checking the word first would
+    // read "marked as an exhibit. Do you see 3 pages" as a reference to exhibit 3.
+    if (/[.?!]$/.test(text)) return false;
+    if (body.toLowerCase() === "exhibit") return true;
+    if (/^\d+$/.test(body)) return false;
+  }
+  return false;
+}
+
 export function styleWords(words = []) {
   return words.map((word, index) => {
     const text = String(word?.text ?? "");
     if (word?.edited || word?.authored || word?.deleted) return { ...word, display:text };
-    const display = styleWord(text, { previous:words[index - 1]?.text ?? "", next:words[index + 1]?.text ?? "" });
+    const display = styleWord(text, { previous:words[index - 1]?.text ?? "", next:words[index + 1]?.text ?? "", exhibitNumber:isExhibitNumber(words, index) });
     return display === text ? { ...word, display } : { ...word, display, styled:true };
   });
 }
