@@ -197,3 +197,32 @@ test("counsel of record and counsel who appeared are both kept, and only one can
       "the attorney of record who did not appear is not offered as a speaker");
   }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });
+
+test("a party is never a speaker candidate, whoever they are",()=>{
+  // Speaker eligibility is a fact about the recording, not about the case. Parties are who the
+  // case is between; nothing about being named in a caption puts a person in the room. Asserted
+  // for a party who shares a surname with counsel and for one who does not, because the risk is
+  // a future change sourcing candidates from the caption for convenience.
+  const value=depositionFixture();
+  try{
+    const file=path.join(value.directory,"intake","canonical-deposition-record.json");
+    const record=JSON.parse(fs.readFileSync(file,"utf8"));
+    record.parties=[
+      { id:"party-1", name:{ value:"Delia Garza", source:"NOD_EXTRACTED", state:"EXTRACTED" } },
+      { id:"party-2", name:{ value:"Home Depot U.S.A., Inc.", source:"NOD_EXTRACTED", state:"EXTRACTED" } },
+      { id:"party-3", name:{ value:"Shawn Herber", source:"NOD_EXTRACTED", state:"EXTRACTED" } },
+    ];
+    fs.writeFileSync(file,JSON.stringify(record));
+    writeDepositionCounsel(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot,
+      counsel:[{ name:"Steven A. Nunez", appearanceRole:"QUESTIONING_ATTORNEY", actualAppearance:true }] });
+
+    const { candidates }=getSpeakerCandidates(null,{ depositionId:"DEP-20260814-ABCDE", storageRoot:value.storageRoot });
+    const labels=candidates.map(item=>item.label);
+    for (const party of ["Delia Garza","Home Depot U.S.A., Inc.","Shawn Herber"]) {
+      assert.equal(labels.includes(party),false,`${party} is a party and must not be offered as a speaker`);
+    }
+    assert.deepEqual(labels,["Heath Thomas","Court Reporter","Steven A. Nunez"]);
+    // And the parties survive the counsel write, because counsel[] is the only key it touches.
+    assert.equal(JSON.parse(fs.readFileSync(file,"utf8")).parties.length,3);
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});

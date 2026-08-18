@@ -90,6 +90,20 @@ export function readAsrEvidence(root,{depositionId,storageRoot}){const directory
 // with no appearanceRole came back as "[OBJECT_OBJECT]". Read the value key when it exists;
 // fall back to the raw field only for the plain strings participants carry.
 //
+// Speaker eligibility comes from deposition-specific appearance evidence, never from a
+// case-level role. A person may be a party, counsel of record, or both, and still not have been
+// in the room -- those are facts about the case; being a speaker is a fact about this recording.
+// The three are stored independently and none of them implies another:
+//
+//   parties[]                    who the case is between. Never a speaker source.
+//   counsel[]                    who is of record. Necessary for a speaker, not sufficient.
+//   counsel[].actualAppearance   who was there. This is what admits a speaker.
+//
+// The failure this prevents is silent in both directions: a candidate list built from case-level
+// role offers people who were never present, and one built only from who spoke loses counsel of
+// record from the appearance page. A party who is also counsel and also absent must appear in two
+// of the three and be a candidate in none.
+//
 // An attorney who did not appear cannot have spoken, so actualAppearance false is excluded
 // from the candidate list entirely. They stay in counsel[] for the appearance page -- being
 // absent from the proceeding is a fact about the record, not a reason to drop them from it --
