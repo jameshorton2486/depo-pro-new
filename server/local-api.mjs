@@ -10,6 +10,7 @@ import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, ge
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { createCaptureSession, enumerateWindowsAudioSources, getCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
+import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -125,8 +126,13 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/audio/tools" && req.method === "GET") return json(res,200,publicAudioTools(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
     if (req.url === "/api/live-capture/devices" && req.method === "GET") return json(res,200,enumerateWindowsAudioSources(),origin);
+    if (req.url === "/api/live-capture/preflight" && req.method === "POST") { const input=await body(req,128*1024); return json(res,201,createPreflight(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/test" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await runTestCapture(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/confirm" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,confirmPlayback(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/arm" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,armPreflight(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/preflight/audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=getPreflightArtifact(root,{depositionId:url.searchParams.get("depositionId"),preflightId:url.searchParams.get("preflightId"),sourceId:url.searchParams.get("sourceId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
     if (req.url === "/api/live-capture/session" && req.method === "POST") { const input=await body(req,256*1024); return json(res,201,createCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
-    if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); const session=getCaptureSession(root,{depositionId:input.depositionId,sessionId:input.sessionId,storageRoot:depositionStorageRoot});assertArmed(root,{depositionId:input.depositionId,preflightId:input.preflightId,sources:session.sources,storageRoot:depositionStorageRoot});return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/session?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,getCaptureSession(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
