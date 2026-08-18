@@ -29,6 +29,7 @@
 // measured in seconds swamps a residual measured in tens of milliseconds. The residual is named in
 // what this returns rather than hidden, because the one thing that must not happen is a downstream
 // reader treating an approximate position as an exact one.
+import fs from "node:fs";
 import path from "node:path";
 
 /** Seconds of context before the hit. Read-back is performed from before the moment, not at it. */
@@ -136,5 +137,47 @@ export function readBackAudioFile(depositionDirectory, target) {
   const file = path.resolve(depositionDirectory, ...String(target.audioPath).split("/"));
   const relative = path.relative(path.resolve(depositionDirectory), file);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) fail(CHANNEL_NOT_RECORDED, "Read-back audio path escaped the deposition folder.");
+  return file;
+}
+
+/**
+ * Search and position in one call, against the stored session records.
+ *
+ * Each hit is resolved with the channel it was found in, so a cross-channel target cannot be
+ * constructed here at all. The guard in resolveReadBackTarget still stands for callers that build
+ * a target themselves -- this route simply never gives them the chance to get it wrong.
+ */
+export async function readBackSearch(root, { depositionId, sessionId, channelId, query, leadInSeconds, storageRoot } = {}) {
+  const { getCaptureSession } = await import("./live-capture.mjs");
+  const { getDeepgramLive } = await import("./deepgram-live.mjs");
+  const capture = getCaptureSession(root, { depositionId, sessionId, storageRoot });
+  let live = null;
+  try { live = getDeepgramLive(root, { depositionId, sessionId, storageRoot }); }
+  catch { live = null; }
+  if (!live) return { channelId: channelId ?? null, hits: [], indexed: false, message: "No live index was recorded for this session, so there is nothing to search. The recording is unaffected." };
+
+  const hits = searchLiveIndex(live, { channelId, query });
+  return {
+    channelId,
+    indexed: true,
+    hits: hits.map(hit => {
+      const target = resolveReadBackTarget({ capture, live, hit, channelId, leadInSeconds: leadInSeconds ?? READ_BACK_LEAD_IN_SECONDS });
+      return { ...hit, playFromSeconds: target.playFromSeconds, recordingSeconds: target.recordingSeconds, precision: target.precision, positionable: target.positionable };
+    }),
+  };
+}
+
+/** The absolute WAV for one channel of a session, for playback. */
+export async function readBackChannelFile(root, { depositionId, sessionId, channelId, storageRoot } = {}) {
+  const { getCaptureSession } = await import("./live-capture.mjs");
+  const { depositionDirectory } = await import("./deposition-store.mjs");
+  const capture = getCaptureSession(root, { depositionId, sessionId, storageRoot });
+  const source = (capture.sources ?? []).find(item => item.id === channelId);
+  if (!source?.artifact?.finalized) fail(CHANNEL_NOT_RECORDED, `Channel ${channelId} has no finalized recording.`, { channelId });
+  const file = readBackAudioFile(depositionDirectory(root, depositionId, { storageRoot }), { audioPath: source.artifact.relativePath });
+  // The manifest says the channel was finalized; the disk is what decides whether it is still
+  // there. Trusting the manifest alone hands the caller a path to a file that may not exist, and
+  // the reporter meets that as a broken player rather than as a stated problem.
+  if (!fs.existsSync(file)) fail(CHANNEL_NOT_RECORDED, `Channel ${channelId} was finalized but its recording is missing from disk.`, { channelId, file });
   return file;
 }

@@ -146,3 +146,22 @@ test("the manifest the code actually writes states the channels are not aligned"
     assert.equal(stored.timeline.interChannelOffsetMeasured, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("a channel finalized in the manifest but missing from disk is refused",async()=>{
+  // The manifest records what was captured; the disk decides what is still there. Trusting the
+  // manifest alone hands back a path to a file that is not there, and the reporter meets it as a
+  // broken player rather than as a stated problem.
+  const { readBackChannelFile } = await import("../server/read-back.mjs");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "depo-missing-"));
+  try {
+    const storageRoot = path.join(root, "depos"), directory = path.join(storageRoot, "r", "c", "d");
+    fs.mkdirSync(path.join(directory, "live-capture", SESSION, "channels"), { recursive: true });
+    fs.writeFileSync(path.join(directory, "deposition.json"), JSON.stringify({ id: "DEP-20260818-MISNG" }));
+    fs.writeFileSync(path.join(directory, "live-capture", SESSION, "capture-session.json"), JSON.stringify({
+      sessionId: SESSION, state: "FINALIZED",
+      sources: [{ id: "ch1", role: "WITNESS", state: "FINALIZED", artifact: { relativePath: `live-capture/${SESSION}/channels/01-ch1.wav`, sha256: "aa", finalized: true } }],
+    }));
+    await assert.rejects(() => readBackChannelFile(null, { depositionId: "DEP-20260818-MISNG", sessionId: SESSION, channelId: "ch1", storageRoot }),
+      error => error.code === CHANNEL_NOT_RECORDED && /missing from disk/.test(error.message));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
