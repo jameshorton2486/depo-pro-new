@@ -57,7 +57,11 @@ test("I2: applying an overlay mutates neither the projection nor the evidence",(
   const workingBefore = JSON.stringify(WORKING), evidenceBefore = JSON.stringify(EVIDENCE);
   render(overlayOf(
     { op:"split", segmentId:ANSWER.id, beforeWordId:MIDWORD },
-    { op:"label", segmentId:`${ANSWER.id}#2`, speakerIdentity:"counsel-ramon", transcriptRole:"DEFENDING_ATTORNEY" },
+    // The tail is named for the word it begins at. It was `#2` for every split, which collided
+    // when one segment was split twice; nothing stored depends on the old form, because the
+    // Workspace only ever labels by wordId and a stale segment id orphans visibly rather than
+    // resolving to the wrong half.
+    { op:"label", segmentId:`${ANSWER.id}#${MIDWORD}`, speakerIdentity:"counsel-ramon", transcriptRole:"DEFENDING_ATTORNEY" },
     { op:"replace", wordId:MIDWORD, text:"Muhammad" },
   ));
   assert.equal(JSON.stringify(WORKING), workingBefore,"working.json must be untouched");
@@ -121,7 +125,11 @@ test("label relabels a split half without touching the other",()=>{
   // The user's case: highlight "Yes." inside a question and make it an answer.
   const result = render(overlayOf(
     { op:"split", segmentId:ANSWER.id, beforeWordId:MIDWORD },
-    { op:"label", segmentId:`${ANSWER.id}#2`, speakerIdentity:"counsel-ramon", transcriptRole:"DEFENDING_ATTORNEY" },
+    // The tail is named for the word it begins at. Every tail used to be `#2`, which collided
+    // when one segment was split twice. Nothing stored depends on the old form: the Workspace
+    // only ever labels by wordId, and a stale segment id now orphans visibly rather than
+    // resolving to the wrong half.
+    { op:"label", segmentId:`${ANSWER.id}#${MIDWORD}`, speakerIdentity:"counsel-ramon", transcriptRole:"DEFENDING_ATTORNEY" },
   ));
   const tail = result.paragraphs.find(paragraph => paragraph.words[0]?.id === MIDWORD);
   assert.equal(tail.elementType, ELEMENT.COLLOQUY);
@@ -194,4 +202,34 @@ test("undo pops the last operation and returns it",()=>{
 
 test("appendOperations rejects the whole batch if any operation is invalid",()=>{
   assert.throws(()=>appendOperations(emptyOverlay("D"),[{ op:"delete", wordId:"a" },{ op:"bogus" }]));
+});
+
+test("splitting one segment twice produces two distinct segments",()=>{
+  // Every tail was named `${segment.id}#2`, so a second split of the same segment produced two
+  // segments sharing an id and raised no orphan. A later `label` addressed by segment id then
+  // resolved to whichever came first, moving a speaker attribution to the wrong half of a
+  // deposition silently.
+  const segments=[{ id:"job:segment:1", sourceJobIdentity:"job", asrWordIds:["w1","w2","w3","w4","w5"], text:"a b c d e", deepgramSpeaker:0 }];
+  const overlay={ schemaVersion:"1.0.0", recordType:"REPORTER_OVERLAY", depositionId:"DEP",
+    operations:[{ op:"split", segmentId:null, beforeWordId:"w5" },{ op:"split", segmentId:null, beforeWordId:"w3" }] };
+  const applied=applyOverlay(segments,overlay,{ knownWordIds:new Set(["w1","w2","w3","w4","w5"]) });
+  const ids=applied.segments.map(segment=>segment.id);
+  assert.equal(new Set(ids).size,ids.length,`segment ids must be unique, got ${ids.join(", ")}`);
+  assert.equal(applied.segments.length,3);
+  assert.equal(applied.orphaned.length,0);
+  // Deterministic, so replaying the same overlay rebuilds the same ids.
+  const again=applyOverlay(segments,overlay,{ knownWordIds:new Set(["w1","w2","w3","w4","w5"]) });
+  assert.deepEqual(again.segments.map(segment=>segment.id),ids);
+});
+
+test("a label pointed at a segment id that no longer exists is reported, not guessed",()=>{
+  // The failure mode the unique ids remove. A stale reference must orphan with a reason rather
+  // than resolve to whichever segment happens to match first.
+  const result = render(overlayOf(
+    { op:"split", segmentId:ANSWER.id, beforeWordId:MIDWORD },
+    { op:"label", segmentId:`${ANSWER.id}#2`, speakerIdentity:"counsel-ramon", transcriptRole:"DEFENDING_ATTORNEY" },
+  ));
+  const orphan = result.findings.find(finding => finding.code === "ORPHANED_OPERATION");
+  assert.ok(orphan,"a stale segment id must be reported");
+  assert.match(orphan.message,/SEGMENT_NOT_FOUND/);
 });

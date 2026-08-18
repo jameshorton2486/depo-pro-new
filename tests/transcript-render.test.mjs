@@ -208,3 +208,65 @@ test("the rendered transcript reports its own content hash",()=>{
   // A transcript with no hash reports none rather than inventing one.
   assert.equal(renderTranscript({ working:{ ...working, transcript_hash:undefined }, evidence }).transcriptContentHash,null);
 });
+
+const threeWords = [{ jobIdentity:"job", words:[
+  { id:"job:word:1", punctuatedWord:"hello", start:1, end:1.5, deepgramSpeaker:0 },
+  { id:"job:word:2", punctuatedWord:"damn",  start:2, end:2.5, deepgramSpeaker:0 },
+  { id:"job:word:3", punctuatedWord:"world", start:3, end:3.5, deepgramSpeaker:0 },
+]}];
+const oneSegment = {
+  derivedFrom:["job"], transcript_hash:"stored", speakerMap:{ status:"unreconciled", assignments:[] },
+  segments:[{ id:"job:segment:1", sourceJobIdentity:"job", sourceUploadId:"u", sourceOrdinal:0,
+    asrWordIds:["job:word:1","job:word:2","job:word:3"], text:"hello damn world",
+    deepgramSpeaker:0, speakerIdentity:null, transcriptRole:null, start:1, end:3.5 }],
+};
+
+test("a struck word is struck from the reading, not just from the word list",()=>{
+  // A deletion strikes a word without removing it from the record, so words[] keeps it flagged
+  // for the Workspace to render struck. paragraph.text is the reading, and it must not contain
+  // it. Building the text from the unfiltered word list put it back: the screen looked correct
+  // because it renders words[], while every consumer of paragraph.text -- an exporter, chunking
+  // for the correction pass, a certified page -- got the struck word again.
+  const overlay={ schemaVersion:"1.0.0", recordType:"REPORTER_OVERLAY", depositionId:"DEP", operations:[{ op:"delete", wordId:"job:word:2" }] };
+  const [paragraph]=renderTranscript({ working:oneSegment, evidence:threeWords, overlay }).paragraphs;
+  assert.equal(paragraph.text,"hello world","the struck word must not be in the reading");
+  assert.equal(paragraph.words.length,3,"but it stays in the record");
+  assert.equal(paragraph.words[1].deleted,true);
+  assert.equal(paragraph.words[1].text,"damn","with its original text intact");
+});
+
+test("the rendered hash observes a reporter edit; the stored hash does not",()=>{
+  // transcript_hash covers working.json alone, which is correct for what it names -- the overlay
+  // lives beside it and is applied at render. That leaves nothing identifying what was actually
+  // read, and a correction pass invalidating against transcript_hash would treat an edited
+  // transcript as unedited. renderedContentHash is that identity; nothing on disk changes.
+  const clean=renderTranscript({ working:oneSegment, evidence:threeWords });
+  const edited=renderTranscript({ working:oneSegment, evidence:threeWords,
+    overlay:{ schemaVersion:"1.0.0", recordType:"REPORTER_OVERLAY", depositionId:"DEP", operations:[{ op:"delete", wordId:"job:word:2" }] } });
+  assert.equal(clean.transcriptContentHash,"stored");
+  assert.equal(edited.transcriptContentHash,"stored","the stored projection hash is unchanged by an edit");
+  assert.notEqual(clean.renderedContentHash,edited.renderedContentHash,"the rendered hash must change");
+  assert.match(clean.renderedContentHash,/^[0-9a-f]{64}$/);
+});
+
+test("a paragraph carries the job it came from",()=>{
+  // speakerBuckets keys the speaker map by (job, speaker) and had to recover the job by
+  // splitting an id string. A format change there would silently collapse every bucket back to
+  // speaker index and merge unrelated people into one row.
+  const [paragraph]=renderTranscript({ working:oneSegment, evidence:threeWords }).paragraphs;
+  assert.equal(paragraph.sourceJobIdentity,"job");
+});
+
+test("the job identity comes from the segment, not from the shape of its id",()=>{
+  // The previous test passes whether the value is carried or re-derived, because both agree
+  // while ids look like "job:segment:1". The risk is a segment id that does not encode the job:
+  // the parse then returns the wrong thing and every speaker bucket silently merges. Asserted
+  // with an id whose prefix is not the job identity, so only the carried value can be right.
+  const evidence=[{ jobIdentity:"job", words:[{ id:"w1", punctuatedWord:"Yes.", start:0, end:1, deepgramSpeaker:0 }] }];
+  const working={ derivedFrom:["job"], speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"a-segment-id-that-encodes-nothing", sourceJobIdentity:"job", sourceUploadId:"u", sourceOrdinal:0,
+      asrWordIds:["w1"], text:"Yes.", deepgramSpeaker:0, speakerIdentity:null, transcriptRole:null, start:0, end:1 }] };
+  const [paragraph]=renderTranscript({ working, evidence }).paragraphs;
+  assert.equal(paragraph.sourceJobIdentity,"job","the carried value, not the id prefix");
+  assert.notEqual(paragraph.sourceJobIdentity,"a-segment-id-that-encodes-nothing");
+});

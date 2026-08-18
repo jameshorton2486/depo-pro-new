@@ -13,6 +13,7 @@ import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { joinStyled, styleWords } from "./transcript-style.mjs";
 import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
+import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
 /**
  * Indexes ASR word evidence by word id. Evidence arrives per job -- a deposition with three
@@ -108,16 +109,32 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     // the segment's, because the segment boundary is derived and the word time is measured --
     // and after a split the second half keeps the segment's start while its first word begins
     // seconds later, so seeking to the segment replays audio the reporter already heard.
+    const styled = styleWords(resolved);
     const start = resolved.find(word => Number.isFinite(word.start))?.start ?? paragraph.start ?? null;
     const end = [...resolved].reverse().find(word => Number.isFinite(word.end))?.end ?? paragraph.end ?? null;
     return {
       id:`paragraph:${index + 1}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
+      // Carried, not parsed. speakerBuckets keys the speaker map by (job, speaker) and had to
+      // recover the job by splitting segmentIds[0] on a colon -- a dependency on the shape of an
+      // id string, where a format change would silently collapse every bucket back to speaker
+      // index and merge unrelated people. The segment already knows.
+      sourceJobIdentity:paragraph.sourceJobIdentity ?? String(paragraph.segmentIds?.[0] ?? "").split(":")[0],
       // Style is applied to the reading, not the record: the words keep their ASR ids and their
       // evidence text, and gain a display form. paragraph.text is rebuilt from the same display
       // words so the screen and the paragraph string can never disagree.
-      start, end, text:joinStyled(styleWords(resolved)) || paragraph.text || "", words:styleWords(resolved),
+      // styleWords runs once. It ran twice here, which is both wasted work and a place for the
+      // two forms to diverge.
+      //
+      // The text excludes struck words; the word list keeps them. A deletion strikes a word from
+      // the reading without removing it from the record, so words[] carries it with deleted:true
+      // for the Workspace to render struck -- but paragraph.text is the reading, and a struck
+      // word belongs in neither the reading nor anything built from it. Building the text from
+      // the unfiltered list put it back: the screen looked right because it renders words[],
+      // while every consumer of paragraph.text -- an exporter, correction-pass chunking, a
+      // certified page -- got the struck word again.
+      start, end, text:joinStyled(styled.filter(word => !word.deleted)) || paragraph.text || "", words:styled,
       segmentIds:paragraph.segmentIds ?? [], asrWordIds:paragraph.asrWordIds ?? [],
     };
   });
@@ -135,9 +152,17 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     schemaVersion:"1.1.0", recordType:"RENDERED_TRANSCRIPT",
     // withTranscriptContentHash writes transcript_hash; this read asked for a key the working
     // transcript has never carried, so the rendered payload reported null for every transcript
-    // since the field was added. Nothing consumed it, which is why nothing caught it -- and it
-    // is the transcript's identity, the value OI-3 uses to invalidate a correction pass.
+    // since the field was added. Nothing consumed it, which is why nothing caught it.
+    //
+    // What it covers, precisely: the segments and the speaker map of working.json. It does NOT
+    // observe the reporter overlay, which lives beside working.json and is applied at render.
+    // Two transcripts differing only by a reporter edit therefore carry the same hash. Calling
+    // it "the transcript's identity" overstated it, and a correction pass cannot invalidate
+    // against it alone without treating an edited transcript as unedited.
     transcriptContentHash:working?.transcript_hash ?? working?.transcriptContentHash ?? null,
+    // What this rendering is, as opposed to what the stored projection is. Differs from
+    // transcriptContentHash whenever the reporter has edited, which is the whole point.
+    renderedContentHash:computeRenderedContentHash(working, overlay ?? emptyOverlay()),
     // The jobs this transcript derives from, carried so a reader can see how many sources are
     // behind it without opening the working file.
     derivedFrom:working?.derivedFrom ?? [],

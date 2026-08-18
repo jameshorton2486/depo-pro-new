@@ -75,7 +75,9 @@ export function speakerBuckets(paragraphs = []) {
   for (const paragraph of paragraphs) {
     const speaker = paragraph?.deepgramSpeaker;
     if (speaker === null || speaker === undefined) continue;
-    const jobIdentity = String(paragraph.segmentIds?.[0] ?? "").split(":")[0];
+    // Prefers the value the paragraph carries; the id-splitting fallback remains for callers
+    // that build paragraphs without it, and is no longer the only route.
+    const jobIdentity = paragraph.sourceJobIdentity ?? String(paragraph.segmentIds?.[0] ?? "").split(":")[0];
     const key = `${jobIdentity}:${speaker}`;
     const bucket = buckets.get(key) ?? { key, jobIdentity, deepgramSpeaker:speaker, words:0, sample:String(paragraph.text ?? "").slice(0, 60) };
     bucket.words += paragraph.words?.length ?? 0;

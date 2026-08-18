@@ -77,7 +77,12 @@ function splitSegments(segments, segmentId, beforeWordId) {
   // no-op that silently multiplies segment ids, so it is reported instead.
   if (at === 0) return { ok:false, reason:"SPLIT_AT_SEGMENT_START" };
   const head = { ...segment, asrWordIds:segment.asrWordIds.slice(0, at) };
-  const tail = { ...segment, id:`${segment.id}#2`, asrWordIds:segment.asrWordIds.slice(at), start:null, end:null };
+  // Named for the word it begins at, not by a counter. Every tail was `#2`, so splitting one
+  // segment twice produced two segments sharing an id, with no orphan raised -- and a later
+  // `label` addressed by segment id then resolved to whichever came first, silently moving a
+  // speaker attribution to the wrong half. The anchor word is unique within the segment and
+  // deterministic, so replaying the same overlay rebuilds the same ids.
+  const tail = { ...segment, id:`${segment.id}#${beforeWordId}`, asrWordIds:segment.asrWordIds.slice(at), start:null, end:null };
   return { ok:true, segments:[...segments.slice(0, index), head, tail, ...segments.slice(index + 1)] };
 }
 
