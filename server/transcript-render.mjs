@@ -10,6 +10,7 @@
 // Pure. No filesystem, no fetch. The caller reads working.json and asr-evidence.json; this
 // decides what the reader sees.
 import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
+import { joinStyled, styleWords } from "./transcript-style.mjs";
 import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 
@@ -101,7 +102,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       id:`paragraph:${index + 1}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
-      start, end, text:paragraph.text ?? "", words:resolved,
+      // Style is applied to the reading, not the record: the words keep their ASR ids and their
+      // evidence text, and gain a display form. paragraph.text is rebuilt from the same display
+      // words so the screen and the paragraph string can never disagree.
+      start, end, text:joinStyled(styleWords(resolved)) || paragraph.text || "", words:styleWords(resolved),
       segmentIds:paragraph.segmentIds ?? [], asrWordIds:paragraph.asrWordIds ?? [],
     };
   });
