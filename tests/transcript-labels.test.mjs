@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ELEMENT, LAYOUT, LINE_WIDTH, buildSpeakerLabels, centerColumn, labelParagraphs } from "../server/transcript-labels.mjs";
+import { tabbedLine, TABS, TAB_STOPS, ELEMENT, LAYOUT, LINE_WIDTH, buildSpeakerLabels, centerColumn, labelParagraphs } from "../server/transcript-labels.mjs";
 
 const CANDIDATES = [
   { id:"counsel-bentley", label:"Dennis Bentley", defaultRole:"QUESTIONING_ATTORNEY", honorific:"MR." },
@@ -133,4 +133,60 @@ test("centered parentheticals compute their column from the string, not a consta
   assert.equal(centerColumn("(Deposition concluded at 2:50 p.m.)"),13);
   assert.equal(centerColumn("EXAMINATION"),25);
   assert.equal(centerColumn("x".repeat(80)),0,"a string wider than the line clamps at zero rather than going negative");
+});
+
+test("Q. and A. carry one tab before the token and one after",()=>{
+  // Measured and unanimous: 503 paragraphs of the certified Etminan transcript carry exactly
+  // two literal tabs on a question or an answer, one either side of the token. This is the half
+  // of the tab model the specimen settles rather than the reporter.
+  const question = tabbedLine(ELEMENT.QUESTION, { token:"Q.", text:"Good afternoon, Doctor." });
+  assert.equal(question.line, "\tQ.\tGood afternoon, Doctor.");
+  assert.equal(question.leadingTabs, 1);
+  assert.equal(question.tabsAfterToken, 1);
+  assert.equal(tabbedLine(ELEMENT.ANSWER, { token:"A.", text:"Yes." }).line, "\tA.\tYes.");
+});
+
+test("colloquy begins at the third stop",()=>{
+  // The reporter's instruction, and it resolves an inconsistency the specimen cannot: 33 of its
+  // colloquy paragraphs use a 0.5-inch first-line indent and 7 use three literal tabs. Three
+  // tabs is the form CaseCATalyst receives.
+  assert.equal(tabbedLine(ELEMENT.COLLOQUY, { text:"MR. BENTLEY:  Objection." }).line, "\t\t\tMR. BENTLEY:  Objection.");
+  assert.equal(tabbedLine(ELEMENT.NEW_PARAGRAPH, { text:"And then he left." }).line, "\t\t\tAnd then he left.");
+});
+
+test("an exhibit line takes one tab to the centre stop",()=>{
+  // The specimen centres these with paragraph justification and no tabs at all. Justification
+  // does not survive into a CAT system the way a tab does, so the line carries one tab and the
+  // stop it lands on is centred.
+  const exhibit = tabbedLine(ELEMENT.PARENTHETICAL_CENTERED, { text:"(Exhibit 1 marked)" });
+  assert.equal(exhibit.line, "\t(Exhibit 1 marked)");
+  assert.equal(exhibit.leadingTabs, 1);
+  assert.equal(exhibit.toCentreStop, true, "the single tab must resolve against the centre stop, not a left one");
+});
+
+test("a BY-line stays at the margin",()=>{
+  // Not one of the "other paragraphs" that indent: it names who resumes questioning and is set
+  // flush left, which is also how the specimen encodes it.
+  assert.equal(tabbedLine(ELEMENT.BY_LINE, { text:"BY MR. BENTLEY:" }).line, "BY MR. BENTLEY:");
+});
+
+test("every tab reaches a defined stop",()=>{
+  // The specimen's two four-tab parentheticals exhaust its three left stops, so the fourth
+  // resolved against the word processor's default grid and printed at different columns in
+  // different contexts. No element here emits more tabs than there are stops to receive them.
+  assert.equal(TAB_STOPS.leftInches.length, 3);
+  for (const [element, spec] of Object.entries(TABS)) {
+    const total = spec.leadingTabs + spec.tabsAfterToken;
+    const available = spec.toCentreStop ? 1 : TAB_STOPS.leftInches.length;
+    assert.ok(total <= available, `${element} emits ${total} tabs against ${available} stops`);
+  }
+});
+
+test("the ruler is the specimen's own",()=>{
+  // 720, 1440 and 2160 twips are 0.5, 1.0 and 1.5 inches; 4680 is 3.25, the middle of a
+  // 6.5-inch text area. Read from the specimen's paragraph properties, not chosen.
+  assert.deepEqual(TAB_STOPS.twips.left, [720, 1440, 2160]);
+  assert.equal(TAB_STOPS.twips.centre, 4680);
+  assert.deepEqual(TAB_STOPS.leftInches, [0.5, 1.0, 1.5]);
+  assert.equal(TAB_STOPS.centreInches, 3.25);
 });

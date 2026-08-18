@@ -46,6 +46,62 @@ export const LAYOUT = Object.freeze({
   [ELEMENT.HEADING]:                { tokenCol:null, textCol:null, wrapCol:0, centered:true },
 });
 
+// Tab stops, for the export the reporter actually needs.
+//
+// The columns above describe where characters land on a printed page. CaseCATalyst does not
+// read columns -- it reads tabs -- so a transcript leaving this application carries literal tab
+// characters resolving against a defined ruler, and the two descriptions have to agree or the
+// screen and the file will disagree with nothing catching it.
+//
+// The ruler is the specimen's own: left stops at 0.5, 1.0 and 1.5 inches (720, 1440 and 2160
+// twips) and a centre stop at 3.25 inches (4680), which is the middle of a 6.5-inch text area.
+//
+// Q. and A. are measured and unanimous: 503 of the specimen's paragraphs carry exactly two tabs,
+// one before the token and one after it.
+//
+// COLLOQUY and the exhibit parenthetical are the reporter's instruction where the specimen is
+// not a usable authority. The specimen encodes colloquy two incompatible ways -- 33 paragraphs
+// with a 0.5-inch first-line indent and 7 with three literal tabs -- and centres its exhibit
+// lines with paragraph justification and no tabs at all. Justification does not survive into a
+// CAT system as a tab does, so the exhibit line takes one tab to the centre stop instead.
+//
+// leadingTabs is what precedes the token, tabsAfterToken what separates token from text. A
+// four-tab form is deliberately not available: the specimen's two four-tab parentheticals
+// exhaust the three defined stops, so the fourth resolves against the word processor's default
+// grid and lands in different places in different contexts. Every tab here reaches a real stop.
+export const TAB_STOPS = Object.freeze({
+  leftInches: Object.freeze([0.5, 1.0, 1.5]),
+  centreInches: 3.25,
+  twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:4680 }),
+});
+
+export const TABS = Object.freeze({
+  [ELEMENT.QUESTION]:               { leadingTabs:1, tabsAfterToken:1, toCentreStop:false },
+  [ELEMENT.ANSWER]:                 { leadingTabs:1, tabsAfterToken:1, toCentreStop:false },
+  [ELEMENT.COLLOQUY]:               { leadingTabs:3, tabsAfterToken:0, toCentreStop:false },
+  [ELEMENT.NEW_PARAGRAPH]:          { leadingTabs:3, tabsAfterToken:0, toCentreStop:false },
+  // Flush left in the specimen, and left flush here: a BY-line names who resumes questioning and
+  // is conventionally set at the margin. It is not one of the "other paragraphs" that indent.
+  [ELEMENT.BY_LINE]:                { leadingTabs:0, tabsAfterToken:0, toCentreStop:false },
+  [ELEMENT.PARENTHETICAL_CENTERED]: { leadingTabs:1, tabsAfterToken:0, toCentreStop:true },
+  [ELEMENT.PARENTHETICAL_INDENTED]: { leadingTabs:3, tabsAfterToken:0, toCentreStop:false },
+  [ELEMENT.HEADING]:                { leadingTabs:1, tabsAfterToken:0, toCentreStop:true },
+});
+
+/**
+ * One line as it leaves for CaseCATalyst: literal tabs, then the token, then the text.
+ *
+ * Returns the tabs and the string separately as well as joined, because an exporter writing
+ * DOCX needs to emit tab elements rather than tab characters, and a screen needs neither.
+ */
+export function tabbedLine(elementType, { token = null, text = "" } = {}) {
+  const spec = TABS[elementType] ?? TABS[ELEMENT.COLLOQUY];
+  const leading = "	".repeat(spec.leadingTabs);
+  const separator = "	".repeat(spec.tabsAfterToken);
+  const body = token ? `${token}${separator}${text}` : String(text ?? "");
+  return { leadingTabs:spec.leadingTabs, tabsAfterToken:spec.tabsAfterToken, toCentreStop:spec.toCentreStop, line:`${leading}${body}` };
+}
+
 export function centerColumn(text, width = LINE_WIDTH) {
   return Math.max(0, Math.floor((width - String(text ?? "").length) / 2));
 }
