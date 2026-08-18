@@ -101,6 +101,17 @@ export function styleWord(text, { previous = "", next = "", exhibitNumber = fals
   // occurrences across the two depositions.
   if (/^miss$/i.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Ms.`;
 
+  // A percentage is written out. The specimen writes "100 percent" four times and "60 percent"
+  // once, and contains no % sign at all; the ASR emits "100%". One token either way.
+  const percent = /^(\d+(?:\.\d+)?)%$/.exec(body);
+  if (percent) return `${percent[1]} percent${tail}`;
+
+  // Money carries cents. The specimen writes 750.00, 875.00, 250.00; the ASR emits $750 and
+  // $4,875 alongside $7.50, so only the ones missing cents are completed. A sum is not rounded
+  // or altered -- two zeroes are added to a whole-dollar figure and nothing else changes.
+  const money = /^\$(\d{1,3}(?:,\d{3})*|\d+)$/.exec(body);
+  if (money) return `$${money[1]}.00${tail}`;
+
   // An exhibit is a named thing, and the specimen capitalises all 18 of its references. Deepgram
   // emits every one of ETM01's nine lowercase. Conditioned on a following digit so the common
   // noun is untouched -- "the exhibit you were shown" stays as it is, and only the reference to

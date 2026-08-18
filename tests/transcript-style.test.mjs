@@ -273,3 +273,21 @@ test("an honorific takes one space, a sentence end takes two",()=>{
   assert.equal(joinStyled(styleWords([{text:"symptoms."},{text:"Correct?"}])),"symptoms.  Correct?");
   assert.equal(joinStyled(styleWords([{text:"mouth."},{text:"My"},{text:"role"}])),"mouth.  My role");
 });
+
+test("a percentage is written out",()=>{
+  // The specimen writes "100 percent" four times and "60 percent" once, and contains no % sign
+  // anywhere; the ASR emits "100%". Both sides of the comparison demand it.
+  assert.equal(styleWord("100%"),"100 percent");
+  assert.equal(styleWord("10%?"),"10 percent?");
+  assert.equal(styleWord("7.5%"),"7.5 percent");
+});
+
+test("a whole-dollar sum gains its cents, and nothing else changes",()=>{
+  // The specimen writes 750.00, 875.00, 250.00. Only sums missing cents are completed: a figure
+  // that already carries them is untouched, and no sum is rounded or altered.
+  assert.equal(styleWord("$750"),"$750.00");
+  assert.equal(styleWord("$1,250"),"$1,250.00");
+  assert.equal(styleWord("$7.50"),"$7.50","a sum with cents is already correct");
+  assert.equal(styleWord("$4,875."),"$4,875.00.","the sentence's full stop is not the sum's");
+  assert.equal(styleWord("1,000"),"1,000","a bare number is not money");
+});
