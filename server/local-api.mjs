@@ -9,6 +9,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { createCaptureSession, enumerateWindowsAudioSources, getCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -123,6 +124,11 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
     if (req.url === "/api/audio/tools" && req.method === "GET") return json(res,200,publicAudioTools(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
+    if (req.url === "/api/live-capture/devices" && req.method === "GET") return json(res,200,enumerateWindowsAudioSources(),origin);
+    if (req.url === "/api/live-capture/session" && req.method === "POST") { const input=await body(req,256*1024); return json(res,201,createCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/session?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,getCaptureSession(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
       const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input,{storageRoot:depositionStorageRoot}),origin);
