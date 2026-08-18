@@ -23,9 +23,15 @@ export const ELEMENT = Object.freeze({
 //     (four literal tabs) and printed at col 20 and col 15. Four tabs exhaust the three
 //     defined stops, so the fourth resolves against Word's default grid and its position
 //     depends on context. Col 15 is Tab Stop 3 at 2160 twips, an actually-defined stop.
-//   COLLOQUY at col 5 for every speaker -- the specimen puts attorney labels at col 5 (28x)
-//     and THE VIDEOGRAPHER:/THE REPORTER: at col 15 (7x), from two incompatible encodings for
-//     one semantic element. Normalized to the plurality.
+//   COLLOQUY at col 15 for every speaker -- SUPERSEDED BY REPORTER RULING. The specimen puts
+//     attorney labels at col 5 (28x) and THE VIDEOGRAPHER:/THE REPORTER: at col 15 (7x), two
+//     incompatible encodings for one semantic element. This previously normalised to the
+//     plurality, col 5. The reporter has ruled that all colloquy takes three tabs, col 15, and
+//     that the specimen's 28 attorney labels at col 5 are defects rather than the standard.
+//
+//     A future diff of exported output against the certified Etminan transcript MUST therefore
+//     show 28 mismatches at colloquy, and they must not be reconciled back. That is the whole
+//     reason this paragraph exists.
 //
 // The runover for both IS measured: flush to col 0, no block indent. The one multi-line
 // parenthetical in the specimen wraps to col 0 exactly like testimony.
@@ -38,7 +44,7 @@ export const ELEMENT = Object.freeze({
 export const LAYOUT = Object.freeze({
   [ELEMENT.QUESTION]:               { tokenCol:5,  textCol:10, wrapCol:0, centered:false },
   [ELEMENT.ANSWER]:                 { tokenCol:5,  textCol:10, wrapCol:0, centered:false },
-  [ELEMENT.COLLOQUY]:               { tokenCol:5,  textCol:null, wrapCol:0, centered:false, inlineAfterLabel:"  " },
+  [ELEMENT.COLLOQUY]:               { tokenCol:15, textCol:null, wrapCol:0, centered:false, inlineAfterLabel:"  " },
   [ELEMENT.NEW_PARAGRAPH]:          { tokenCol:null, textCol:5, wrapCol:0, centered:false },
   [ELEMENT.BY_LINE]:                { tokenCol:0,  textCol:0,  wrapCol:0, centered:false },
   [ELEMENT.PARENTHETICAL_CENTERED]: { tokenCol:null, textCol:null, wrapCol:0, centered:true },
@@ -53,8 +59,15 @@ export const LAYOUT = Object.freeze({
 // characters resolving against a defined ruler, and the two descriptions have to agree or the
 // screen and the file will disagree with nothing catching it.
 //
-// The ruler is the specimen's own: left stops at 0.5, 1.0 and 1.5 inches (720, 1440 and 2160
-// twips) and a centre stop at 3.25 inches (4680), which is the middle of a 6.5-inch text area.
+// The ruler: left stops at 0.5, 1.0 and 1.5 inches (720, 1440, 2160 twips), read from the
+// specimen's own paragraph properties, and a centre stop at 3.0 inches (4320).
+//
+// That centre is the PHYSICAL PAGE centre, ruled by the reporter, not the text-block centre.
+// With a 1.25-inch left margin the paper centres at 4.25 inches, which is 3.0 from the margin;
+// the text block centres at 3.10. One character apart, and the page was chosen. centerColumn()
+// below computes the text-block centre and is therefore the wrong basis for an exported line --
+// a centre tab stop does the centring, not computed padding. It is kept only because the screen
+// still uses character columns; when the Workspace renders from this model it goes.
 //
 // Q. and A. are measured and unanimous: 503 of the specimen's paragraphs carry exactly two tabs,
 // one before the token and one after it.
@@ -71,8 +84,8 @@ export const LAYOUT = Object.freeze({
 // grid and lands in different places in different contexts. Every tab here reaches a real stop.
 export const TAB_STOPS = Object.freeze({
   leftInches: Object.freeze([0.5, 1.0, 1.5]),
-  centreInches: 3.25,
-  twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:4680 }),
+  centreInches: 3.0,
+  twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:4320 }),
 });
 
 export const TABS = Object.freeze({

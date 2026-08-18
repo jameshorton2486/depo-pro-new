@@ -114,7 +114,10 @@ test("measured layout coordinates",()=>{
   // all 501 Q./A. paragraphs with zero variance.
   assert.deepEqual(LAYOUT[ELEMENT.QUESTION],{ tokenCol:5, textCol:10, wrapCol:0, centered:false });
   assert.deepEqual(LAYOUT[ELEMENT.ANSWER],LAYOUT[ELEMENT.QUESTION]);
-  assert.equal(LAYOUT[ELEMENT.COLLOQUY].tokenCol,5);
+  // Not measured, ruled. The specimen is inconsistent here -- attorney labels at col 5 (28x)
+  // against THE VIDEOGRAPHER:/THE REPORTER: at col 15 (7x) -- and the reporter ruled all
+  // colloquy to col 15. The 28 are defects under that ruling and a diff must keep showing them.
+  assert.equal(LAYOUT[ELEMENT.COLLOQUY].tokenCol,15);
   assert.equal(LAYOUT[ELEMENT.NEW_PARAGRAPH].textCol,5);
   assert.equal(LAYOUT[ELEMENT.BY_LINE].textCol,0);
   assert.equal(LAYOUT[ELEMENT.PARENTHETICAL_INDENTED].textCol,15);
@@ -183,10 +186,30 @@ test("every tab reaches a defined stop",()=>{
 });
 
 test("the ruler is the specimen's own",()=>{
-  // 720, 1440 and 2160 twips are 0.5, 1.0 and 1.5 inches; 4680 is 3.25, the middle of a
-  // 6.5-inch text area. Read from the specimen's paragraph properties, not chosen.
+  // 720, 1440 and 2160 twips are 0.5, 1.0 and 1.5 inches, read from the specimen's paragraph
+  // properties. 4320 is 3.0 inches: the PHYSICAL PAGE centre, ruled by the reporter. With a
+  // 1.25-inch left margin the paper centres 3.0 from the margin and the text block centres at
+  // 3.10 -- one character apart, and the page was chosen.
   assert.deepEqual(TAB_STOPS.twips.left, [720, 1440, 2160]);
-  assert.equal(TAB_STOPS.twips.centre, 4680);
+  assert.equal(TAB_STOPS.twips.centre, 4320);
   assert.deepEqual(TAB_STOPS.leftInches, [0.5, 1.0, 1.5]);
-  assert.equal(TAB_STOPS.centreInches, 3.25);
+  assert.equal(TAB_STOPS.centreInches, 3.0);
+});
+
+test("colloquy sits at column 15, against the specimen and on purpose",()=>{
+  // The reporter ruled that all colloquy takes three tabs. The certified transcript places
+  // attorney labels at column 5 in 28 places; under this ruling those are defects, not the
+  // standard, and a diff of exported output against that transcript must show 28 mismatches
+  // here. This assertion is what stops someone reconciling them back.
+  assert.equal(LAYOUT[ELEMENT.COLLOQUY].tokenCol, 15, "colloquy is at the third stop, not the first");
+  assert.equal(tabbedLine(ELEMENT.COLLOQUY, { text:"MR. BENTLEY:  Objection." }).leadingTabs, 3);
+});
+
+test("the centre stop is the page centre, not the text-block centre",()=>{
+  // 3.0 inches from a 1.25-inch margin is the middle of the paper; the text block centres at
+  // 3.10. One character apart, and the reporter chose the page. centerColumn computes the
+  // text-block centre and must not be used to position an exported line.
+  assert.equal(TAB_STOPS.centreInches, 3.0);
+  assert.equal(TAB_STOPS.twips.centre, 4320);
+  assert.notEqual(TAB_STOPS.twips.centre, 4680, "4680 is 3.25in, the text-block centre");
 });
