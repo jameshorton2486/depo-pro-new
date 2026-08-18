@@ -118,7 +118,11 @@ test("measured layout coordinates",()=>{
   // against THE VIDEOGRAPHER:/THE REPORTER: at col 15 (7x) -- and the reporter ruled all
   // colloquy to col 15. The 28 are defects under that ruling and a diff must keep showing them.
   assert.equal(LAYOUT[ELEMENT.COLLOQUY].tokenCol,15);
-  assert.equal(LAYOUT[ELEMENT.NEW_PARAGRAPH].textCol,5);
+  // Also ruled, not measured. UFM 2.11 puts the first line of a new paragraph at the third stop,
+  // 1.5in. Column 5 aligned a continuation with the Q./A. designations rather than with the body
+  // of the testimony it continues.
+  assert.equal(LAYOUT[ELEMENT.NEW_PARAGRAPH].textCol,15);
+  assert.equal(LAYOUT[ELEMENT.NEW_PARAGRAPH].wrapCol,0,"and wraps flush to the left margin");
   assert.equal(LAYOUT[ELEMENT.BY_LINE].textCol,0);
   assert.equal(LAYOUT[ELEMENT.PARENTHETICAL_INDENTED].textCol,15);
   assert.equal(LAYOUT[ELEMENT.PARENTHETICAL_CENTERED].centered,true);

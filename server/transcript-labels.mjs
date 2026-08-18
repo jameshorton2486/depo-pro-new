@@ -45,7 +45,10 @@ export const LAYOUT = Object.freeze({
   [ELEMENT.QUESTION]:               { tokenCol:5,  textCol:10, wrapCol:0, centered:false },
   [ELEMENT.ANSWER]:                 { tokenCol:5,  textCol:10, wrapCol:0, centered:false },
   [ELEMENT.COLLOQUY]:               { tokenCol:15, textCol:null, wrapCol:0, centered:false, inlineAfterLabel:"  " },
-  [ELEMENT.NEW_PARAGRAPH]:          { tokenCol:null, textCol:5, wrapCol:0, centered:false },
+  // Ruled: UFM 2.11 puts the first line of a new paragraph at the third stop, 1.5in, wrapping
+  // flush left. Column 5 aligned continuations with the Q./A. designations rather than with the
+  // body of the testimony they continue.
+  [ELEMENT.NEW_PARAGRAPH]:          { tokenCol:null, textCol:15, wrapCol:0, centered:false },
   [ELEMENT.BY_LINE]:                { tokenCol:0,  textCol:0,  wrapCol:0, centered:false },
   [ELEMENT.PARENTHETICAL_CENTERED]: { tokenCol:null, textCol:null, wrapCol:0, centered:true },
   [ELEMENT.PARENTHETICAL_INDENTED]: { tokenCol:null, textCol:15, wrapCol:0, centered:false },

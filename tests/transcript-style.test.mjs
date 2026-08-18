@@ -210,16 +210,6 @@ test("mister before a name becomes Mr., in either case",()=>{
   assert.equal(styleWord("mister",{ next:"you" }),"mister","without a name following it is not a title");
 });
 
-test("miss is never resolved to an honorific",()=>{
-  // The one that must not convert. The ASR's "miss" may be Miss, Ms. or Mrs.; the certified
-  // record distinguishes them, and picking one would do by inference exactly what
-  // HONORIFIC_MISSING was built to refuse. 45 occurrences, all left alone.
-  assert.equal(styleWord("miss",{ next:"Garza" }),"miss");
-  assert.equal(styleWord("Miss",{ next:"Vargas" }),"Miss");
-  assert.equal(styleWord("miss",{ next:"Vargas," }),"miss");
-  // And the ordinary verb, which a looser rule would have mangled into a title.
-  assert.equal(styleWord("miss,",{ next:"based" }),"miss,");
-});
 
 const line = text => joinStyled(styleWords(text.split(" ").map((word,index)=>({ id:`w${index}`, text:word }))));
 
@@ -245,4 +235,41 @@ test("a sentence ending at the word 'exhibit' ends the lookback with it",()=>{
   // check has to run before the word is matched, or "exhibit." claims the next sentence's number.
   assert.match(line("marked as an exhibit. Do you see 3 pages"),/see three pages/);
   assert.match(line("exhibit 4. Okay. Do you have 2 copies"),/have two copies/);
+});
+
+test("miss before a name becomes Ms., by ruling",()=>{
+  // Morson's Rule 208, ruled by the reporter: the marriage-neutral honorific is the standard
+  // form regardless of what the ASR heard. This replaces an earlier refusal to convert, which
+  // was correct while the question was open -- Miss, Ms. and Mrs. are distinct in a certified
+  // record and nothing in the data settled it. It is settled now.
+  assert.equal(styleWord("miss",{ next:"Vargas" }),"Ms.");
+  assert.equal(styleWord("Miss",{ next:"Vargas" }),"Ms.");
+  assert.equal(styleWord("miss",{ next:"Garza?" }),"Ms.");
+});
+
+test("the verb 'miss' is still a verb",()=>{
+  // The condition that keeps the rule from reaching ordinary speech: a title precedes a name.
+  // "I miss based on the records" and "did you miss, was it" must survive untouched.
+  assert.equal(styleWord("miss",{ next:"based" }),"miss");
+  assert.equal(styleWord("miss,",{ next:"was" }),"miss,");
+  assert.equal(styleWord("miss",{ next:"" }),"miss");
+});
+
+test("a colloquial affirmation is never normalised",()=>{
+  // Morson's Rule 4: "Yeah." is a dictionary-recognised expression and is what the witness said.
+  // No rule here may turn it into "Yes.", and this asserts the class rather than the instance --
+  // spoken affirmations pass through whatever else the styling does to the line.
+  for (const spoken of ["Yeah.","Yeah","Uh-huh.","Huh-uh.","Nope.","Yep.","Okay.","Mm-hmm."]) {
+    assert.equal(styleWord(spoken,{ previous:"happen?", next:"I" }),spoken,`${spoken} must survive verbatim`);
+  }
+  assert.equal(joinStyled(styleWords([{text:"happen?"},{text:"Yeah."},{text:"I"},{text:"think"}])),"happen?  Yeah.  I think");
+});
+
+test("an honorific takes one space, a sentence end takes two",()=>{
+  // Morson's Rules 1 and 16 for the sentence terminal, and the corpus guardrail for honorifics:
+  // "Dr. Lee" and "Ms. Vargas" are one space, "Objection.  Form." is two.
+  assert.equal(joinStyled(styleWords([{text:"from"},{text:"Doctor"},{text:"Lee,"},{text:"Ms."},{text:"Vargas"}])),"from Dr. Lee, Ms. Vargas");
+  assert.equal(joinStyled(styleWords([{text:"Objection."},{text:"Form."}])),"Objection.  Form.");
+  assert.equal(joinStyled(styleWords([{text:"symptoms."},{text:"Correct?"}])),"symptoms.  Correct?");
+  assert.equal(joinStyled(styleWords([{text:"mouth."},{text:"My"},{text:"role"}])),"mouth.  My role");
 });

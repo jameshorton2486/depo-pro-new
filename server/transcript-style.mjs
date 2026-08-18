@@ -85,14 +85,21 @@ export function styleWord(text, { previous = "", next = "", exhibitNumber = fals
   // ordinary English noun and needed the capital to tell a title from a vocative, while every
   // one of the 22 "mister" tokens across both depositions precedes a personal name.
   //
-  // "miss" is deliberately NOT here, and it is the more common of the two -- 45 occurrences
-  // against 22. It cannot be resolved by inference: the ASR's "miss" may be Miss, Ms. or Mrs.,
-  // the certified record distinguishes all three, and choosing one would do silently what
-  // HONORIFIC_MISSING exists to refuse. The roster cannot settle it either, measured rather
-  // than assumed: every recorded honorific in both depositions is null, and the people these
-  // tokens name -- Vargas, Garza -- are in no roster at all, both parties[] being empty. A
-  // "miss" therefore stays as it was until a person says which form it is.
   if (/^mister$/i.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Mr.`;
+
+  // "miss" before a name is "Ms.", by reporter ruling under Morson's Rule 208: the
+  // marriage-neutral honorific is the standard form regardless of what the ASR heard.
+  //
+  // This reverses an earlier refusal, and the reason it was refused is worth keeping rather than
+  // deleting. The ASR's "miss" could be Miss, Ms. or Mrs.; the certified record distinguishes
+  // all three; and nothing in the data settles it -- every recorded honorific was null and the
+  // people these tokens name are in no roster. The refusal was correct while the question was
+  // open. It is now answered: all of them are Ms., so there is nothing left to infer.
+  //
+  // The consequence, stated rather than discovered later: a witness who is in fact Mrs. will be
+  // written Ms. That is the standard chosen, not an error the rule failed to catch. 45
+  // occurrences across the two depositions.
+  if (/^miss$/i.test(body) && (tail === "" || tail === ".") && /^[A-Z]/.test(String(next))) return `Ms.`;
 
   // An exhibit is a named thing, and the specimen capitalises all 18 of its references. Deepgram
   // emits every one of ETM01's nine lowercase. Conditioned on a following digit so the common
