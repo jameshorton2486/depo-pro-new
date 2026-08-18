@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 const API = "http://127.0.0.1:4317";
 
-type Word = { id:string; text:string; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string };
+type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string };
 type Rendered = { paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
@@ -217,13 +217,18 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
                   {/* shiftKey rather than a separate control: the click event carries it for
                       Enter and Space on a focused button too, so extending the selection works
                       from the keyboard without a second affordance to find. */}
+                  {/* display, not text: the styled form is what the certified transcript shows --
+                      "April 24, 2026" for "04/24/2026". Editing below still seeds from word.text,
+                      because the reporter corrects the word the recording produced, not its
+                      styling; a correction typed over a display form would be a correction to
+                      something the evidence never contained. */}
                   <button
                     type="button"
                     className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selected?.wordId===word.id?"picked":""}`}
-                    aria-label={`${word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
+                    aria-label={`${word.display ?? word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
                     onClick={event=>{ if(event.shiftKey && selected) setSelected({ ...selected, extentWordId:word.id }); else setSelected({ paragraphId:paragraph.id, wordId:word.id, extentWordId:null }); setEditing(null); }}
                     onDoubleClick={()=>{ if(!word.authored) setEditing({ wordId:word.id, text:word.text }); }}
-                  >{word.text}</button>
+                  >{word.display ?? word.text}</button>
                   </Fragment>
                 ))}
               </p>

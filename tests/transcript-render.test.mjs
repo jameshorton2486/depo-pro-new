@@ -174,3 +174,22 @@ test("a transcript that does not say what it derives from keeps every document",
   assert.equal(result.counts.evidenceWords,2);
   assert.equal(result.findings.find(finding=>finding.code==="EVIDENCE_NOT_RENDERED")?.count,1);
 });
+
+test("the rendered word carries a styled display alongside its evidence text",()=>{
+  // The Workspace renders word.display and seeds its editor from word.text. Both have to be
+  // present on every word or one of those reads undefined: the screen would show the raw form
+  // while the API reported the styled one, which is the mismatch this test exists to catch.
+  const evidence=[{ jobIdentity:"job", words:[
+    { id:"job:word:1", punctuatedWord:"04/24/2026,", start:0, end:1, deepgramSpeaker:0 },
+    { id:"job:word:2", punctuatedWord:"okay", start:1, end:2, deepgramSpeaker:0 },
+  ]}];
+  const working={ derivedFrom:["job"], speakerMap:{ status:"unreconciled", assignments:[] },
+    segments:[{ id:"s1", sourceJobIdentity:"job", asrWordIds:["job:word:1","job:word:2"], text:"04/24/2026, okay", deepgramSpeaker:0, start:0, end:2 }] };
+  const [paragraph]=renderTranscript({ working, evidence }).paragraphs;
+  assert.equal(paragraph.words[0].text,"04/24/2026,");
+  assert.equal(paragraph.words[0].display,"April 24, 2026,");
+  assert.equal(paragraph.words[0].styled,true);
+  // An unstyled word still carries a display, so the consumer never has to branch.
+  assert.equal(paragraph.words[1].display,"okay");
+  assert.equal(paragraph.words[1].styled,undefined);
+});
