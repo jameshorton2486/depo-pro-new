@@ -8,6 +8,9 @@ const JOB = "job";
 const WORD = n => `${JOB}:word:${n}`;
 const SEGMENT = n => `${JOB}:segment:${n}`;
 const STARTED = "2026-08-18T14:00:00.000Z";
+// Fixture words carry no digits, because R12 refuses any correction that alters one. Naming them
+// w1..wN would have made every fixture word look like substantive testimony to that rule.
+const alpha = n => String(n).split("").map(digit => "abcdefghij"[Number(digit)]).join("");
 
 /** Alternating question and answer turns, which is what a deposition mostly is. */
 function fixture({ utterances = 40, wordsPer = 10, sizes = null } = {}) {
@@ -20,7 +23,7 @@ function fixture({ utterances = 40, wordsPer = 10, sizes = null } = {}) {
     for (let w = 0; w < count; w += 1) {
       n += 1;
       ids.push(WORD(n));
-      evidenceWords.push({ id: WORD(n), word: `w${n}`, punctuatedWord: `w${n}`, start: n * 0.5, end: n * 0.5 + 0.4, confidence: 0.99, deepgramSpeaker: index % 2, speakerConfidence: 0.9 });
+      evidenceWords.push({ id: WORD(n), word: `w${alpha(n)}`, punctuatedWord: `w${alpha(n)}`, start: n * 0.5, end: n * 0.5 + 0.4, confidence: 0.99, deepgramSpeaker: index % 2, speakerConfidence: 0.9 });
     }
     segments.push({
       id: SEGMENT(index + 1), sourceJobIdentity: JOB, asrWordIds: ids, text: ids.join(" "),
@@ -302,7 +305,7 @@ test("well-formed proposals against the right chunk are accepted",()=>{
   const { chunk, editable } = chunkForResponses();
   const response = respond(chunk, [
     good(editable[0].id),
-    good(editable[5].id, { correctionType: "punctuation", proposedValue: "w6,", confidenceScore: 0.71, evidenceSource: "transcript" }),
+    good(editable[5].id, { correctionType: "punctuation", proposedValue: "wg,", confidenceScore: 0.71, evidenceSource: "transcript" }),
     good(editable[9].id, { correctionType: "word_replacement", proposedValue: "cervical", endWordId: editable[10].id, confidenceScore: 0.55, evidenceSource: "case_material" }),
     good(editable[20].id, { correctionType: "speaker_assignment", proposedValue: "witness", speakerIdentity: "witness", confidenceScore: 0.8, evidenceSource: "case_context" }),
   ]);
@@ -424,4 +427,97 @@ test("an empty response is valid and proposes nothing",()=>{
   const { chunk } = chunkForResponses();
   const result = validateProposals(respond(chunk, []), { chunk, roster: ROSTER });
   assert.deepEqual(result, { ok: true, rejected: null, accepted: [], declined: [] });
+});
+
+// -------------------------------------------------------------------------------------------
+// Deliberately hostile responses: well-formed, plausible, and false
+// -------------------------------------------------------------------------------------------
+//
+// Everything above this line tests whether a response is STRUCTURALLY sound -- right chunk, real
+// anchor, permitted vocabulary. None of it can tell whether a proposal is TRUE. Measured against
+// the structural gate alone, five of these seven passed: changing 1991 to 2001 is a valid
+// word_replacement, inventing an objection is a valid structure change, and a fabricated name is a
+// valid spelling correction. Being well-formed and being right are different properties.
+//
+// Two controls close the gap, and they are different in kind:
+//
+//   R12 is a rule about testimony and is always on. Digits are substance -- a year, an age, a
+//   dosage, a dollar amount -- and no correction to a name or a mark of punctuation changes one.
+//
+//   R13 and R14 are rules about AUTHORISATION, not truth. They constrain what a given pass was
+//   permitted to attempt and which values it could draw on. A pass configured without them gets
+//   the structural gate and nothing more, which is exactly what these tests document.
+
+const HOSTILE_ROSTER = new Set(["witness", "attorney-1"]);
+const PASS_ONE = { allowedCorrectionTypes: ["spelling"], lexicon: ["Etminan", "Elizondo", "Vargas"] };
+
+function hostileChunk() {
+  const line = "In 1991 I began working at the clinic uh and I saw Doctor Atamanan there until 2001 when".split(" ");
+  const parts = fixture({ sizes: [line.length, 12] });
+  parts.transcript.segments[0].asrWordIds.forEach((id, index) => {
+    const word = parts.evidence[0].words.find(item => item.id === id);
+    word.word = line[index];
+    word.punctuatedWord = line[index];
+  });
+  const { chunks } = build(parts, null, { targetEditableWords: line.length, maxEditableWords: line.length });
+  return { chunk: chunks[0], at: n => WORD(n) };
+}
+
+const verdictOf = (chunk, proposal, options) => {
+  const result = validateProposals(
+    { chunkId: chunk.chunkId, passId: chunk.passId, reviewStateHash: chunk.reviewStateHash, proposals: [proposal] },
+    { chunk, roster: HOSTILE_ROSTER, ...options },
+  );
+  if (result.rejected) return `REJECTED:${result.rejected.code}`;
+  return result.accepted.length ? "ACCEPTED" : `${result.declined[0].rule}:${result.declined[0].code}`;
+};
+
+test("the structural gate alone cannot refuse a plausible lie",()=>{
+  // Documented rather than lamented. This is what the addressing rules buy and what they do not,
+  // and a reader who assumes the gate checks meaning would be wrong in a way that matters.
+  const { chunk, at } = hostileChunk();
+  assert.equal(verdictOf(chunk, { wordId: at(2), correctionType: "word_replacement", proposedValue: "2001", confidenceScore: 0.91, evidenceSource: "transcript" }, { allowedCorrectionTypes: null }), "R12:DIGITS_ALTERED");
+  for (const [name, proposal] of [
+    ["deleting a filler word the witness said", { wordId: at(9), correctionType: "structure", proposedValue: null, confidenceScore: 0.97, evidenceSource: "transcript" }],
+    ["inventing a name absent from the record", { wordId: at(14), correctionType: "spelling", proposedValue: "Rodriguez", confidenceScore: 0.88, evidenceSource: "case_material" }],
+    ["inventing an objection never made", { wordId: at(13), correctionType: "structure", proposedValue: "MR. NUNEZ: Objection, form.", confidenceScore: 0.65, evidenceSource: "transcript" }],
+  ]) assert.equal(verdictOf(chunk, proposal), "ACCEPTED", `${name} is structurally valid and only an authorisation rule can refuse it`);
+});
+
+test("digits are not correctable, whatever the pass is permitted to do",()=>{
+  // The one always-on semantic rule. 1991 to 2001 rewrites what a witness said while satisfying
+  // every structural rule above it, so the guard cannot depend on how the pass was configured.
+  const { chunk, at } = hostileChunk();
+  const open = { allowedCorrectionTypes: ["spelling", "word_replacement", "structure", "punctuation"] };
+  assert.equal(verdictOf(chunk, { wordId: at(2), correctionType: "word_replacement", proposedValue: "2001", confidenceScore: 0.91, evidenceSource: "transcript" }, open), "R12:DIGITS_ALTERED");
+  assert.equal(verdictOf(chunk, { wordId: at(2), endWordId: at(17), correctionType: "word_replacement", proposedValue: "2001", confidenceScore: 0.7, evidenceSource: "case_context" }, open), "R12:DIGITS_ALTERED",
+    "collapsing a span from 1991 to 2001 loses one of them, and that is the same failure");
+  // A correction that leaves the digits alone is unaffected.
+  assert.equal(verdictOf(chunk, { wordId: at(14), correctionType: "spelling", proposedValue: "Etminan", confidenceScore: 0.95, evidenceSource: "keyterm" }, open), "ACCEPTED");
+});
+
+test("a constrained entity pass refuses every hostile case and still does its job",()=>{
+  // Pass 1 as it will actually be configured: spelling only, values drawn from an authority list.
+  // The point is the last assertion -- a gate that refused everything would be no use.
+  const { chunk, at } = hostileChunk();
+  const refused = [
+    [{ wordId: at(2), correctionType: "word_replacement", proposedValue: "2001", confidenceScore: 0.91, evidenceSource: "transcript" }, "R13:CORRECTION_TYPE_NOT_ENABLED_FOR_PASS"],
+    [{ wordId: at(9), correctionType: "structure", proposedValue: null, confidenceScore: 0.97, evidenceSource: "transcript" }, "R13:CORRECTION_TYPE_NOT_ENABLED_FOR_PASS"],
+    [{ wordId: at(13), correctionType: "structure", proposedValue: "MR. NUNEZ: Objection, form.", confidenceScore: 0.65, evidenceSource: "transcript" }, "R13:CORRECTION_TYPE_NOT_ENABLED_FOR_PASS"],
+    [{ wordId: at(14), correctionType: "spelling", proposedValue: "Rodriguez", confidenceScore: 0.88, evidenceSource: "case_material" }, "R14:VALUE_NOT_IN_LEXICON"],
+  ];
+  for (const [proposal, expected] of refused) assert.equal(verdictOf(chunk, proposal, PASS_ONE), expected);
+
+  assert.equal(verdictOf(chunk, { wordId: at(14), correctionType: "spelling", proposedValue: "Etminan", confidenceScore: 0.95, evidenceSource: "keyterm" }, PASS_ONE), "ACCEPTED",
+    "and the correction the pass exists to make is still made");
+});
+
+test("an unauthorised name is reported as attempted, not swallowed",()=>{
+  const { chunk, at } = hostileChunk();
+  const result = validateProposals(
+    { chunkId: chunk.chunkId, passId: chunk.passId, reviewStateHash: chunk.reviewStateHash,
+      proposals: [{ wordId: at(14), correctionType: "spelling", proposedValue: "Rodriguez", confidenceScore: 0.88, evidenceSource: "case_material" }] },
+    { chunk, roster: HOSTILE_ROSTER, ...PASS_ONE },
+  );
+  assert.equal(result.declined[0].proposedValue, "Rodriguez", "what was attempted is the finding");
 });

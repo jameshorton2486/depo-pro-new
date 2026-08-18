@@ -175,7 +175,7 @@ export const RESPONSE_REJECTED = "RESPONSE_REJECTED";
  * naming anyone else is declined with the attempted identity reported verbatim, because "the model
  * proposed a person who is not in this case" is the finding, and paraphrasing it loses it.
  */
-export function validateProposals(response, { chunk, reviewStateHash, roster } = {}) {
+export function validateProposals(response, { chunk, reviewStateHash, roster, allowedCorrectionTypes, lexicon: lexiconInput } = {}) {
   const reject = (code, detail) => ({ ok: false, rejected: { code, ...detail }, accepted: [], declined: [] });
 
   if (response?.chunkId !== chunk?.chunkId) {
@@ -192,6 +192,8 @@ export function validateProposals(response, { chunk, reviewStateHash, roster } =
   const words = chunkWords(chunk);
   const index = new Map(words.map((word, position) => [word.id, { word, position }]));
   const allowed = roster instanceof Set ? roster : new Set(roster ?? []);
+  const enabledTypes = allowedCorrectionTypes ? new Set(allowedCorrectionTypes) : null;
+  const lexicon = lexiconInput ? new Set([...lexiconInput].map(value => String(value).toLowerCase())) : null;
 
   const accepted = [];
   const declined = [];
@@ -228,6 +230,12 @@ export function validateProposals(response, { chunk, reviewStateHash, roster } =
 
     if (!CORRECTION_TYPES.includes(proposal.correctionType) && refuse("R6", "CORRECTION_TYPE_NOT_PERMITTED", { correctionType: proposal.correctionType ?? null })) continue;
 
+    // What THIS pass was authorised to do, which is narrower than what the vocabulary can express.
+    // A pass asked to resolve entity names has no business restructuring testimony, and the way to
+    // ensure that is to withhold the capability rather than to hope the instruction is followed.
+    if (enabledTypes && !enabledTypes.has(proposal.correctionType)
+      && refuse("R13", "CORRECTION_TYPE_NOT_ENABLED_FOR_PASS", { correctionType: proposal.correctionType, enabled: [...enabledTypes] })) continue;
+
     const score = proposal.confidenceScore;
     if ((typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) && refuse("R7", "CONFIDENCE_OUT_OF_RANGE", { confidenceScore: score ?? null })) continue;
 
@@ -237,6 +245,26 @@ export function validateProposals(response, { chunk, reviewStateHash, roster } =
     // empty value on any other type is a proposal that does not propose anything.
     const isDeletion = proposal.correctionType === "structure" && proposal.proposedValue === null;
     if (!isDeletion && !String(proposal.proposedValue ?? "").trim() && refuse("R9", "PROPOSED_VALUE_EMPTY", {})) continue;
+
+    // R12: the digits of testimony are not correctable. A year, an age, a dosage, a dollar amount
+    // and a street number are the substance of an answer, not its spelling, and a correction pass
+    // that can alter them can rewrite what a witness said while looking entirely well-formed --
+    // 1991 to 2001 is a valid word_replacement by every structural rule above it. No legitimate
+    // correction to a name or a punctuation mark changes a digit, so refusing every such change
+    // costs nothing this pass needs and closes the whole category. A reporter who genuinely must
+    // change a number does it in the Workspace, where a person is deciding.
+    const spanText = words.slice(anchor.position, end.position + 1).map(word => word.text).join(" ");
+    const digitsOf = value => String(value ?? "").match(/\d/g)?.join("") ?? "";
+    if (digitsOf(spanText) !== digitsOf(proposal.proposedValue)
+      && refuse("R12", "DIGITS_ALTERED", { was: digitsOf(spanText), proposed: digitsOf(proposal.proposedValue), spanText })) continue;
+
+    // R14: when a pass is given an authority list, the proposed value must come from it. This is
+    // the difference between "correct Atamanan to the doctor's name as the record spells it" and
+    // "decide what this word should have been", and only the first is a task a model can be held
+    // to. Absent a lexicon this rule does not fire, so an unconstrained pass is a deliberate choice
+    // rather than an oversight.
+    if (lexicon && proposal.proposedValue !== null && !lexicon.has(String(proposal.proposedValue).toLowerCase())
+      && refuse("R14", "VALUE_NOT_IN_LEXICON", { proposedValue: proposal.proposedValue })) continue;
 
     if (proposal.correctionType === "speaker_assignment") {
       const identity = proposal.speakerIdentity ?? null;
