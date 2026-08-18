@@ -464,6 +464,27 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-flag { color:#a3283a; }
 .workspace-hash { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78em; color:#5b6880; }
 
+/* Read-only transcript print projection. Page geometry remains visibly provisional until the
+   UFM profile records verified margins/gutter measurements. */
+.print-preview { min-height:100vh; background:#e9eef5; padding:30px; }
+.print-preview-header { width:min(1180px,100%); margin:0 auto 24px; display:flex; align-items:end; justify-content:space-between; gap:24px; }
+.print-preview-header h1 { margin:6px 0; font-size:30px; }.print-preview-header p { margin:0; color:var(--muted); font-size:13px; }
+.print-preview-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
+.print-preview-modes { display:flex; padding:3px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.print-preview-modes button { border:0; border-radius:7px; padding:9px 11px; background:transparent; color:#61738f; font-weight:700; }
+.print-preview-modes button.active { background:var(--blue); color:#fff; }
+.print-preview-layout { width:min(1180px,100%); margin:0 auto; display:grid; grid-template-columns:270px minmax(0,1fr); gap:24px; align-items:start; }
+.print-preview-status { position:sticky; top:20px; display:grid; gap:14px; padding:20px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+.print-preview-status h2,.print-preview-status h3 { margin:0; }.print-preview-status h2 { font-size:17px; }.print-preview-status h3 { font-size:12px; }
+.print-preview-status dl { display:grid; gap:7px; margin:0; }.print-preview-status dl div { display:flex; justify-content:space-between; gap:12px; }.print-preview-status dt { color:var(--muted); font-size:11px; }.print-preview-status dd { margin:0; font-size:11px; font-weight:700; }
+.print-preview-findings { display:grid; gap:8px; }.print-preview-findings article { padding:10px; border-radius:8px; background:#fff8e6; color:#6b551d; }.print-preview-findings article.blocking,.print-preview-findings article.transcript { background:#fdf3f3; color:#8a2b2b; }.print-preview-findings strong { font-size:9px; }.print-preview-findings p { margin:4px 0; font-size:10px; line-height:1.45; }.print-preview-findings button { border:0; padding:0; background:transparent; color:inherit; font-size:10px; text-decoration:underline; }
+.print-preview-clear { margin:0; padding:10px; border-radius:8px; background:#e8f6ec; color:#285f45; font-size:11px; }.print-preview-note { margin:0; padding-top:13px; border-top:1px solid var(--line); color:var(--muted); font-size:10px; line-height:1.5; }
+.print-preview-content { min-width:0; }.print-continuous { padding:24px 28px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+.print-continuous article { padding:15px 0; border-top:1px solid #edf1f6; }.print-continuous article:first-child { border-top:0; }.print-continuous article>div { display:grid; grid-template-columns:52px 132px minmax(0,1fr); gap:10px; font-family:"Courier New",Courier,monospace; line-height:1.75; }.print-continuous time { color:var(--blue); font-size:11px; }.print-continuous strong { color:var(--navy); font-size:13px; }.print-continuous p { margin:0; }.print-byline { margin:0 0 5px 62px!important; color:var(--muted); font-style:italic; font-family:"Courier New",Courier,monospace; }
+.print-pages { display:grid; justify-items:center; gap:28px; }.print-paper { width:min(100%,816px); min-height:1056px; padding:70px 58px 44px; background:#fff; color:#111; box-shadow:0 10px 30px rgba(25,43,78,.14); }
+.print-paper ol { min-height:900px; display:grid; grid-template-rows:repeat(25,1fr); margin:0; padding:0; list-style:none; }.print-paper li { display:grid; grid-template-columns:30px minmax(0,1fr); min-height:36px; align-items:start; font:12px/1.5 "Courier New",Courier,monospace; }.print-paper li>span { padding-right:10px; color:#7d7d7d; text-align:right; user-select:none; }.print-paper code { color:inherit; font:inherit; white-space:pre; }.print-paper footer { text-align:center; font:12px "Courier New",Courier,monospace; }
+@media(max-width:900px){.print-preview{padding:20px 12px}.print-preview-header{align-items:stretch;flex-direction:column}.print-preview-actions{justify-content:flex-start}.print-preview-layout{grid-template-columns:1fr}.print-preview-status{position:static}.print-continuous article>div{grid-template-columns:46px 100px minmax(0,1fr)}.print-paper{min-height:auto;padding:35px 16px}.print-paper ol{min-height:760px}.print-paper li{font-size:10px;grid-template-columns:25px minmax(0,1fr)}}
+
 /* Shown when a transcript has paragraphs but no speaker map. Informational rather than an error:
    the transcript is correct, it just cannot show Q./A. until the speakers are assigned. */
 .workspace-awaiting { margin:0; padding:11px 20px; background:#fff8e6; border-bottom:1px solid #e8d9a8; color:#6b551d; font-size:.9rem; }

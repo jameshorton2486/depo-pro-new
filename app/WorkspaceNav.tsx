@@ -1,6 +1,6 @@
 "use client";
 
-export type NavView = "library" | "intake" | "audio-tools" | "workspace" | "compare" | "insertion-pages" | "admin";
+export type NavView = "library" | "intake" | "audio-tools" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
 
 type Item = {
   view: NavView;
@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
     heading: "Open deposition",
     items: [
       { view: "workspace", label: "Workspace", note: "Transcribe, assign speakers, correct the record", needsDeposition: true },
+      { view: "preview", label: "Print preview", note: "Continuous and 25-line body pages", needsDeposition: true },
       { view: "compare", label: "Compare transcripts", note: "Measured source selection", needsDeposition: true },
       { view: "insertion-pages", label: "Certification pages", note: "Texas variants; federal pending", needsDeposition: true },
     ],

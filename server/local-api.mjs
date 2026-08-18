@@ -8,6 +8,7 @@ import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, se
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
+import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -227,6 +228,10 @@ const server = http.createServer(async (req,res) => {
         examinerIdentity:url.searchParams.get("examinerIdentity")||null,
         overlay:readReporterOverlay(root,{depositionId,...store}),
       }),origin);
+    }
+    if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
     }
     // The only two write paths for reporter edits. Deliberately not an editable operation list:
     // append and undo are enough to work, and every additional verb is another way for the
