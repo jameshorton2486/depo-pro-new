@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
 import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
-import { counselEntry, createCanonicalDepositionRecord } from "./canonical-deposition-record.mjs";
+import { counselEntry, createCanonicalDepositionRecord, partyEntry } from "./canonical-deposition-record.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
 function base(_root,{storageRoot}={}){return storageRoot?path.resolve(storageRoot):depositionStorageRoot()}
@@ -52,6 +52,38 @@ export function readPlaybackProxy(root,id,index,options={}){const paths=playback
 export function writePlaybackProxyRecord(root,id,index,record,options={}){const paths=playbackProxyPaths(root,id,index,options);fs.mkdirSync(path.dirname(paths.record),{recursive:true});atomicJson(paths.record,record);return{...record,file:paths.file}}
 
 const APPEARANCE_ROLES = Object.freeze(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY", "OTHER"]);
+
+/**
+ * Replaces parties[] on an existing deposition, and touches nothing else.
+ *
+ * Narrow for the same reason writeDepositionCounsel is narrow: a party entry cannot orphan a word
+ * id or invalidate a transcript hash, and it should not be able to reach anything that could.
+ *
+ * The rule this exists to hold: PARTY STATUS IS NOT ATTENDANCE. Writing a party never makes anyone
+ * a speaker candidate. getSpeakerCandidates reads the witness, the reporter, counsel who actually
+ * appeared, interpreters and videographers -- it does not read parties[], and must not begin to.
+ * A defendant who never attended is still a defendant; a corporation cannot attend at all. If
+ * party status were allowed to imply eligibility, a speaker map could attribute testimony to an
+ * entity that was never in the room, which is a defect in the record rather than in the interface.
+ */
+export function writeDepositionParties(root, { depositionId, parties, storageRoot, source = "REPORTER_ENTERED" } = {}) {
+  if (!Array.isArray(parties)) throw new Error("Parties must be an array.");
+  const entries = parties.map((party, index) => {
+    if (!String(party?.name ?? "").trim()) throw new Error("Every party entry requires a name.");
+    return partyEntry(party, index, { source });
+  });
+  const seen = new Set();
+  for (const entry of entries) {
+    if (seen.has(entry.id)) throw new Error(`Party id ${entry.id} appears more than once.`);
+    seen.add(entry.id);
+  }
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, parties:entries });
+  return { depositionId, parties:entries };
+}
 
 /**
  * Replaces counsel[] on an existing deposition with reporter-typed entries.

@@ -43,6 +43,48 @@ export function counselEntry(attorney = {}, index = 0, { source = "NOD_EXTRACTED
   };
 }
 
+export const PARTY_ROLES = Object.freeze(["PLAINTIFF", "DEFENDANT", "INTERVENOR", "THIRD_PARTY", "OTHER"]);
+export const PARTY_ENTITY_TYPES = Object.freeze(["PERSON", "ORGANIZATION"]);
+
+/**
+ * One party to the case.
+ *
+ * A party is a fact about the lawsuit. It is NOT a fact about who was in the room, and nothing
+ * here may be read as one: a defendant who never appeared is still a defendant, and a party who
+ * testified is a speaker because of the appearance record, never because of this list. The two are
+ * kept apart deliberately -- getSpeakerCandidates does not read parties[] at all -- because
+ * inferring attendance from party status is how someone who was never deposed ends up attributed
+ * with testimony.
+ *
+ * Aliases carry their qualifier rather than being flattened, because "a/k/a" and "d/b/a" are legal
+ * claims of different kinds and a caption that collapses them misstates the style of the case.
+ */
+export function partyEntry(party = {}, index = 0, { source = "NOD_EXTRACTED" } = {}) {
+  const supplied = (value, citations = []) => {
+    const present = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
+    if (source === "NOD_EXTRACTED") return field(value ?? null, { source, citations });
+    return field(value ?? null, { source, state: present ? "REPORTER_ADDED" : "MISSING", citations });
+  };
+  const name = String(party.name ?? "").trim();
+  const role = String(party.role ?? "").trim().toUpperCase().replaceAll(" ", "_");
+  const entityType = String(party.entityType ?? "").trim().toUpperCase();
+  if (role && !PARTY_ROLES.includes(role)) throw new Error(`Unsupported party role: ${party.role}`);
+  if (entityType && !PARTY_ENTITY_TYPES.includes(entityType)) throw new Error(`Unsupported party entity type: ${party.entityType}`);
+
+  return {
+    id: party.id || `party-${index + 1}`,
+    name: supplied(name || null, party.citations ?? []),
+    // Derived from the name by a rule, so it is SYSTEM_GENERATED whatever supplied the name.
+    normalizedName: name
+      ? field(name.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim(), { source: "SYSTEM_GENERATED", state: "DERIVED" })
+      : field(null, { source: "SYSTEM_GENERATED", state: "MISSING" }),
+    role: supplied(role || null),
+    entityType: supplied(entityType || null),
+    aliases: (party.aliases ?? []).map(alias => ({ qualifier: supplied(alias.qualifier ?? null), name: supplied(alias.name ?? null) })),
+    captionDisplayName: supplied(party.captionDisplayName || name || null),
+  };
+}
+
 export function createCanonicalDepositionRecord(input={}){
   const partyValues=Array.isArray(input.parties)?input.parties:[];
   const attorneyValues=Array.isArray(input.attorneys)?input.attorneys:[];
