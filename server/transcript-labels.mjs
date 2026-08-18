@@ -59,15 +59,28 @@ export const LAYOUT = Object.freeze({
 // characters resolving against a defined ruler, and the two descriptions have to agree or the
 // screen and the file will disagree with nothing catching it.
 //
-// The ruler: left stops at 0.5, 1.0 and 1.5 inches (720, 1440, 2160 twips), read from the
-// specimen's own paragraph properties, and a centre stop at 3.0 inches (4320).
+// The ruler, and the two halves of it have different standing.
 //
-// That centre is the PHYSICAL PAGE centre, ruled by the reporter, not the text-block centre.
-// With a 1.25-inch left margin the paper centres at 4.25 inches, which is 3.0 from the margin;
-// the text block centres at 3.10. One character apart, and the page was chosen. centerColumn()
-// below computes the text-block centre and is therefore the wrong basis for an exported line --
-// a centre tab stop does the centring, not computed padding. It is kept only because the screen
-// still uses character columns; when the Workspace renders from this model it goes.
+// The three left stops -- 0.5, 1.0 and 1.5 inches, 720/1440/2160 twips -- are measured. They are
+// defined in the specimen's paragraph properties AND they position characters: 503 Q./A.
+// paragraphs land on the first two.
+//
+// The centre stop is NOT measured, and the earlier claim that it was is withdrawn. The specimen
+// defines a centre stop at 4680 in 710 paragraphs and uses it in none: all nine exhibit
+// parentheticals are centred with jc="center" and carry no tab at all. A property that has never
+// positioned a character measures nothing, however consistently it appears -- being present in a
+// file is not evidence.
+//
+// 4320 is derived instead, from the reporter's ruling plus the specimen's page geometry. The
+// ruling is the PHYSICAL PAGE centre; tab positions are measured from the left margin, so that
+// is 12240/2 - 1800. For reference, the three candidates are a quarter inch apart in total:
+// page centre 4320 (3.000in), text-block centre 4500 (3.125in), the specimen's unused stop 4680
+// (3.250in). Only the first implements the ruling.
+//
+// centerColumn() below computes the text-block centre and is therefore the wrong basis for an
+// exported line -- a centre tab stop does the centring, not computed padding. It is kept only
+// because the screen still positions by character column; when the Workspace renders from this
+// model it goes.
 //
 // Q. and A. are measured and unanimous: 503 of the specimen's paragraphs carry exactly two tabs,
 // one before the token and one after it.
@@ -82,10 +95,22 @@ export const LAYOUT = Object.freeze({
 // four-tab form is deliberately not available: the specimen's two four-tab parentheticals
 // exhaust the three defined stops, so the fourth resolves against the word processor's default
 // grid and lands in different places in different contexts. Every tab here reaches a real stop.
+// The page the specimen is set on, read from its sectPr. Present so the centre stop can be
+// derived rather than asserted: a margin change must move the stop, not silently invalidate it.
+export const PAGE = Object.freeze({
+  widthTwips: 12240,   // 8.5in
+  heightTwips: 15840,  // 11in
+  marginTwips: Object.freeze({ left:1800, right:1440, top:1440, bottom:1440 }),
+});
+
+// Tab positions are measured from the left margin, so the centre of the paper is half the page
+// width less the left margin: 12240/2 - 1800 = 4320 twips, 3.0in. Derived, not typed.
+const PAGE_CENTRE_FROM_MARGIN = PAGE.widthTwips / 2 - PAGE.marginTwips.left;
+
 export const TAB_STOPS = Object.freeze({
   leftInches: Object.freeze([0.5, 1.0, 1.5]),
-  centreInches: 3.0,
-  twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:4320 }),
+  centreInches: PAGE_CENTRE_FROM_MARGIN / 1440,
+  twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:PAGE_CENTRE_FROM_MARGIN }),
 });
 
 export const TABS = Object.freeze({

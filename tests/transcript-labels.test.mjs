@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { tabbedLine, TABS, TAB_STOPS, ELEMENT, LAYOUT, LINE_WIDTH, buildSpeakerLabels, centerColumn, labelParagraphs } from "../server/transcript-labels.mjs";
+import { tabbedLine, TABS, TAB_STOPS, PAGE, ELEMENT, LAYOUT, LINE_WIDTH, buildSpeakerLabels, centerColumn, labelParagraphs } from "../server/transcript-labels.mjs";
 
 const CANDIDATES = [
   { id:"counsel-bentley", label:"Dennis Bentley", defaultRole:"QUESTIONING_ATTORNEY", honorific:"MR." },
@@ -212,4 +212,34 @@ test("the centre stop is the page centre, not the text-block centre",()=>{
   assert.equal(TAB_STOPS.centreInches, 3.0);
   assert.equal(TAB_STOPS.twips.centre, 4320);
   assert.notEqual(TAB_STOPS.twips.centre, 4680, "4680 is 3.25in, the text-block centre");
+});
+
+test("the centre stop is derived from the page, not typed",()=>{
+  // Asserted against the geometry rather than a literal, so a margin change moves the stop
+  // instead of silently invalidating it. Tab positions are measured from the left margin, so
+  // the centre of the paper is half the page width less that margin.
+  assert.equal(TAB_STOPS.twips.centre, PAGE.widthTwips / 2 - PAGE.marginTwips.left);
+  assert.equal(TAB_STOPS.twips.centre, 4320);
+  assert.equal(TAB_STOPS.centreInches, 3.0);
+});
+
+test("the centre stop is neither of the two values it could be mistaken for",()=>{
+  // Three candidates a quarter inch apart in total, and only one implements the ruling:
+  //   4320 page centre        3.000in   ← ruled
+  //   4500 text-block centre  3.125in
+  //   4680 the specimen's own 3.250in   ← defined in 710 paragraphs, used by none
+  const textBlockCentre = (PAGE.widthTwips - PAGE.marginTwips.left - PAGE.marginTwips.right) / 2;
+  assert.equal(textBlockCentre, 4500);
+  assert.notEqual(TAB_STOPS.twips.centre, textBlockCentre, "the text block centres 180 twips right of the page");
+  assert.notEqual(TAB_STOPS.twips.centre, 4680, "the specimen's encoded stop positions no character and measures nothing");
+});
+
+test("the page geometry is the specimen's own",()=>{
+  // From its sectPr: 8.5 by 11 inches, 1.25in left margin, 1.0in right. These do position
+  // characters -- every line in the document sits inside them.
+  assert.equal(PAGE.widthTwips, 12240);
+  assert.equal(PAGE.heightTwips, 15840);
+  assert.equal(PAGE.marginTwips.left, 1800);
+  assert.equal(PAGE.marginTwips.right, 1440);
+  assert.equal(PAGE.widthTwips - PAGE.marginTwips.left - PAGE.marginTwips.right, 9000, "a 6.25in text block");
 });
