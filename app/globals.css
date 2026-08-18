@@ -461,6 +461,9 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .wp-byline { color:var(--muted); font-style:italic; }
 .wp-word { border:0; background:transparent; font:inherit; padding:0 1px; cursor:pointer; color:inherit; border-radius:3px; }
 .wp-word:hover { background:#e7eefc; }
+/* Declared before .picked so the anchor keeps the stronger fill: both selectors have the same
+   specificity, so source order is what decides which one the anchor word shows. */
+.wp-word.in-range { background:#dbe6fb; }
 .wp-word.picked { background:var(--blue); color:#fff; }
 .wp-word.edited { background:#fff4d6; }
 .wp-word.authored { background:#e8f6ec; font-style:italic; }

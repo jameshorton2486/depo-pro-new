@@ -18,7 +18,11 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
   const [examiner,setExaminer] = useState<string>("");
-  const [selected,setSelected] = useState<{ paragraphId:string; wordId:string }|null>(null);
+  // Anchor and extent, not a point. wordId stays the anchor so every existing single-word
+  // operation keeps addressing exactly what it addressed before; extentWordId is null until the
+  // reporter extends. A range may cross paragraphs -- turn boundaries are the thing a correction
+  // pass is meant to question, so a selection that could not span them would be useless for it.
+  const [selected,setSelected] = useState<{ paragraphId:string; wordId:string; extentWordId:string|null }|null>(null);
   const [editing,setEditing] = useState<{ wordId:string; text:string }|null>(null);
   const [error,setError] = useState("");
   const [busy,setBusy] = useState(false);
@@ -116,6 +120,30 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
 
+  // Transcript order across every paragraph, so a range can be resolved without caring which
+  // paragraph either end lives in. Rebuilt only when the render changes.
+  const wordOrder = useMemo(()=>{
+    const order = new Map<string,number>();
+    let index = 0;
+    for(const paragraph of rendered?.paragraphs ?? []) for(const word of paragraph.words) order.set(word.id,index++);
+    return order;
+  },[rendered]);
+  // Null unless the extent is a different word that still exists in the current render: an
+  // extent left over from a paragraph that an edit removed collapses back to a point selection
+  // rather than highlighting an arbitrary span.
+  const range = useMemo(()=>{
+    if(!selected?.extentWordId || selected.extentWordId===selected.wordId) return null;
+    const from = wordOrder.get(selected.wordId), to = wordOrder.get(selected.extentWordId);
+    if(from===undefined || to===undefined) return null;
+    return { first:Math.min(from,to), last:Math.max(from,to) };
+  },[selected,wordOrder]);
+  const inRange = useCallback((wordId:string)=>{
+    if(!range) return false;
+    const index = wordOrder.get(wordId);
+    return index!==undefined && index>=range.first && index<=range.last;
+  },[range,wordOrder]);
+  const rangeWords = range ? range.last-range.first+1 : 0;
+
   return (
     <main className="workspace">
       <header className="workspace-top">
@@ -165,11 +193,14 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
                       -- the transcript rendered as "Goodafternoon.Weareontherecord." A margin
                       would look right and still copy and read aloud without spaces. */}
                   {index>0 && " "}
+                  {/* shiftKey rather than a separate control: the click event carries it for
+                      Enter and Space on a focused button too, so extending the selection works
+                      from the keyboard without a second affordance to find. */}
                   <button
                     type="button"
-                    className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${selected?.wordId===word.id?"picked":""}`}
-                    aria-label={`${word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}. Select to edit or split here.`}
-                    onClick={()=>{ setSelected({ paragraphId:paragraph.id, wordId:word.id }); setEditing(null); }}
+                    className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selected?.wordId===word.id?"picked":""}`}
+                    aria-label={`${word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
+                    onClick={event=>{ if(event.shiftKey && selected) setSelected({ ...selected, extentWordId:word.id }); else setSelected({ paragraphId:paragraph.id, wordId:word.id, extentWordId:null }); setEditing(null); }}
                     onDoubleClick={()=>{ if(!word.authored) setEditing({ wordId:word.id, text:word.text }); }}
                   >{word.text}</button>
                   </Fragment>
@@ -182,7 +213,9 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
         <aside className="workspace-menu" aria-label="Paragraph labels">
           <h2>Label</h2>
           <p className="workspace-hint">
-            {active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word.` : "Click a word, then choose what its paragraph should be."}
+            {range ? `${rangeWords} words selected. Choosing a label still acts on the anchor word; single-word edits are unavailable while a range is selected.`
+              : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`
+              : "Click a word, then choose what its paragraph should be."}
           </p>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="QUESTIONING_ATTORNEY")?.id??examiner??null,"QUESTIONING_ATTORNEY")}>Q.</button>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="WITNESS")?.id??null,"WITNESS")}>A.</button>
@@ -204,7 +237,9 @@ export default function WorkspaceScreen({ depositionId, audioIndex = 0, onBack }
               <button type="button" onClick={()=>setEditing(null)}>Cancel</button>
             </form>
           )}
-          {selected && !editing && (
+          {/* Hidden while a range is selected: a range is not a word, and leaving "Strike the
+              word" pointing at the anchor invites striking one word when eleven look selected. */}
+          {selected && !editing && !range && (
             <>
               <h3>This word</h3>
               <button type="button" disabled={busy} onClick={()=>{ const word=active?.words.find(item=>item.id===selected.wordId); if(word) setEditing({ wordId:word.id, text:word.text }); }}>Correct the word</button>
