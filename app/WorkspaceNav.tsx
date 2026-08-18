@@ -17,7 +17,7 @@ const GROUPS: Group[] = [
     heading: "Library",
     items: [
       { view: "library", label: "Depositions" },
-      { view: "intake", label: "New deposition" },
+      { view: "intake", label: "New Deposition" },
     ],
   },
   {

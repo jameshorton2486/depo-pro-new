@@ -232,7 +232,11 @@ export default function Home() {
   }
 
   if (showIntake) {
-    return frame(<IntakeScreen onCancel={() => setShowIntake(false)} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
+    // Its button says "Back to depositions", so it goes to the depositions. Closing intake
+    // without clearing the active deposition dropped the reporter into the Workspace of whatever
+    // was open before -- which reads as the app refusing to leave, particularly when intake was
+    // reached from the nav while a deposition was open.
+    return frame(<IntakeScreen onCancel={() => { setShowIntake(false); setActive(null); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
@@ -286,7 +290,7 @@ export default function Home() {
             ))}
           </div>
         ) : (
-          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>Create a deposition</button>}</div>
+          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>New Deposition</button>}</div>
         )}
       </section>
 
