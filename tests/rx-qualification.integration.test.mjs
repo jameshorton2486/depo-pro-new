@@ -12,12 +12,21 @@ const enabled = process.env.RUN_RX_INTEGRATION === "1";
 const fixture = process.env.DEPO_PRO_RX_TEST_AUDIO ? path.resolve(process.env.DEPO_PRO_RX_TEST_AUDIO) : null;
 const output = process.env.DEPO_PRO_RX_QUALIFICATION_OUT ? path.resolve(process.env.DEPO_PRO_RX_QUALIFICATION_OUT) : null;
 
+// Named for the same reason as the module suite: a silent skip here would read as "De-hum is
+// qualified" when what it means is "nothing measured it".
+const unqualified = !enabled
+  ? "RUN_RX_INTEGRATION=1 is required: qualification measures the installed RX 12 plug-ins."
+  : !fixture
+    ? "DEPO_PRO_RX_TEST_AUDIO must point at the disposable RX fixture; asrSafe stays a prior until it does."
+    : false;
+const unwritable = unqualified || (!output && "DEPO_PRO_RX_QUALIFICATION_OUT must name a directory for the qualification record.");
+
 // De-hum and De-click first, deliberately. Both carry asrSafe: true in shipped code and are
 // selectable by an operator today, so they are the two whose unmeasured status is live
 // exposure rather than a future concern.
 const FIRST = [["rx12-de-hum-dynamic-v1"], ["rx12-de-click-conservative-v1"]];
 
-for (const profileIds of FIRST) test(`qualification protocol runs against ${profileIds.join("+")}`,{skip:!enabled||!fixture,timeout:900000},async t=>{
+for (const profileIds of FIRST) test(`qualification protocol runs against ${profileIds.join("+")}`,{skip:unqualified,timeout:900000},async t=>{
   const workRoot = fs.mkdtempSync(path.join(os.tmpdir(),"depo-rx-qual-")); t.after(()=>fs.rmSync(workRoot,{recursive:true,force:true}));
   const record = await qualifyProfile({ fixturePath:fixture, profileIds, workRoot });
 
@@ -47,7 +56,7 @@ for (const profileIds of FIRST) test(`qualification protocol runs against ${prof
   t.diagnostic(`${profileIds.join("+")} rtf=${record.results.realTimeFactor.factor?.toFixed(3)} chunks=${record.results.frameParity.chunksRun} markers=${record.results.alignment.markers}`);
 });
 
-test("a qualification record is written to disk so it can become part of the catalog entry",{skip:!enabled||!fixture||!output,timeout:900000},async t=>{
+test("a qualification record is written to disk so it can become part of the catalog entry",{skip:unwritable,timeout:900000},async t=>{
   const workRoot = fs.mkdtempSync(path.join(os.tmpdir(),"depo-rx-qual-out-")); t.after(()=>fs.rmSync(workRoot,{recursive:true,force:true}));
   const record = await qualifyProfile({ fixturePath:fixture, profileIds:["rx12-de-hum-dynamic-v1"], workRoot });
   const file = writeQualificationRecord(output,record);
