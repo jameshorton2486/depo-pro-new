@@ -24,7 +24,7 @@ const GROUPS: Group[] = [
     heading: "Audio",
     items: [
       { view: "audio-tools", label: "Audio tools", note: "Processing and repair" },
-      { view: "live-capture", label: "Live deposition", note: "Independent local channels", needsDeposition: true },
+      { view: "live-capture", label: "Live deposition", note: "Record now, attach to a case later" },
     ],
   },
   {
