@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API = "http://127.0.0.1:4317";
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 const TERM_GROUP_SET = "deposition-core-v1";
 
 type GroupMetric = { expected: number; matched: number; missed: number; errorRate: number | null; missedTerms: string[] };

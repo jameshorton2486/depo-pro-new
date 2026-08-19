@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API = "http://127.0.0.1:4317";
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 
 type Finding = { code: string; target: string; severity: "blocking" | "warning"; message: string };
 type RenderingSpec = { sha256?: string; pages?: unknown[] };

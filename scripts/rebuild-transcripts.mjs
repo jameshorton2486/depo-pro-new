@@ -14,12 +14,13 @@
 // Without --apply it reports what would change and writes nothing.
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { depositionStorageRoot } from "../server/storage-config.mjs";
 import { getTranscriptionJob, listTranscriptionJobs } from "../server/transcription-jobs.mjs";
 
 const apply = process.argv.includes("--apply");
 const storageRoot = depositionStorageRoot();
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function depositions(directory, depth = 0) {
   if (depth > 4 || !fs.existsSync(directory)) return [];

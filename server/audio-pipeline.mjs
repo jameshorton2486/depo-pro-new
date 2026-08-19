@@ -23,7 +23,8 @@ export const ANALYSIS_VERSION = "audio-quality-v2.0.0";
 // differently is the defect ADR-0018 names.
 export const ROUTING_VERSION = "audio-routing-v3.0.0";
 const auditLocks=new Map();
-export async function withAuditLock(uploadId,fn){const previous=auditLocks.get(uploadId)??Promise.resolve();const next=previous.then(fn,fn);auditLocks.set(uploadId,next.catch(()=>{}));try{return await next}finally{if(auditLocks.get(uploadId)===next)auditLocks.delete(uploadId)}}
+export async function withAuditLock(uploadId,fn){const previous=auditLocks.get(uploadId)??Promise.resolve();const next=previous.then(fn,fn),settled=next.catch(()=>{});auditLocks.set(uploadId,settled);try{return await next}finally{if(auditLocks.get(uploadId)===settled)auditLocks.delete(uploadId)}}
+export const _testing = Object.freeze({ activeAuditLockCount: () => auditLocks.size });
 
 async function run(command, args, { binary = false } = {}) {
   return await new Promise((resolve, reject) => {

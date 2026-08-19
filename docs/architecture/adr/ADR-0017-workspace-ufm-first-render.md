@@ -1,7 +1,9 @@
 # ADR-0017 — Workspace UFM First-Render and Correction Architecture
 
 **File:** docs/architecture/adr/ADR-0017-workspace-ufm-first-render.md
-**Status:** DRAFT — proposed, not yet ratified. No code until owner ratifies.
+**Status:** PARTIALLY IMPLEMENTED — requirements 1–7 are ratified; chunking and
+response validation are implemented, but no correction model is connected to a live
+transcript.
 **Date:** 2026-08-14
 **Supersedes:** None
 **Related:** ADR-0016 (Format and Correct button — Option A rename); ADR-0012 OQ-4/OQ-5/OQ-6; ADR-0015 (geometry)
@@ -177,8 +179,10 @@ A failure in one chunk must not block or corrupt other chunks.
   Certified Transcript object.
 - The Thomas-specific 8-step prompt series remains as documentation only
   and must not be wired to any live transcript.
-- Part 2 code work is blocked until this ADR is ratified and the generic
-  versioned prompt is written and reviewed.
+- The bounded chunker and structural response validator are implemented and tested.
+- Live model invocation, proposal persistence, reporter decisions, and atomic
+  application remain blocked until the generic prompt is reviewed and the ATIA
+  workflow is implemented.
 - Parentheticals remain plain black; no F20 color change is required.
 
 ---
@@ -188,8 +192,8 @@ A failure in one chunk must not block or corrupt other chunks.
 | ID | Item | Owner | Blocks |
 |---|---|---|---|
 | OI-1 | Parenthetical color — closed 2026-08-15: plain black | Miah | Closed |
-| OI-2 | Generic versioned correction prompt — closed 2026-08-15 | Agent | Closed |
-| OI-3 | Reopened — budget-based revision required; fixed-utterance design superseded by audit findings | Agent | REQ-3 implementation |
+| OI-2 | Generic versioned correction prompt exists as a draft; live-use review remains open | Owner | Live model invocation |
+| OI-3 | Closed 2026-08-15 — budget-based chunking contract ratified and implemented | Agent | Closed |
 | OI-4 | Retranscription verification (clean Thomas) | James | REQ-2 scoping |
 | OI-5 | Build ATIA infrastructure (`corrections` table, `correction_decisions` table, `aiCorrectionBridge.ts`, decision endpoints) | Agent | Part 2 code — blocks AI button |
 
