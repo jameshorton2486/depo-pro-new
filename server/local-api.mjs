@@ -37,7 +37,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionIntake, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -256,6 +256,7 @@ const server = http.createServer(async (req,res) => {
         speakerCandidates:getSpeakerCandidates(root,{depositionId,...store}).candidates,
         examinerIdentity:url.searchParams.get("examinerIdentity")||null,
         overlay:readReporterOverlay(root,{depositionId,...store}),
+        sourceAudio:readDepositionRecord(root,depositionId,store)?.audio??[],
       }),origin);
     }
     if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){

@@ -238,7 +238,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
   // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
   // entirely -- the component would still be "memoized" and still re-render everything.
-  const seek = useCallback((seconds:number|null)=>{ if(seconds===null||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[]);
+  // Refused rather than guessed. The player is hardcoded to audio index 0, which is only correct
+  // while a deposition has exactly one transcribed recording; renderTranscript raises
+  // MULTI_VOLUME_UNSUPPORTED when it does not. Seeking anyway would play confident, wrong audio
+  // against the right text -- the failure a reporter is least able to catch by reading.
+  const multiVolume = useMemo(()=>(rendered?.findings ?? []).some(finding=>finding.code==="MULTI_VOLUME_UNSUPPORTED"),[rendered]);
+  const seek = useCallback((seconds:number|null)=>{ if(seconds===null||multiVolume||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[multiVolume]);
   // The functional form of setSelected is what keeps this stable: reading `selected` directly would
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.

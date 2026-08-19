@@ -40,7 +40,7 @@ export function indexEvidenceWords(evidenceDocuments = []) {
  * the evidence cannot resolve is still worth showing -- refusing to render it leaves the
  * reporter with a blank screen and no way to see what is wrong.
  */
-export function renderTranscript({ working, evidence = [], speakerCandidates = [], examinerIdentity = null, overlay = null } = {}) {
+export function renderTranscript({ working, evidence = [], speakerCandidates = [], examinerIdentity = null, overlay = null, sourceAudio = [] } = {}) {
   const findings = [];
   const projected = working?.segments || [];
   // The evidence store for a transcript is the evidence that transcript derives from, not every
@@ -153,6 +153,23 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   const assumed = paragraphs.flatMap(paragraph => paragraph.words.filter(word => word.honorificAssumed));
   if (assumed.length) findings.push({ code:"HONORIFIC_ASSUMED", count:assumed.length, wordIds:assumed.slice(0, 10).map(word => word.id),
     message:`${assumed.length} spoken "miss" written as "Ms." A certified record distinguishes Miss, Ms. and Mrs., and the recording does not; each of these is the standard form applied, not a title heard.` });
+
+  // Multi-volume is not supported, and the screen must say so rather than seek against the wrong
+  // recording. The Workspace player is hardcoded to audio index 0 -- correct today only because
+  // every deposition in the library has exactly one transcribed source, which is an accident of
+  // the current data rather than a property anything enforces. This is that assertion.
+  //
+  // Two independent conditions, because they fail differently. More than one job means paragraphs
+  // come from different recordings and Deepgram timestamps restart per job, so a seek lands in
+  // the wrong audio. More than one source audio means index 0 is a guess even with a single job --
+  // a live capture registered alongside a transcribed file is exactly that case.
+  //
+  // Resolving it properly is job -> sourceAudio -> index. That is not built, and building the
+  // job-identity half alone would not do it, so this refuses instead of guessing.
+  const jobCount = new Set(working?.derivedFrom ?? []).size;
+  const audioCount = Array.isArray(sourceAudio) ? sourceAudio.length : 0;
+  if (jobCount > 1 || audioCount > 1) findings.push({ code:"MULTI_VOLUME_UNSUPPORTED", severity:"blocking", jobs:jobCount, audio:audioCount,
+    message:`This deposition has ${jobCount} transcription job${jobCount === 1 ? "" : "s"} and ${audioCount} source recording${audioCount === 1 ? "" : "s"}. Playback cannot choose which recording a paragraph belongs to, so seeking is refused rather than played against the first one.` });
 
   const diarized = [...words.values()].some(word => Number.isInteger(word?.deepgramSpeaker));
   if (words.size && !diarized) findings.push({ code:"NO_DIARIZATION", message:"No ASR word carries a speaker number. Every paragraph will collapse into one speaker, and no speaker map can be assigned." });
