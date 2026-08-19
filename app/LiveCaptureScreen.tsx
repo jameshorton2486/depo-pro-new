@@ -90,9 +90,11 @@ type Unassigned = {
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
 export default function LiveCaptureScreen({
   deposition,
+  onDepositionUpdated,
   onBack,
 }: {
   deposition: LibraryDeposition | null;
+  onDepositionUpdated?: (deposition: LibraryDeposition) => void;
   onBack: () => void;
 }) {
   const [devices, setDevices] = useState<Device[]>([]),
@@ -106,6 +108,8 @@ export default function LiveCaptureScreen({
     [query, setQuery] = useState(""),
     [hits, setHits] = useState<Hit[] | null>(null),
     [handoff, setHandoff] = useState<string>(""),
+    [registeredUploads, setRegisteredUploads] = useState<string[]>([]),
+    [transcriptProgress, setTranscriptProgress] = useState(""),
     [label, setLabel] = useState(""),
     [unassigned, setUnassigned] = useState<Unassigned[]>([]),
     [library, setLibrary] = useState<LibraryDeposition[]>([]),
@@ -243,6 +247,13 @@ export default function LiveCaptureScreen({
       setBusy(false);
     }
   }
+  async function refreshOpenDeposition() {
+    if (!deposition || !onDepositionUpdated) return;
+    const response = await fetch(`${API}/api/depositions`), payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not refresh the deposition after recording.");
+    const updated = (payload.depositions ?? []).find((item: LibraryDeposition) => item.id === deposition.id);
+    if (updated) onDepositionUpdated(updated);
+  }
   const beginTest = () =>
       act(async () => {
         const created = await post("/api/live-capture/preflight", {
@@ -309,6 +320,19 @@ export default function LiveCaptureScreen({
         setHandoff(
           `${result.added.length} channel${result.added.length === 1 ? "" : "s"} added to this deposition${result.skipped.length ? `; ${result.skipped.length} skipped (${result.skipped.map((s: { id: string }) => s.id).join(", ")})` : ""}.`,
         );
+        setRegisteredUploads(result.added.map((item: { uploadId: string }) => item.uploadId));
+        await refreshOpenDeposition();
+      }),
+    createWorkingTranscript = () =>
+      act(async () => {
+        for (const [index, uploadId] of registeredUploads.entries()) {
+          setTranscriptProgress(`Transcribing channel ${index + 1} of ${registeredUploads.length}…`);
+          await post("/api/audio/transcribe", {
+            depositionId: deposition?.id ?? null,
+            uploadId,
+          });
+        }
+        setTranscriptProgress("Working transcript created. Open the Workspace to review speakers and corrections.");
       }),
     assign = (sessionId: string) =>
       act(async () => {
@@ -387,12 +411,20 @@ export default function LiveCaptureScreen({
             );
           }
         }
-        setSession(
-          await post("/api/live-capture/stop", {
+        const finalized = await post("/api/live-capture/stop", {
             depositionId: deposition?.id ?? null,
             sessionId: session?.sessionId,
-          }),
-        );
+          });
+        setSession(finalized);
+        if (deposition) {
+          const result = await post("/api/live-capture/add-to-deposition", {
+            depositionId: deposition.id,
+            sessionId: finalized.sessionId,
+          });
+          setRegisteredUploads(result.added.map((item: { uploadId: string }) => item.uploadId));
+          setHandoff(`${result.added.length} verified channel${result.added.length === 1 ? " was" : "s were"} automatically attached to this deposition.`);
+          await refreshOpenDeposition();
+        }
       });
   const recording = running,
     tested = preflight?.state === "TEST_CAPTURED",
@@ -419,6 +451,11 @@ export default function LiveCaptureScreen({
           Back to Workspace
         </button>
       </header>
+      {deposition && <section className="live-readiness-summary" aria-labelledby="live-readiness-title">
+        <div><span className="eyebrow">SCHEDULED DEPOSITION</span><h2 id="live-readiness-title">Confirm the case, then test both audio channels</h2></div>
+        <dl><div><dt>Case</dt><dd>{deposition.caseStyle}</dd></div><div><dt>Witness</dt><dd>{deposition.witness}</dd></div><div><dt>Deposition ID</dt><dd>{deposition.id}</dd></div></dl>
+        <p>Live text is preserved as a provisional transcript. The working transcript is created only after the verified local recordings are finalized.</p>
+      </section>}
       <section className="live-capture-card">
         <h2>Local recording preflight</h2>
         <p>
@@ -642,15 +679,19 @@ export default function LiveCaptureScreen({
               </p>
             ))}
             <div className="live-handoff">
-              <button
+              {deposition && registeredUploads.length === 0 && <button
                 className="primary-button"
                 type="button"
                 disabled={busy}
                 onClick={() => void addToDeposition()}
               >
-                Add these recordings to the deposition
-              </button>
+                Retry attaching these recordings
+              </button>}
               {handoff && <p className="live-handoff-result">{handoff}</p>}
+              {deposition && registeredUploads.length > 0 && <button className="primary-button" type="button" disabled={busy} onClick={()=>void createWorkingTranscript()}>
+                {busy && transcriptProgress ? transcriptProgress : "Create Working Transcript"}
+              </button>}
+              {transcriptProgress && !busy && <p className="live-handoff-result" role="status">{transcriptProgress}</p>}
             </div>
             {/* Read-back: find a moment and play the audio. The text is an index into the recording, not
           a transcript of it, so a misheard word the reporter can still place has done its job.

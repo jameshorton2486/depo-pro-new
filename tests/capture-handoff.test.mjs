@@ -48,6 +48,7 @@ test("a finished capture session becomes the deposition's audio",()=>{
 
     const record = deposition(value);
     assert.equal(record.audio.length, 2);
+    assert.equal(record.workflowStatus, "recorded");
     assert.deepEqual(record.audioIntakeIds, result.added.map(item => item.uploadId));
     // Registered where it lies: no copy, and the path still resolves inside the deposition.
     for (const item of record.audio) {

@@ -5,6 +5,7 @@ export type IntakeAttorney = {
 
 export type KeytermEntry = { term:string; tier?:number; reason?:string; source?:string; [key:string]:unknown };
 export type UfmEntry = { canonical:string; category?:string; asr_variants?:string[]; rendering_rule?:string|null; spoken?:boolean; in_keyterms?:boolean; source?:string; confidence?:string; [key:string]:unknown };
+export type DepositionCreationMode = "existing_recording" | "live";
 
 export type ClaudeIntakeAnalysis = {
   caseStyle:string; witness:string; causeNumber:string; depositionDate:string; deponentType:string;

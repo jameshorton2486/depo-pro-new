@@ -5,7 +5,7 @@ import AudioToolsScreen from "./AudioToolsScreen";
 import TermReviewTable from "./TermReviewTable";
 import { KEYTERM_PRODUCT_CAP } from "@/server/keyterm-limits.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
-import type { ClaudeIntakeAnalysis, IntakeAttorney } from "./intake-types";
+import type { ClaudeIntakeAnalysis, DepositionCreationMode, IntakeAttorney } from "./intake-types";
 export type AudioDerivative = {
   kind?: string;
   operationId?: string;
@@ -88,6 +88,7 @@ export type { IntakeAttorney } from "./intake-types";
 // one and silently omitted both -- so counsel[] and parties[] arrived empty on every deposition
 // however good the extraction was.
 export type IntakeDraft = {
+  creationMode: DepositionCreationMode;
   caseStyle: string;
   witness: string;
   causeNumber: string;
@@ -107,7 +108,7 @@ export type IntakeDraft = {
   warnings: string[];
   confidence: string;
 };
-type Props = { onCancel: () => void; onContinue: (draft: IntakeDraft) => void };
+type Props = { creationMode: DepositionCreationMode; onCancel: () => void; onContinue: (draft: IntakeDraft) => void };
 function fileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -126,7 +127,7 @@ function toBase64(file: File) {
     reader.readAsDataURL(file);
   });
 }
-export default function IntakeScreen({ onCancel, onContinue }: Props) {
+export default function IntakeScreen({ creationMode, onCancel, onContinue }: Props) {
   const [notice, setNotice] = useState<File | null>(null),
     [courtOrder, setCourtOrder] = useState<File | null>(null),
     [supportingFiles, setSupportingFiles] = useState<File[]>([]),
@@ -264,6 +265,7 @@ export default function IntakeScreen({ onCancel, onContinue }: Props) {
       return;
     }
     onContinue({
+      creationMode,
       caseStyle: analysis.caseStyle || "",
       witness: analysis.witness || "",
       causeNumber: analysis.causeNumber || analysis.ufmData?.cause_number || "",
@@ -511,7 +513,7 @@ export default function IntakeScreen({ onCancel, onContinue }: Props) {
             </div>
           )}
         </section>
-        <section className="intake-panel audio-panel">
+        {creationMode === "existing_recording" ? <section className="intake-panel audio-panel">
           <div className="panel-title">
             <span className="panel-number">2</span>
             <div>
@@ -590,7 +592,18 @@ export default function IntakeScreen({ onCancel, onContinue }: Props) {
               No audio files added yet. Audio can also be added later.
             </div>
           )}
-        </section>
+        </section> : <section className="intake-panel live-intake-plan" aria-labelledby="live-recording-plan-title">
+          <div className="panel-title"><span className="panel-number">2</span><div>
+            <h2 id="live-recording-plan-title">Live recording plan</h2>
+            <p>The deposition will be created now. Select and test both audio channels when you are ready to record.</p>
+          </div></div>
+          <div className="live-plan-grid">
+            <div><strong>Local microphone</strong><span>Required reporter-room channel</span></div>
+            <div><strong>Virtual meeting audio</strong><span>Separate remote-participant channel</span></div>
+            <div><strong>Deepgram live text</strong><span>Preserved as a provisional transcript</span></div>
+            <div><strong>Working transcript</strong><span>Created explicitly from the preserved audio after recording</span></div>
+          </div>
+        </section>}
         <footer className="intake-footer">
           <button type="button" className="secondary-button" onClick={onCancel}>
             Cancel
