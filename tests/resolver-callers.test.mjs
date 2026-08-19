@@ -13,12 +13,19 @@ import test from "node:test";
 const root = path.resolve(import.meta.dirname, "..");
 const SKIP = new Set(["node_modules", ".git", ".next", "dist", ".venv-pedalboard", ".wrangler"]);
 
+// A git worktree checked out inside the repo is a second copy of every source file, which would
+// show up as a duplicate caller and fail this test for the wrong reason. Skipped by MECHANISM --
+// a worktree always carries a .git entry at its root -- rather than by directory name. A name in
+// the SKIP list would be a hole: any future path called ".verify-staged" would become invisible
+// to the scan, which is the opposite of what a guard against unguarded callers should do.
+const isNestedCheckout = directory => fs.existsSync(path.join(directory, ".git"));
+
 function sourceFiles(directory) {
   const found = [];
   for (const entry of fs.readdirSync(directory, { withFileTypes:true })) {
     if (SKIP.has(entry.name)) continue;
     const full = path.join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...sourceFiles(full));
+    if (entry.isDirectory()) { if (isNestedCheckout(full)) continue; found.push(...sourceFiles(full)); }
     else if (/\.(mjs|js|ts|tsx)$/.test(entry.name)) found.push(full);
   }
   return found;
