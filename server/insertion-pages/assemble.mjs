@@ -74,7 +74,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     signatureDispositionBasis: operator.signatureDispositionBasis ?? null,
     variant,
     caption: { court, causeNumber, caseStyle, label: operator.captionLabel ?? null },
-    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation },
+    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote) },
     reporter,
     appearances: counsel,
     counselReconciliation: {
