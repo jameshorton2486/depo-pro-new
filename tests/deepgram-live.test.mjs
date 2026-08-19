@@ -92,8 +92,12 @@ test("finalized events append rather than rewriting the whole record",async()=>{
     assert.equal(during.finalizedEvents,undefined,"the manifest no longer carries the events");
 
     const closed=await stopDeepgramLive(null,{sessionId:value.sessionId});
+    /* The count is derived from the log, not read out of the manifest: the manifest is a summary
+       of state and is allowed to lag. */
+    const read=getDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot});
+    assert.equal(read.finalizedEventCount,5);
     const manifest=JSON.parse(fs.readFileSync(path.join(dir,"live-session.json"),"utf8"));
-    assert.equal(manifest.finalizedEventCount,5,"it carries the count instead, written when state changes");
+    assert.equal(manifest.finalizedEventCount,undefined,"the manifest does not carry a count that could disagree with the log");
     assert.equal(closed.finalizedEvents.length,5,"and the events are still readable through the API");
     assert.deepEqual(closed.finalizedEvents.map(e=>e.transcript),["line 0","line 1","line 2","line 3","line 4"]);
   }finally{fs.rmSync(value.root,{recursive:true,force:true})}
@@ -182,5 +186,36 @@ test("the in-memory tail is bounded while the log keeps everything",async()=>{
     await stopDeepgramLive(null,{sessionId:value.sessionId});
     const log=fs.readFileSync(path.join(value.directory,"live-capture",value.sessionId,"live-events.jsonl"),"utf8").trim().split("\n");
     assert.equal(log.length,450,"while the append log keeps every event");
+  }finally{fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("events survive a crash with no clean stop",async()=>{
+  // The case the append log exists for, and the one a clean-shutdown test cannot reach. The
+  // process dies mid-deposition: no stop, no final persist, a manifest still saying OPEN. Every
+  // finalized event must still be there, because each one was written when it happened rather
+  // than at the end.
+  const value=recordingFixture(),{Socket,spawnProcess,handlers}=fakes();
+  try{
+    startDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot,apiKey:"k",WebSocketClass:Socket,spawnProcess});
+    handlers.open();
+    for(let n=0;n<12;n++)handlers.message(JSON.stringify({type:"Results",is_final:true,start:n,duration:1,channel:{alternatives:[{transcript:`line ${n}`,words:[{word:"line",punctuated_word:"line",start:n,end:n+0.4,speaker:n%2}]}]}}));
+
+    // The crash: the runtime disappears without stopDeepgramLive ever running. A killed process
+    // takes its timers with it, so they go too -- otherwise the keepalive outlives the simulated
+    // crash and holds the runner open, which is an artefact of testing in-process.
+    const runtime=_testing.active.get(value.sessionId);
+    clearInterval(runtime.keepalive);
+    for(const connection of runtime.connections)if(connection.timer)clearTimeout(connection.timer);
+    _testing.active.delete(value.sessionId);
+
+    const dir=path.join(value.directory,"live-capture",value.sessionId);
+    const manifest=JSON.parse(fs.readFileSync(path.join(dir,"live-session.json"),"utf8"));
+    assert.equal(manifest.state,"OPEN","the manifest is stale, which is expected and visible");
+
+    const recovered=getDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot});
+    assert.equal(recovered.finalizedEventCount,12,"every event is recovered from the log");
+    assert.equal(recovered.finalizedEvents.length,12);
+    assert.deepEqual(recovered.finalizedEvents.map(e=>e.transcript),Array.from({length:12},(_,n)=>`line ${n}`));
+    assert.deepEqual(recovered.finalizedEvents.map(e=>e.words[0].speaker),Array.from({length:12},(_,n)=>n%2),"with their diarization intact");
   }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });

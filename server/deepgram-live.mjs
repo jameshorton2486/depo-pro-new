@@ -32,7 +32,7 @@ const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
  * Finalized events are append-only facts, so they append. The manifest carries state, channels,
  * connection history and errors, and is written when one of those changes rather than per word.
  */
-function persist(runtime){runtime.record.updatedAt=now();const {finalizedEvents,...manifest}=runtime.record;atomic(runtime.paths.file,{...manifest,finalizedEventCount:runtime.eventCount??finalizedEvents.length})}
+function persist(runtime){runtime.record.updatedAt=now();const manifest={...runtime.record};delete manifest.finalizedEvents;atomic(runtime.paths.file,manifest)}
 function appendEvent(runtime,event){
   runtime.eventCount=(runtime.eventCount??0)+1;
   fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END);
@@ -43,11 +43,11 @@ function appendEvent(runtime,event){
   if(extra>0)runtime.record.finalizedEvents.splice(0,extra);
 }
 /* Finalized events read back from the append log, newest last. */
-function readEvents(file,limit=EVENTS_IN_MEMORY){
+function readEventLog(file){
   if(!fs.existsSync(file))return[];
-  const lines=fs.readFileSync(file,"utf8").split(LINE_END).filter(Boolean);
-  return lines.slice(-limit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean);
+  return fs.readFileSync(file,"utf8").split(LINE_END).filter(Boolean);
 }
+
 function normalizedEvent(source,epoch,payload){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
 export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
@@ -114,11 +114,9 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
     runtime.connections.push(connection);connect(connection);
   }
   runtime.keepalive=setInterval(()=>{for(const {socket} of runtime.connections)if(socket&&socket.readyState===WebSocketClass.OPEN)socket.send(JSON.stringify({type:"KeepAlive"}))},8000);
-  runtime.heartbeat=setInterval(()=>persist(runtime),30000);
-  if(typeof runtime.heartbeat?.unref==="function")runtime.heartbeat.unref();
   return publicRecord(record);
 }
-export async function stopDeepgramLive(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("Deepgram Live is not active.");clearInterval(runtime.keepalive);if(runtime.heartbeat)clearInterval(runtime.heartbeat);for(const connection of runtime.connections){connection.stopping=true;if(connection.timer)clearTimeout(connection.timer);if(connection.process)connection.process.kill();if(connection.socket&&connection.socket.readyState===WebSocket.OPEN){connection.socket.send(JSON.stringify({type:"Finalize"}));await new Promise(resolve=>setTimeout(resolve,250));connection.socket.send(JSON.stringify({type:"CloseStream"}));connection.socket.close()}}runtime.record.state="CLOSED";runtime.record.closedAt=now();runtime.record.interimByChannel={};persist(runtime);active.delete(sessionId);return publicRecord(runtime.record)}
+export async function stopDeepgramLive(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("Deepgram Live is not active.");clearInterval(runtime.keepalive);for(const connection of runtime.connections){connection.stopping=true;if(connection.timer)clearTimeout(connection.timer);if(connection.process)connection.process.kill();if(connection.socket&&connection.socket.readyState===WebSocket.OPEN){connection.socket.send(JSON.stringify({type:"Finalize"}));await new Promise(resolve=>setTimeout(resolve,250));connection.socket.send(JSON.stringify({type:"CloseStream"}));connection.socket.close()}}runtime.record.state="CLOSED";runtime.record.closedAt=now();runtime.record.interimByChannel={};persist(runtime);active.delete(sessionId);return publicRecord(runtime.record)}
 /* The manifest no longer carries the events, so a finished session reattaches them from the append
    log. Read-back needs the whole index, so it asks for it explicitly; the live screen only ever
    shows the tail. */
@@ -127,6 +125,10 @@ export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLi
   if(runtime)return publicRecord(runtime.record);
   const {file,events}=locations(root,depositionId,sessionId,storageRoot);
   const record=JSON.parse(fs.readFileSync(file,"utf8"));
-  return {...record,finalizedEvents:readEvents(events,eventLimit)};
+  const lines=readEventLog(events);
+  /* Count and tail both come from the log. The manifest is a summary of state and is allowed to
+     lag -- after an unclean stop it will, and the log is what says what was actually captured. */
+  return {...record,finalizedEventCount:lines.length,
+    finalizedEvents:lines.slice(-eventLimit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean)};
 }
 export const _testing={active,normalizedEvent};
