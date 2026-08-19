@@ -86,8 +86,8 @@ test("the intake draft and the deposition payload both carry parties and attorne
   // omitted both, so counsel[] arrived empty however good the extraction was. Read from source
   // because nothing about the omission looked wrong at the call site.
   const intake = read("IntakeScreen.tsx"), page = read("page.tsx");
-  assert.match(intake,/parties:string\[\];attorneys:IntakeAttorney\[\]/,"IntakeDraft must declare both");
-  assert.match(intake,/parties:analysis\.parties\|\|\[\],attorneys:analysis\.attorneys\|\|\[\]/,"onContinue must carry both");
+  assert.match(intake,/parties\s*:\s*string\[\][\s\S]*?attorneys\s*:\s*IntakeAttorney\[\]/,"IntakeDraft must declare both");
+  assert.match(intake,/parties\s*:\s*analysis\.parties\s*\|\|\s*\[\][\s\S]*?attorneys\s*:\s*analysis\.attorneys\s*\|\|\s*\[\]/,"onContinue must carry both");
   assert.match(page,/parties: intakeDraft\?\.parties \?\? \[\]/);
   assert.match(page,/attorneys: intakeDraft\?\.attorneys \?\? \[\]/);
 });

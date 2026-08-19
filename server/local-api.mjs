@@ -42,6 +42,8 @@ import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
+import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
+import { inspectStorage } from "./storage-inventory.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -153,6 +155,10 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/add-to-deposition" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,registerCaptureAudio(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/session?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,getCaptureSession(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
+    if (req.url === "/api/reporters" && req.method === "GET") return json(res,200,{reporters:listReporters(depositionStorageRoot)},origin);
+    if (req.url === "/api/reporters" && req.method === "POST") return json(res,201,createReporter(depositionStorageRoot,await body(req,64*1024)),origin);
+    if (req.url === "/api/reporters/import" && req.method === "POST") { const input=await body(req,256*1024);return json(res,200,{reporters:importReporters(depositionStorageRoot,input.reporters)},origin); }
+    if (req.url === "/api/storage/inventory" && req.method === "GET") return json(res,200,inspectStorage(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
       const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input,{storageRoot:depositionStorageRoot}),origin);
     }

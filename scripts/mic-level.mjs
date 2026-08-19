@@ -1,7 +1,7 @@
 // Live microphone level, so a dead input is visible while you fix it rather than after.
 // Run: node scripts/mic-level.mjs      Ctrl+C to stop.
 import { spawn } from "node:child_process";
-const { enumerateWindowsAudioSources } = await import("../server/live-capture.mjs");
+const { enumerateWindowsAudioSources, SIGNAL_FLOOR_DB } = await import("../server/live-capture.mjs");
 
 const devices = enumerateWindowsAudioSources().devices;
 if (!devices.length) { console.log("No audio input devices found."); process.exit(1); }
@@ -20,9 +20,9 @@ child.stderr.on("data", chunk => {
   const match = [...buffer.matchAll(/lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+)/g)].at(-1);
   if (!match) return;
   const db = Number(match[1]);
-  // -70 dB is the threshold preflight uses to decide a source received audio at all.
+  // Use the same threshold as preflight so this diagnostic cannot drift from the gate.
   const filled = Math.max(0, Math.min(40, Math.round((db + 80) / 2)));
-  const verdict = db > -70 ? (db > -12 ? "LOUD" : "audio") : "SILENT -- preflight will refuse to arm";
+  const verdict = db > SIGNAL_FLOOR_DB ? (db > -12 ? "LOUD" : "audio") : "SILENT -- preflight will refuse to arm";
   process.stdout.write(`\r  ${String(db.toFixed(1)).padStart(7)} dB  [${"#".repeat(filled)}${" ".repeat(40 - filled)}] ${verdict.padEnd(44)}`);
 });
 process.on("SIGINT", () => { child.kill(); console.log("\n"); process.exit(0); });

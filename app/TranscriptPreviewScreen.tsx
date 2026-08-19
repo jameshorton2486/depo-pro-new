@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const API="http://127.0.0.1:4317";
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 type Finding={code:string;message:string;severity?:"blocking"|"warning"};
 type Paragraph={id:string;label:string|null;byLine:string|null;text:string;start:number|null;segmentIds:string[];asrWordIds:string[]};
 type PrintLine={position:number;occupied:boolean;content:string;paragraphId:string|null;trace:{sourceSegmentIds:string[];sourceWordIds:string[]}|null};

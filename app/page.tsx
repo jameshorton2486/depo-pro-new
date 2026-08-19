@@ -12,6 +12,7 @@ import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
 import { formatDisplayDate } from "./date-format.mjs";
+import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
 
 type Deposition = {
   id: string;
@@ -44,7 +45,6 @@ type CourtReporter = {
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
 const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
-const API = "http://127.0.0.1:4317";
 
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
@@ -89,6 +89,16 @@ async function artifact(file:File|null){return file?{name:file.name,type:file.ty
 async function loadSavedAudioFiles(deposition:Deposition){return Promise.all(deposition.audioFiles.map(async(name,index)=>{const response=await fetch(`${API}/api/depositions/audio?id=${encodeURIComponent(deposition.id)}&index=${index}`);if(!response.ok)throw new Error((await response.json()).error);return new File([await response.blob()],name,{lastModified:Date.now()})}))}
 function legacyFiles(depositionId:string){return new Promise<Array<{category:string;order:number;name:string;type:string;blob:Blob}>>((resolve,reject)=>{const request=indexedDB.open("depo-pro-local-files",1);request.onerror=()=>reject(request.error);request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains("files"))db.createObjectStore("files",{keyPath:"id"})};request.onsuccess=()=>{const db=request.result,transaction=db.transaction("files","readonly"),all=transaction.objectStore("files").getAll();all.onerror=()=>reject(all.error);all.onsuccess=()=>resolve(all.result.filter(item=>item.depositionId===depositionId));transaction.oncomplete=()=>db.close()}})}
 async function migrateLegacyDepositions(existing:Deposition[]){const raw=localStorage.getItem(LEGACY_DEPOSITIONS_KEY);if(!raw)return null;const legacy:Deposition[]=JSON.parse(raw),known=new Set(existing.map(item=>item.id)),migrated=[...existing];for(const deposition of legacy){if(known.has(deposition.id))continue;const records=await legacyFiles(deposition.id),notice=records.find(item=>item.category==="notice"),courtOrder=records.find(item=>item.category==="court-order"),supporting=records.filter(item=>item.category==="supporting-document").sort((a,b)=>a.order-b.order);const convert=async(item:typeof notice)=>item?{name:item.name,type:item.type,base64:await toBase64(new File([item.blob],item.name,{type:item.type}))}:null;const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition,artifacts:{notice:await convert(notice),courtOrder:await convert(courtOrder),supportingFiles:await Promise.all(supporting.map(convert))}})}),saved=await response.json();if(!response.ok)throw new Error(`Legacy migration stopped at ${deposition.id}: ${saved.error||"unknown error"}`);migrated.push(saved);known.add(saved.id)}localStorage.removeItem(LEGACY_DEPOSITIONS_KEY);indexedDB.deleteDatabase("depo-pro-local-files");return migrated}
+async function loadReporters(){
+  let {reporters}=await apiJson<{reporters:CourtReporter[]}>("/api/reporters",{cache:"no-store"});
+  const legacy=localStorage.getItem(REPORTERS_STORAGE_KEY);
+  if(legacy){
+    const candidates=JSON.parse(legacy) as CourtReporter[];
+    if(candidates.length)({reporters}=await postJson<{reporters:CourtReporter[]}>("/api/reporters/import",{reporters:candidates}));
+    localStorage.removeItem(REPORTERS_STORAGE_KEY);
+  }
+  return reporters;
+}
 export default function Home() {
   const [depositions, setDepositions] = useState<Deposition[]>([]);
   const [reporters, setReporters] = useState<CourtReporter[]>([]);
@@ -120,7 +130,7 @@ export default function Home() {
       await Promise.resolve();
       if(cancelled)return;
       const resumeSession=readWorkflowSession();
-      try{const saved=localStorage.getItem(REPORTERS_STORAGE_KEY);setReporters(saved?JSON.parse(saved):[])}catch{setReporters([])}
+      try{setReporters(await loadReporters())}catch(error){setReporters([]);setNotice(error instanceof Error?error.message:"Could not load the Court Reporter directory.")}
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
@@ -179,7 +189,7 @@ export default function Home() {
   }
 
 
-  function createReporter(event: FormEvent<HTMLFormElement>) {
+  async function createReporter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const reporter: CourtReporter = {
@@ -187,11 +197,12 @@ export default function Home() {
       email: String(data.get("email")), phone: formatPhoneNumber(String(data.get("phone"))),
       licenseNumber: String(data.get("licenseNumber")), taxId: String(data.get("taxId")), address: String(data.get("address")),
     };
-    const updated = [...reporters, reporter].sort((a, b) => a.name.localeCompare(b.name));
-    setReporters(updated);
-    localStorage.setItem(REPORTERS_STORAGE_KEY, JSON.stringify(updated));
-    setSelectedReporterId(reporter.id);
-    setShowReporterModal(false);
+    try{
+      const saved=await postJson<CourtReporter>("/api/reporters",reporter);
+      setReporters(current=>[...current,saved].sort((a,b)=>a.name.localeCompare(b.name)));
+      setSelectedReporterId(saved.id);
+      setShowReporterModal(false);
+    }catch(error){setNotice(error instanceof Error?error.message:"Could not save the Court Reporter.")}
   }
   function openById(event: FormEvent) {
     event.preventDefault();

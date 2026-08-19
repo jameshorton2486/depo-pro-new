@@ -10,8 +10,10 @@ import path from "node:path";
 import test from "node:test";
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, "..", "app", "LiveCaptureScreen.tsx"), "utf8");
+const declaration = source.match(/const isRunning\s*=\s*\(session[\s\S]*?\n\s*\);/);
+assert.ok(declaration,"LiveCaptureScreen must declare isRunning");
 const isRunning = new Function("session", `
-  ${source.match(/const isRunning=\(session[^;]+;/s)[0].replace(/:Session\|null/, "").replace(/session!/g, "session").replace("const isRunning=", "const fn=")}
+  ${declaration[0].replace(/:\s*Session\s*\|\s*null/, "").replace(/session!/g, "session").replace(/const isRunning\s*=/, "const fn=")}
   return fn(session);
 `);
 

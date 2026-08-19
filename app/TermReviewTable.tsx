@@ -2,12 +2,11 @@
 import { useMemo, useState } from "react";
 import { applyTermCorrections, buildTermRows } from "@/server/keyterm-corrections.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET } from "@/server/keyterm-limits.mjs";
+import type { ClaudeIntakeAnalysis } from "./intake-types";
 
 export type TermRow = { term:string; source:"keyterm"|"ufm"; flag:string|null; correction:string };
 type Problem = { code:string; term?:string; message:string };
-// The intake shape is Claude's extraction output, which is schema-validated but extensible.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Intake = any;
+type Intake = ClaudeIntakeAnalysis;
 
 export default function TermReviewTable({ intake, onSave, onCancel }:{ intake:Intake; onSave:(next:Intake)=>void; onCancel:()=>void }) {
   const initial = useMemo(()=>buildTermRows(intake) as TermRow[],[intake]);
