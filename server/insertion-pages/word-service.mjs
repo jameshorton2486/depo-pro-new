@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { depositionDirectory } from "../deposition-store.mjs";
+import { assertStorageRootIsLocal } from "../storage-config.mjs";
 import { assembleInsertionInput } from "./assemble.mjs";
 import { buildTexasInsertionPageSet } from "./build-pages.mjs";
 import { createRenderingSpec, workspaceDocumentFromRenderingSpec } from "./rendering-spec.mjs";
@@ -14,6 +15,12 @@ import { selectInsertionVariant } from "./variants.mjs";
 
 const rendererScript = fileURLToPath(new URL("./python-docx-renderer.py", import.meta.url));
 const defaultFormatterRoot = path.join(os.homedir(), "transcript_formatter");
+
+// Resolved here rather than at module load, because DEPO_PRO_FORMATTER_ROOT is what actually
+// reaches the renderer and checking only the default would leave the override unguarded.
+export function formatterRoot(environment = process.env) {
+  return assertStorageRootIsLocal(path.resolve(environment.DEPO_PRO_FORMATTER_ROOT ?? defaultFormatterRoot), "The transcript formatter root", environment);
+}
 
 function safeTranscriptPath(directory, relativePath) {
   const normalized = String(relativePath).replace(/\\/g, "/");
@@ -59,7 +66,7 @@ export async function createInsertionWordArtifact(root, depositionId, request, o
   const prepared = await prepareInsertionRenderingArtifact(root, depositionId, request, options);
   const outputPath = safeTranscriptPath(prepared.directory, request.outputRelativePath ?? (request.mode === "standalone" ? "transcript/insertion-pages.docx" : "transcript/transcript-with-insertion-pages.docx"));
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const result = spawnSync(process.env.DEPO_PRO_PYTHON ?? "python", [rendererScript, "--spec", prepared.specPath, "--output", outputPath, "--formatter-root", process.env.DEPO_PRO_FORMATTER_ROOT ?? defaultFormatterRoot], { encoding: "utf8", windowsHide: true });
+  const result = spawnSync(process.env.DEPO_PRO_PYTHON ?? "python", [rendererScript, "--spec", prepared.specPath, "--output", outputPath, "--formatter-root", formatterRoot()], { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) throw new Error(`PYTHON_DOCX_RENDER_FAILED: ${(result.stderr || result.stdout || "unknown formatter error").trim()}`);
   const renderer = JSON.parse(result.stdout.trim());
   return { outputPath, bytes: fs.statSync(outputPath).size, mode: request.mode === "standalone" ? "standalone" : "full", variant: prepared.variant, findings: prepared.findings, pageSetSha256: prepared.pageSet.sha256, renderingSpecSha256: prepared.renderingSpec.sha256, renderingSpecPath: prepared.specPath, renderer };
