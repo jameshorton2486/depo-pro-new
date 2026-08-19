@@ -1,9 +1,11 @@
-# ADR-0019 — Participation method is a fact about the deposition, not about each attorney
+# ADR-0020 — Participation method is a fact about the deposition, not about each attorney
 
-**File:** docs/architecture/adr/ADR-0019-participation-method-is-deposition-level.md
+**File:** docs/architecture/adr/ADR-0020-participation-method-is-deposition-level.md
 **Status:** RATIFIED
 **Date:** 2026-08-19
 **Related:** ADR-0015 (geometry); the column-15 colloquy divergence, recorded on the same terms
+**Note:** ADR-0019 is reserved for the AI correction pass and is deliberately unassigned. This
+ruling was drafted as 0019 and renumbered before merge so that slot stays open.
 
 ---
 
