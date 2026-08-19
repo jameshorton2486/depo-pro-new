@@ -7,7 +7,6 @@ export function field(value=null,{source="REPORTER_ENTERED",state=value===null||
   if(!FIELD_STATES.includes(state))throw new Error(`Unsupported canonical field state: ${state}`);
   return {value:value??null,source,state,confidence,citations};
 }
-const extracted=value=>field(value,{source:"NOD_EXTRACTED"});
 const missing=(source="REPORTER_ENTERED")=>field(null,{source,state:"MISSING"});
 
 /**
@@ -85,18 +84,36 @@ export function partyEntry(party = {}, index = 0, { source = "NOD_EXTRACTED" } =
   };
 }
 
-export function createCanonicalDepositionRecord(input={}){
+/**
+ * Builds the canonical record, attributing every document-sourced field to whoever actually
+ * supplied it.
+ *
+ * `noticeSupplied` is not a detail. Every field here used to be marked NOD_EXTRACTED regardless,
+ * so a deposition created without a Notice still claimed one as its source -- the Etminan record
+ * carries intake.notice = null and twelve populated fields asserting NOD_EXTRACTED, all of them
+ * typed by a reporter. That is false provenance on a certified record, and it is worse than a
+ * blank: it tells a reader the document said something no document said.
+ *
+ * The distinction also has to survive to be useful. Extracted-but-unconfirmed and
+ * reporter-confirmed are different states, because a Notice states what was NOTICED, not what
+ * occurred -- counsel noticed for videoconference may appear in person.
+ */
+export function createCanonicalDepositionRecord(input={},{noticeSupplied=false}={}){
   const partyValues=Array.isArray(input.parties)?input.parties:[];
   const attorneyValues=Array.isArray(input.attorneys)?input.attorneys:[];
   const reporter=input.reporterProfile||{};
   const reporterField=value=>field(value,{source:"REPORTER_PROFILE"});
+  // Shadows the module-level helper for the length of this record, so every field below is
+  // attributed by the same rule without each call site having to remember.
+  const documentSource=noticeSupplied?"NOD_EXTRACTED":"REPORTER_ENTERED";
+  const extracted=value=>field(value,{source:documentSource});
   return {
     schemaVersion:CANONICAL_RECORD_VERSION,
     recordType:"CANONICAL_DEPOSITION_DATA_RECORD",
     case:{jurisdictionType:extracted(input.jurisdictionType||input.jurisdiction),court:extracted(input.court),district:extracted(input.district),division:extracted(input.division),county:extracted(input.county),judicialDistrict:extracted(input.judicialDistrict),causeNumber:extracted(input.causeNumber),caseStyle:extracted(input.caseStyle),governingRules:extracted(input.governingRules||[])},
     parties:partyValues.map((party,index)=>typeof party==="string"?{id:`party-${index+1}`,name:extracted(party),normalizedName:missing("SYSTEM_GENERATED"),role:missing(),entityType:missing(),aliases:[],captionDisplayName:extracted(party)}:{id:party.id||`party-${index+1}`,name:extracted(party.name),normalizedName:extracted(party.normalizedName),role:extracted(party.role),entityType:extracted(party.entityType),aliases:(party.aliases||[]).map(alias=>({qualifier:extracted(alias.qualifier),name:extracted(alias.name)})),captionDisplayName:extracted(party.captionDisplayName||party.name)}),
     deposition:{witness:extracted(input.witness),representativeCapacity:extracted(input.representativeCapacity||input.deponentType),representedOrganization:extracted(input.representedOrganization),corporateTopics:extracted(input.corporateTopics||[]),proceedingType:extracted(input.proceedingType||"Oral deposition"),volumeNumber:missing("WORKFLOW_DERIVED"),depositionDate:extracted(input.depositionDate),scheduledStart:extracted(input.scheduledStart),actualStart:missing("TRANSCRIPT_DERIVED"),actualEnd:missing("TRANSCRIPT_DERIVED"),timeZone:extracted(input.timeZone),location:extracted(input.location),remote:extracted(input.remote??null),remotePlatform:extracted(input.remotePlatform),telephone:extracted(input.telephone??null),videotaped:extracted(input.videotaped??null),interpreted:extracted(input.interpreted??null),corporateRepresentative:extracted(input.corporateRepresentative??null),witnessSworn:missing("REPORTER_ENTERED"),reportingMethod:missing("REPORTER_PROFILE")},
-    counsel:attorneyValues.map((attorney,index)=>counselEntry(attorney,index)),
+    counsel:attorneyValues.map((attorney,index)=>counselEntry(attorney,index,{source:documentSource})),
     reporter:{profileId:reporterField(reporter.id),fullName:reporterField(reporter.name||input.courtReporterName),designations:reporterField(reporter.designations),csrNumber:reporterField(reporter.licenseNumber),csrState:reporterField(reporter.csrState),csrExpiration:reporterField(reporter.csrExpiration),notaryStatus:reporterField(reporter.notaryStatus),notaryState:reporterField(reporter.notaryState),firm:reporterField(reporter.company),firmRegistrationNumber:reporterField(reporter.firmRegistrationNumber),address:reporterField(reporter.address),phone:reporterField(reporter.phone),email:reporterField(reporter.email),officialStatus:reporterField(reporter.officialStatus)},
     participants:{otherAttendees:[],interpreters:[],videographers:[]},
     transcript:{volumes:[],pageCount:missing("TRANSCRIPT_DERIVED"),examinations:[],chronologicalEvents:[],requestedDocuments:[],certifiedQuestions:[]},
