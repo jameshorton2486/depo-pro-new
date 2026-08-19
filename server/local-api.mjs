@@ -6,7 +6,29 @@ import { spawnSync } from "node:child_process";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
-import { getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, reconcileDepositionSpeakers, runTranscriptionJob } from "./transcription-jobs.mjs";
+import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
+import { renderTranscript } from "./transcript-render.mjs";
+import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, getCaptureSession, listCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
+import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
+import { getDeepgramLive, startDeepgramLive, stopDeepgramLive } from "./deepgram-live.mjs";
+import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
+import { listCorrectionPasses, readCorrectionPass, runEntityPass } from "./entity-pass.mjs";
+import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
+import { mediaContentType, mediaResponse } from "./media-range.mjs";
+import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
+
+// Every media route answers through here so seeking behaves the same on all three. The size is
+// taken from the file on disk rather than from the recorded `bytes`: a range must be resolved
+// against what will actually be streamed, and if the two ever disagree the recorded figure is
+// the one that is wrong. Integrity of the file itself is established by SHA-256 elsewhere.
+function sendMedia(req, res, file, base) {
+  const size = fs.statSync(file).size;
+  const { status, headers, start, end, partial, unsatisfiable } = mediaResponse({ rangeHeader:req.headers?.range, size, base });
+  res.writeHead(status, headers);
+  if (unsatisfiable) return res.end();
+  return fs.createReadStream(file, partial ? { start, end } : {}).pipe(res);
+}
 import { compareTranscripts } from "./transcript-quality.mjs";
 import { inspectRx } from "./rx-adapter.mjs";
 import { createRxDerivative, RxProcessingError } from "./rx-processing.mjs";
@@ -15,7 +37,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, readDepositionIntake, resolveDepositionAudio, scanDepositions } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -85,9 +107,15 @@ async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivat
   }
 }
 const server = http.createServer(async (req,res) => {
+  // The gate is correct and stays. It is also non-obvious for media, so: ANY <audio> or <video>
+  // element pointed at this server MUST carry crossOrigin="anonymous". Without it the browser
+  // issues a no-cors request, which sends no Origin header, and this line 403s it -- surfacing
+  // as MEDIA_ERR_SRC_NOT_SUPPORTED, indistinguishable from an unsupported codec. That cost an
+  // investigation once (see the correction in media-range.mjs) and will bite the next media
+  // element someone adds.
   const origin=req.headers.origin || "";
   if (!allowedOrigins.has(origin)) return json(res,403,{error:"Origin not allowed."},"null");
-  if (req.method === "OPTIONS") { res.writeHead(204,{"access-control-allow-origin":origin,"access-control-allow-methods":"GET,POST","access-control-allow-headers":"content-type,x-admin-code,x-file-name"}); return res.end(); }
+  if (req.method === "OPTIONS") { res.writeHead(204,{"access-control-allow-origin":origin,"access-control-allow-methods":"GET,POST","access-control-allow-headers":"content-type,x-admin-code,x-file-name,range","access-control-expose-headers":"content-range,accept-ranges,content-length"}); return res.end(); }
   try {
     if (req.url === "/api/audio/analyze" && req.method === "POST") {
       const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "audio.bin"));
@@ -100,6 +128,30 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/rx/status" && req.method === "GET") return json(res,200,inspectRx(),origin);
     if (req.url === "/api/audio/tools" && req.method === "GET") return json(res,200,publicAudioTools(),origin);
     if (req.url === "/api/system/preflight" && req.method === "GET") return json(res,200,systemPreflight({config:loadSecrets()}),origin);
+    if (req.url === "/api/live-capture/devices" && req.method === "GET") return json(res,200,enumerateWindowsAudioSources(),origin);
+    if (req.url === "/api/live-capture/preflight" && req.method === "POST") { const input=await body(req,128*1024); return json(res,201,createPreflight(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/test" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await runTestCapture(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/confirm" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,confirmPlayback(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/preflight/arm" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,armPreflight(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/preflight/audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=getPreflightArtifact(root,{depositionId:url.searchParams.get("depositionId"),preflightId:url.searchParams.get("preflightId"),sourceId:url.searchParams.get("sourceId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
+    if (req.url === "/api/live-capture/session" && req.method === "POST") { const input=await body(req,256*1024); return json(res,201,createCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); if(input.preflightId){const session=getCaptureSession(root,{depositionId:input.depositionId,sessionId:input.sessionId,storageRoot:depositionStorageRoot});assertArmed(root,{depositionId:input.depositionId,preflightId:input.preflightId,sources:session.sources,storageRoot:depositionStorageRoot});}return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/deepgram/start" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();return json(res,200,startDeepgramLive(root,{...input,apiKey:config?.deepgramApiKey,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/deepgram/stop" && req.method === "POST") { const input=await body(req,64*1024);return json(res,200,await stopDeepgramLive(root,input),origin); }
+    if (req.url?.startsWith("/api/live-capture/deepgram?") && req.method === "GET") { const url=new URL(req.url,"http://localhost");return json(res,200,getDeepgramLive(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
+      if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
+      return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/correction/passes?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,{passes:listCorrectionPasses(root,{depositionId:url.searchParams.get("depositionId"),storageRoot:depositionStorageRoot})},origin); }
+    if (req.url?.startsWith("/api/correction/pass?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,readCorrectionPass(root,{depositionId:url.searchParams.get("depositionId"),passId:url.searchParams.get("passId"),storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/read-back" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await readBackSearch(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/channel-audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=await readBackChannelFile(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),channelId:url.searchParams.get("channelId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
+    if (req.url === "/api/live-capture/sessions" && req.method === "GET") return json(res,200,{sessions:listCaptureSessions()},origin);
+    if (req.url === "/api/live-capture/rename" && req.method === "POST") { const input=await body(req,8*1024); return json(res,200,renameCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/assign" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await assignCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/add-to-deposition" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,registerCaptureAudio(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/session?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,getCaptureSession(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
       const input=await body(req,100*1024*1024);return json(res,201,createDeposition(root,input,{storageRoot:depositionStorageRoot}),origin);
@@ -113,9 +165,35 @@ const server = http.createServer(async (req,res) => {
       const prepared=await prepareInsertionRenderingArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot});
       return json(res,201,{variant:prepared.variant,findings:prepared.findings,renderingSpec:prepared.renderingSpec,workspaceDocument:prepared.workspaceDocument},origin);
     }
+    // Playback proxy. GET serves it or reports that none exists; POST renders one.
+    //
+    // Split because rendering an 83-minute source takes about half a minute, which is too long
+    // to hold a media request open -- the player asks, and if the answer is "none yet" the
+    // Workspace offers to build it rather than showing a control that silently fails.
+    if (req.url?.startsWith("/api/depositions/playback?") && req.method === "GET") {
+      const url=new URL(req.url,"http://localhost"),id=url.searchParams.get("id"),index=url.searchParams.get("index")??0;
+      const store={storageRoot:depositionStorageRoot};
+      if(url.searchParams.get("meta")==="1"){
+        const source=resolveDepositionAudio(root,id,index,store);
+        const media=await probeMediaForPlayback(source.file);
+        return json(res,200,{proxy:readPlaybackProxy(root,id,index,store),sourceMedia:media,needsProxy:needsPlaybackProxy(media)},origin);
+      }
+      const proxy=readPlaybackProxy(root,id,index,store);
+      if(!proxy) return json(res,404,{error:"No playback proxy has been rendered for this recording."},origin);
+      return sendMedia(req,res,proxy.file,{"content-type":"audio/ogg","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
+    }
+    if (req.url === "/api/depositions/playback" && req.method === "POST") {
+      const input=await body(req,64*1024),store={storageRoot:depositionStorageRoot},index=Number(input.index??0);
+      const source=resolveDepositionAudio(root,input.depositionId,index,store);
+      const paths=playbackProxyPaths(root,input.depositionId,index,store);
+      const started=Date.now();console.log("[external:playback proxy] render started",{depositionId:input.depositionId,index});
+      const record=await renderPlaybackProxy({sourceFile:source.file,targetFile:paths.file,sourceSha256:source.item.sha256});
+      console.log("[external:playback proxy] render finished",{depositionId:input.depositionId,index,elapsedMs:Date.now()-started,aligned:record.alignment?.aligned});
+      return json(res,201,{proxy:writePlaybackProxyRecord(root,input.depositionId,index,{...record,file:undefined},store)},origin);
+    }
     if (req.url?.startsWith("/api/depositions/audio?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),resolved=resolveDepositionAudio(root,url.searchParams.get("id"),url.searchParams.get("index"),{storageRoot:depositionStorageRoot});
-      res.writeHead(200,{"content-type":path.extname(resolved.file).toLowerCase()===".flac"?"audio/flac":"application/octet-stream","content-length":fs.statSync(resolved.file).size,"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(resolved.file).pipe(res);
+      return sendMedia(req,res,resolved.file,{"content-type":mediaContentType(resolved.file),"content-disposition":`inline; filename*=UTF-8''${encodeURIComponent(resolved.item.name)}`,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/select" && req.method === "POST") {
       const input=await body(req,64*1024); return json(res,200,await selectAudioSource(root,input.uploadId,input.source,"user-override",input.derivativeOperationId),origin);
@@ -149,7 +227,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.url?.startsWith("/api/audio/original?") && req.method === "GET") {
       const uploadId=new URL(req.url,"http://localhost").searchParams.get("uploadId"),audit=readAudioAudit(root,uploadId),file=resolveAudioPath(root,audit,"original");
-      res.writeHead(200,{"content-type":audit.contentType||"application/octet-stream","content-length":audit.storage.original.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});return fs.createReadStream(file).pipe(res);
+      return sendMedia(req,res,file,{"content-type":audit.contentType||"application/octet-stream","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url?.startsWith("/api/audio/derivative?") && req.method === "GET") {
       const url=new URL(req.url,"http://localhost"),audit=readAudioAudit(root,url.searchParams.get("uploadId"));
@@ -157,7 +235,7 @@ const server = http.createServer(async (req,res) => {
       if(!derivative) throw new Error("Processed audio was not found.");
       const file=path.resolve(root,"data",derivative.key),directory=path.resolve(root,"data","audio-intake",audit.uploadId)+path.sep;
       if(!file.startsWith(directory)) throw new Error("Processed audio path is invalid.");
-      res.writeHead(200,{"content-type":path.extname(file).toLowerCase()===".flac"?"audio/flac":"audio/wav","content-length":derivative.bytes,"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); return fs.createReadStream(file).pipe(res);
+      return sendMedia(req,res,file,{"content-type":mediaContentType(file,"audio/wav"),"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/transcribe" && req.method === "POST") {
       const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);
@@ -166,6 +244,48 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
     if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
+      // What the Workspace reads: the projection joined to its evidence, carrying transcript
+      // labels and addressable word spans. GET only -- nothing here writes, and the render is
+      // recomputed on every read rather than stored, so it cannot drift from working.json.
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      const store={storageRoot:depositionStorageRoot};
+      return json(res,200,renderTranscript({
+        working:getWorkingTranscript(root,{depositionId,...store}),
+        evidence:readAsrEvidence(root,{depositionId,...store}),
+        speakerCandidates:getSpeakerCandidates(root,{depositionId,...store}).candidates,
+        examinerIdentity:url.searchParams.get("examinerIdentity")||null,
+        overlay:readReporterOverlay(root,{depositionId,...store}),
+        sourceAudio:readDepositionRecord(root,depositionId,store)?.audio??[],
+      }),origin);
+    }
+    if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
+    }
+    // The only two write paths for reporter edits. Deliberately not an editable operation list:
+    // append and undo are enough to work, and every additional verb is another way for the
+    // record of what a reporter did to stop matching what they did.
+    if(req.url==="/api/transcript/overlay"&&req.method==="POST"){
+      const input=await body(req,1024*1024);
+      const overlay=appendReporterOperations(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,operations:input.operations??input.operation});
+      return json(res,200,{overlay},origin);
+    }
+    if(req.url==="/api/transcript/overlay/undo"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      return json(res,200,{overlay,removed},origin);
+    }
+    // Counsel only. The one write the canonical record has outside intake, and it stays narrow
+    // on purpose: without it the Label panel offers no attorneys on any deposition whose Notice
+    // extraction missed them, and the alternative is editing the record by hand.
+    if(req.url==="/api/deposition/counsel"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const written=writeDepositionCounsel(root,{depositionId:input.depositionId,counsel:input.counsel,storageRoot:depositionStorageRoot});
+      // The candidate list is returned with it so the caller never has to guess whether the
+      // roster it is about to label against reflects what was just saved.
+      return json(res,200,{...written,candidates:getSpeakerCandidates(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}).candidates},origin);
+    }
     if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
     if (req.url === "/api/transcript/compare" && req.method === "POST") {
@@ -212,13 +332,13 @@ const server = http.createServer(async (req,res) => {
       data.ufm_registry.entries=Array.isArray(data.ufm_registry.entries)?data.ufm_registry.entries:[];
       data.extraction_report.low_confidence_spellings=Array.isArray(data.extraction_report.low_confidence_spellings)?data.extraction_report.low_confidence_spellings:[];
       const seen=new Set();
-      data.deepgram_keyterms.terms=(data.deepgram_keyterms.terms||[]).filter((item)=>{const term=String(item.term||"").trim();const key=term.toLowerCase();if(!term||seen.has(key))return false;seen.add(key);item.term=term;return true;}).slice(0,50);
+      data.deepgram_keyterms.terms=(data.deepgram_keyterms.terms||[]).filter((item)=>{const term=String(item.term||"").trim();const key=term.toLowerCase();if(!term||seen.has(key))return false;seen.add(key);item.term=term;return true;}).slice(0,KEYTERM_PRODUCT_CAP);
       const wire=data.deepgram_keyterms.terms.map((item)=>item.term);
-      const estimatedTokens=wire.reduce((sum,term)=>sum+Math.ceil(term.length/4)+1,0);
+      const estimatedTokens=estimateKeytermTokens(wire);
       data.deepgram_keyterms.wire=wire;
       data.deepgram_keyterms.term_count=wire.length;
       data.deepgram_keyterms.estimated_tokens=estimatedTokens;
-      data.deepgram_keyterms.budget={token_ceiling:500,working_target:400,quality_target_range:[20,50],product_cap:50};
+      data.deepgram_keyterms.budget={token_ceiling:500,working_target:KEYTERM_TOKEN_BUDGET,quality_target_range:[20,KEYTERM_PRODUCT_CAP],product_cap:KEYTERM_PRODUCT_CAP};
       data.ufm_registry.entry_count=(data.ufm_registry.entries||[]).length;
       const deepgramArtifact={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",...data.deepgram_keyterms};
       const ufmData={case_id:data.case_id,cause_number:data.setup.causeNumber,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
@@ -241,6 +361,6 @@ const server = http.createServer(async (req,res) => {
       }
       return json(res,200,results,origin);
     }    return json(res,404,{error:"Not found."},origin);
-  } catch(error) {const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
+  } catch(error) {if(error?.code==="WORKING_TRANSCRIPT_NOT_CREATED")return json(res,404,{error:error.message,code:error.code},origin);const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
 server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));

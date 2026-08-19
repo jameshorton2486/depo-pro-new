@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   MAX_PARAGRAPH_CHARACTERS,
   groupTranscriptSegments,
+  speakerBuckets,
 } from "../app/transcript-paragraphs.mjs";
 
 function segment(id, { speaker = 0, start = 0, end = 1, text = "Text.", words = [id] } = {}) {
@@ -66,4 +67,39 @@ test("source segments are not mutated", () => {
   const snapshot = structuredClone(source);
   groupTranscriptSegments(source);
   assert.deepEqual(source, snapshot);
+});
+
+test("two jobs each with a speaker 0 produce two buckets, not one", () => {
+  // Deepgram numbers speakers per request, so speaker 0 in one job and speaker 0 in another are
+  // two different people sharing an index. Keyed by index alone they merged into one row, and
+  // whichever identity the reporter chose was applied to both -- no error, no warning, the wrong
+  // person attributed in a certified record. A deposition recorded in three volumes has three.
+  const paragraph = (job, speaker, words, text) => ({
+    deepgramSpeaker:speaker, segmentIds:[`${job}:segment:1`], text,
+    words:Array.from({ length:words }, () => ({})),
+  });
+  const buckets = speakerBuckets([
+    paragraph("jobA", 0, 100, "Videographer on jobA"),
+    paragraph("jobB", 0, 50, "Witness on jobB"),
+    paragraph("jobA", 0, 20, "More jobA speaker zero"),
+    paragraph("jobA", 1, 10, "Reporter on jobA"),
+  ]);
+  assert.deepEqual(buckets.map(bucket => bucket.key), ["jobA:0", "jobB:0", "jobA:1"]);
+  assert.equal(buckets.filter(bucket => bucket.deepgramSpeaker === 0).length, 2, "each job keeps its own speaker 0");
+  assert.equal(buckets.find(bucket => bucket.key === "jobA:0").words, 120, "paragraphs from one job and speaker accumulate");
+  assert.equal(buckets.find(bucket => bucket.key === "jobB:0").words, 50, "and do not leak into the other job");
+});
+
+test("the bucket key is the one the server validates against", () => {
+  // reconcileSpeakerMap builds `${sourceJobIdentity}:${deepgramSpeaker}` and refuses an
+  // assignment whose key is not an observed speaker. If the panel offered a different key the
+  // save would fail at the server rather than in the browser, which is a worse place to find out.
+  const [bucket] = speakerBuckets([{ deepgramSpeaker:3, segmentIds:["job-sha:segment:9"], text:"x", words:[{}] }]);
+  assert.equal(bucket.key, `${bucket.jobIdentity}:${bucket.deepgramSpeaker}`);
+  assert.equal(bucket.jobIdentity, "job-sha");
+});
+
+test("a paragraph with no speaker is not a bucket", () => {
+  assert.deepEqual(speakerBuckets([{ deepgramSpeaker:null, segmentIds:["job:segment:1"], text:"x", words:[{}] }]), []);
+  assert.deepEqual(speakerBuckets([]), []);
 });

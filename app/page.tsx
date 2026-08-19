@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import IntakeScreen, { type IntakeDraft } from "./IntakeScreen";
+import IntakeScreen, { type IntakeAttorney, type IntakeDraft } from "./IntakeScreen";
 import AdminSettings from "./AdminSettings";
-import TranscriptCreationScreen from "./TranscriptCreationScreen";
 import InsertionPagesScreen from "./InsertionPagesScreen";
 import TranscriptComparisonScreen from "./TranscriptComparisonScreen";
-import ReporterReviewScreen from "./ReporterReviewScreen";
+import WorkspaceScreen from "./WorkspaceScreen";
+import TranscriptPreviewScreen from "./TranscriptPreviewScreen";
+import LiveCaptureScreen from "./LiveCaptureScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
@@ -29,6 +30,8 @@ type Deposition = {
   audioFiles: string[];
   keytermCount: number;
   keyterms: string[];
+  parties?: string[];
+  attorneys?: IntakeAttorney[];
   audioIntakeIds: string[];
   createdAt: string;
 };
@@ -42,10 +45,26 @@ const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
 const LEGACY_DEPOSITIONS_KEY = "depo-pro-depositions";
 const WORKFLOW_SESSION_KEY = "depo-pro-current-workflow-v1";
 const API = "http://127.0.0.1:4317";
-type WorkflowView="library"|"intake"|"setup"|"transcript"|"audio-tools"|"admin"|"insertion-pages"|"compare"|"review";
+
 type WorkflowSession={view:WorkflowView;activeDepositionId:string|null};
 const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionId:null};
-function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&["library","intake","setup","transcript","audio-tools","admin"].includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
+// One list, because two drifted. The session writer persists every view; the reader accepted six
+// of the ten and silently reset the rest to the library with no deposition open -- so reloading
+// the Workspace, Compare, Read-through or Certification pages threw the reporter back to the
+// start. Deriving the guard from the same constant is what stops the next view being added to one
+// and not the other.
+// The views that mean nothing without an open deposition. Restoring the flag without restoring
+// the deposition is why widening the guard above is not on its own enough: the view flag would be
+// restored, active would be null, and `if (active)` would drop to the library anyway.
+const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","preview","compare","review","insertion-pages"];
+// The one list. The type is derived from it rather than declared beside it, so a view added to
+// the union without being added here is a type error at the assignment below -- which is the
+// drift that let the writer persist ten views while the reader accepted six. "transcript" stays
+// on the list although its screen is gone: a session stored before the deletion must still be
+// readable, and it falls through to the Workspace.
+const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","preview","live-capture","audio-tools","admin","insertion-pages","compare","review"] as const;
+type WorkflowView=typeof WORKFLOW_VIEWS[number];
+function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&(WORKFLOW_VIEWS as readonly string[]).includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
 function makeId() {
   const date = new Date();
@@ -81,7 +100,8 @@ export default function Home() {
   const [showAudioTools, setShowAudioTools] = useState(false);
   const [showInsertionPages, setShowInsertionPages] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  const [showReview, setShowReview] = useState(false);
+  const [showPreview,setShowPreview]=useState(false);
+  const [showLiveCapture,setShowLiveCapture]=useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -104,14 +124,14 @@ export default function Home() {
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
-      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowReview(resumeSession.view==="review");
-      try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(resumeSession.view==="transcript"&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
+      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowPreview(resumeSession.view==="preview");setShowLiveCapture(resumeSession.view==="live-capture");
+      try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(DEPOSITION_VIEWS.includes(resumeSession.view)&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showReview&&active?"review":showAudioTools?"audio-tools":showIntake?"intake":active?"transcript":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showReview,showModal]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showLiveCapture&&active?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showLiveCapture,showModal,showPreview]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -147,6 +167,10 @@ export default function Home() {
       audioFiles: intakeDraft?.audioFiles.map((file) => file.name) ?? [],
       keytermCount: intakeDraft?.keyterms.length ?? 0,
       keyterms: intakeDraft?.keyterms ?? [],
+      // Read by createCanonicalDepositionRecord as input.parties / input.attorneys, which is why
+      // they must sit at the top level of the deposition object rather than inside canonicalSeed.
+      parties: intakeDraft?.parties ?? [],
+      attorneys: intakeDraft?.attorneys ?? [],
       audioIntakeIds: intakeDraft ? intakeDraft.audioFiles.map(file=>intakeDraft.audioProfiles[audioProfileKey(file)]?.uploadId).filter((value):value is string=>Boolean(value)) : [],
       createdAt: new Date().toISOString(),
     };
@@ -181,12 +205,12 @@ export default function Home() {
   }
 
 
-  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showReview?"review":"transcript"):"library";
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":showLiveCapture?"live-capture":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showPreview?"preview":"workspace"):"library";
   function navigate(next:NavView){
     // One place decides which screen is showing. Every entry clears the others, so two
     // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
     setShowAdmin(next==="admin"); setShowIntake(next==="intake"); setShowAudioTools(next==="audio-tools");
-    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowReview(next==="review");
+    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowPreview(next==="preview"); setShowLiveCapture(next==="live-capture");
     if(next==="library") setActive(null);
   }
   const frame=(node:React.ReactNode)=>(
@@ -211,14 +235,29 @@ export default function Home() {
     return frame(<AudioToolsScreen initialFiles={audioToolFiles} onFilesChange={setAudioToolFiles} onBack={() => setShowAudioTools(false)} />);
   }
 
+  // Recording no longer waits for a deposition to exist. The reporter presses record and decides
+  // where it belongs afterwards, so this sits beside Audio tools rather than inside the
+  // open-deposition block. An open deposition is still passed when there is one.
+  if (showLiveCapture) {
+    return frame(<LiveCaptureScreen deposition={active} onBack={() => setShowLiveCapture(false)} />);
+  }
+
   if (showIntake) {
-    return frame(<IntakeScreen onCancel={() => setShowIntake(false)} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
+    // Its button says "Back to depositions", so it goes to the depositions. Closing intake
+    // without clearing the active deposition dropped the reporter into the Workspace of whatever
+    // was open before -- which reads as the app refusing to leave, particularly when intake was
+    // reached from the nav while a deposition was open.
+    return frame(<IntakeScreen onCancel={() => { setShowIntake(false); setActive(null); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
-    if (showReview) return frame(<ReporterReviewScreen deposition={active} onBack={() => setShowReview(false)} />);
-    return frame(<TranscriptCreationScreen deposition={active} onBack={() => setActive(null)} onInsertionPages={() => setShowInsertionPages(true)} onCompare={() => setShowCompare(true)} onReview={() => setShowReview(true)} />);
+    if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} />);
+    // The Workspace is the default for an open deposition. It was the Transcript screen, whose
+    // only irreplaceable control -- the transcribe step -- now lives here, and whose speaker map
+    // is keyed by job here too. A stored session naming the retired "transcript" view lands here
+    // as well, because no flag matches it and this is the fallback.
+    return frame(<WorkspaceScreen deposition={active} onBack={() => setActive(null)} />);
   }
 
   return frame(
@@ -263,7 +302,7 @@ export default function Home() {
             ))}
           </div>
         ) : (
-          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>Create a deposition</button>}</div>
+          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>New Deposition</button>}</div>
         )}
       </section>
 

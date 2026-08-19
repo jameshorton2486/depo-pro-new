@@ -90,7 +90,7 @@ export default function TranscriptComparisonScreen({ deposition, onBack }: { dep
         <label className="compare-field">
           <span>Reporter-verified transcript</span>
           <textarea value={reference} onChange={(event) => { setReference(event.target.value); setResults({}); setSelection(null); }} rows={8} placeholder="Paste the verified text for the excerpt being measured." />
-          <small>{reference.trim() ? `${reference.trim().split(/\s+/).length.toLocaleString()} words` : "Comparison is limited to 5,000 words per side; measure an aligned excerpt."}</small>
+          <small>{reference.trim() ? `${reference.trim().split(/\s+/).length.toLocaleString()} words` : "Paste an aligned reference excerpt. The server enforces a per-side word limit and reports it if the comparison exceeds it."}</small>
         </label>
 
         <div className="compare-actions">

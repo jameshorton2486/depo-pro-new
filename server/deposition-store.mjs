@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
 import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
-import { createCanonicalDepositionRecord } from "./canonical-deposition-record.mjs";
+import { counselEntry, createCanonicalDepositionRecord, partyEntry } from "./canonical-deposition-record.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
 function base(_root,{storageRoot}={}){return storageRoot?path.resolve(storageRoot):depositionStorageRoot()}
@@ -41,6 +41,144 @@ export function createDeposition(root,input,options={}){const metadata=input?.de
   atomicJson(path.join(staging,"audio","audit.json"),{schemaVersion:"1.0.0",items:audio});atomicJson(path.join(staging,"intake","canonical-deposition-record.json"),canonicalData);atomicJson(path.join(staging,"deposition.json"),record);commitDirectory(staging,finalDirectory);return record;
  }catch(error){fs.rmSync(staging,{recursive:true,force:true});throw error}}
 
+// The browser-playable copy, beside the frozen audio and never in place of it.
+//
+// It lives under audio/playback/ with a sidecar record so the alignment measurement, encoder
+// versions and declared pre-skip travel with the file. resolveDepositionAudio still returns the
+// original for every other purpose; nothing here changes what can be transcribed, and
+// PLAYBACK_PROXY is absent from ASR_ELIGIBLE_KINDS so it never could.
+export function playbackProxyPaths(root,id,index,options={}){const directory=depositionDirectory(root,id,options),base=path.join(directory,"audio","playback");return{directory,file:path.join(base,`${Number(index)}.ogg`),record:path.join(base,`${Number(index)}.json`)}}
+export function readPlaybackProxy(root,id,index,options={}){const paths=playbackProxyPaths(root,id,index,options);if(!fs.existsSync(paths.file)||!fs.existsSync(paths.record))return null;try{return{...JSON.parse(fs.readFileSync(paths.record,"utf8")),file:paths.file}}catch{return null}}
+export function writePlaybackProxyRecord(root,id,index,record,options={}){const paths=playbackProxyPaths(root,id,index,options);fs.mkdirSync(path.dirname(paths.record),{recursive:true});atomicJson(paths.record,record);return{...record,file:paths.file}}
+
+const APPEARANCE_ROLES = Object.freeze(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY", "OTHER"]);
+
+/**
+ * Adds audio to a deposition that already exists.
+ *
+ * Until this, audio[] could only be written by createDeposition, which meant a recording made for
+ * a deposition could never reach it -- the same structural defect counsel had before
+ * writeDepositionCounsel, and fixed the same way: a narrow endpoint rather than a wider intake.
+ * Losing a recording is a lost record, not an inconvenience, so this is the seam that matters.
+ *
+ * The file is registered where it already lies rather than copied. A capture session writes inside
+ * the deposition folder, resolveDepositionAudio resolves any path within that folder, and copying
+ * would double the disk cost of every deposition to gain nothing.
+ *
+ * The SHA-256 is recomputed here rather than taken from the caller. The hash recorded when the
+ * recording was finalized says what was captured; recomputing it at registration says the bytes on
+ * disk are still those. A caller that supplies a hash is checked against the file and refused on
+ * mismatch -- registering audio is exactly the moment to find out, not the moment to assume.
+ */
+export function appendDepositionAudio(root, { depositionId, entries, storageRoot } = {}) {
+  if (!Array.isArray(entries) || !entries.length) throw new Error("At least one audio entry is required.");
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "deposition.json");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const known = new Set((record.audio ?? []).map(item => item.uploadId));
+  const added = [];
+
+  for (const entry of entries) {
+    const uploadId = String(entry?.uploadId ?? "").trim();
+    if (!uploadId) throw new Error("Every audio entry requires an upload id.");
+    if (known.has(uploadId)) throw new Error(`Audio ${uploadId} is already part of this deposition.`);
+    const relative = String(entry?.path ?? "").replaceAll("\\", "/");
+    if (!relative) throw new Error("Every audio entry requires a path.");
+    const target = path.resolve(directory, ...relative.split("/"));
+    if (!within(target, directory)) throw new Error("Audio path escaped the deposition folder.");
+    if (!fs.existsSync(target)) throw new Error(`Audio file was not found: ${relative}`);
+    const sha256 = crypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex");
+    if (entry.sha256 && entry.sha256 !== sha256) throw new Error(`Audio ${relative} failed SHA-256 verification; the file on disk is not the one that was recorded.`);
+    known.add(uploadId);
+    added.push({ uploadId, source: String(entry.source ?? "original"), operationId: entry.operationId ?? null, sha256, path: relative, name: String(entry.name ?? path.basename(target)) });
+  }
+
+  const audio = [...(record.audio ?? []), ...added];
+  atomicJson(file, { ...record, audio, audioFiles: audio.map(item => item.name), audioIntakeIds: audio.map(item => item.uploadId), updatedAt: new Date().toISOString() });
+  return { depositionId, added };
+}
+
+/**
+ * Replaces parties[] on an existing deposition, and touches nothing else.
+ *
+ * Narrow for the same reason writeDepositionCounsel is narrow: a party entry cannot orphan a word
+ * id or invalidate a transcript hash, and it should not be able to reach anything that could.
+ *
+ * The rule this exists to hold: PARTY STATUS IS NOT ATTENDANCE. Writing a party never makes anyone
+ * a speaker candidate. getSpeakerCandidates reads the witness, the reporter, counsel who actually
+ * appeared, interpreters and videographers -- it does not read parties[], and must not begin to.
+ * A defendant who never attended is still a defendant; a corporation cannot attend at all. If
+ * party status were allowed to imply eligibility, a speaker map could attribute testimony to an
+ * entity that was never in the room, which is a defect in the record rather than in the interface.
+ */
+export function writeDepositionParties(root, { depositionId, parties, storageRoot, source = "REPORTER_ENTERED" } = {}) {
+  if (!Array.isArray(parties)) throw new Error("Parties must be an array.");
+  const entries = parties.map((party, index) => {
+    if (!String(party?.name ?? "").trim()) throw new Error("Every party entry requires a name.");
+    return partyEntry(party, index, { source });
+  });
+  const seen = new Set();
+  for (const entry of entries) {
+    if (seen.has(entry.id)) throw new Error(`Party id ${entry.id} appears more than once.`);
+    seen.add(entry.id);
+  }
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, parties:entries });
+  return { depositionId, parties:entries };
+}
+
+/**
+ * Replaces counsel[] on an existing deposition with reporter-typed entries.
+ *
+ * Deliberately narrow. It reads the canonical record, replaces one key, and writes it back --
+ * it never touches the transcript, the overlay, the audio audit or any other field of the
+ * record. That narrowness is the whole reason this is safer than the hand-edits it replaces:
+ * a counsel entry cannot orphan a word id or invalidate a transcript hash.
+ *
+ * Entries are written REPORTER_ENTERED / REPORTER_ADDED. Counsel that came off the Notice keep
+ * NOD_EXTRACTED, so the record shows which attorneys the document supplied and which a person
+ * typed.
+ *
+ * Attorney of record and attorney who appeared are separate facts, and actualAppearance is where
+ * they part company. A Notice seeds the roster; the transcript settles who was in the room, and
+ * they disagree more often than the roster suggests. On DEP-20260814-LQ9R6 the Notice named Karen
+ * M. Alvarado for Home Depot and Lucia D. Zhan appeared in her place, stating her appearance on
+ * the record -- a substitution within the same firm. Writing the Notice's roster alone would have
+ * recorded an attorney who was not there and omitted the one who defended the deposition.
+ *
+ * So both go in. Counsel who did not appear stay in counsel[] because the appearance page names
+ * counsel of record, and getSpeakerCandidates filters them out because someone who was not there
+ * cannot have spoken. That is the whole reason the two facts are stored separately rather than
+ * one being inferred from the other. Ids are regenerated as attorney-1..n: a speaker map keyed to an id that this call
+ * removes would be reconciling against someone who is no longer in the record, and
+ * reconcileSpeakerMap already refuses an identity the canonical record does not contain.
+ */
+export function writeDepositionCounsel(root, { depositionId, counsel, storageRoot } = {}) {
+  if (!Array.isArray(counsel)) throw new Error("Counsel must be an array.");
+  const entries = counsel.map((attorney, index) => {
+    const name = String(attorney?.name ?? attorney?.fullName ?? "").trim();
+    if (!name) throw new Error("Every counsel entry requires a name.");
+    const role = String(attorney?.appearanceRole ?? "").trim().toUpperCase().replaceAll(" ", "_");
+    if (role && !APPEARANCE_ROLES.includes(role)) throw new Error(`Unsupported appearance role: ${attorney.appearanceRole}`);
+    return counselEntry({ ...attorney, name, appearanceRole:role || null }, index, { source:"REPORTER_ENTERED" });
+  });
+  const seen = new Set();
+  for (const entry of entries) {
+    if (seen.has(entry.id)) throw new Error(`Counsel id ${entry.id} appears more than once.`);
+    seen.add(entry.id);
+  }
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, counsel:entries });
+  return { depositionId, counsel:entries };
+}
+
+export function readDepositionRecord(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"deposition.json");if(!fs.existsSync(file))throw new Error("Deposition record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 

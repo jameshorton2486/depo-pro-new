@@ -1,6 +1,6 @@
 "use client";
 
-export type NavView = "library" | "intake" | "audio-tools" | "transcript" | "review" | "compare" | "insertion-pages" | "admin";
+export type NavView = "library" | "intake" | "audio-tools" | "live-capture" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
 
 type Item = {
   view: NavView;
@@ -17,20 +17,21 @@ const GROUPS: Group[] = [
     heading: "Library",
     items: [
       { view: "library", label: "Depositions" },
-      { view: "intake", label: "New deposition" },
+      { view: "intake", label: "New Deposition" },
     ],
   },
   {
     heading: "Audio",
     items: [
       { view: "audio-tools", label: "Audio tools", note: "Processing and repair" },
+      { view: "live-capture", label: "Live deposition", note: "Record now, attach to a case later" },
     ],
   },
   {
     heading: "Open deposition",
     items: [
-      { view: "transcript", label: "Transcript", note: "Transcribe and assign speakers", needsDeposition: true },
-      { view: "review", label: "Read-through", note: "Reading only — no edits yet", needsDeposition: true },
+      { view: "workspace", label: "Workspace", note: "Transcribe, assign speakers, correct the record", needsDeposition: true },
+      { view: "preview", label: "Print preview", note: "Continuous and 25-line body pages", needsDeposition: true },
       { view: "compare", label: "Compare transcripts", note: "Measured source selection", needsDeposition: true },
       { view: "insertion-pages", label: "Certification pages", note: "Texas variants; federal pending", needsDeposition: true },
     ],
