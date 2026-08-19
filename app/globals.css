@@ -429,6 +429,11 @@ dd { margin:0; font-size:13px; font-weight:650; }
 /* Declared before .picked so the anchor keeps the stronger fill: both selectors have the same
    specificity, so source order is what decides which one the anchor word shows. */
 .wp-word.in-range { background:#dbe6fb; }
+/* The mark. Red text and a wavy rule, not a fill: the fills are already spoken for by selection
+   and range, and a mark that fought them would make a selected marked word unreadable. Declared
+   before .picked so selecting a marked word still reads as selected -- the underline is not a
+   colour, so it survives on top of the selection and the mark stays visible either way. */
+.wp-word.flagged { color:#c0392b; text-decoration:underline wavy #c0392b; text-underline-offset:3px; }
 .wp-word.picked { background:var(--blue); color:#fff; }
 .wp-word.edited { background:#fff4d6; }
 .wp-word.authored { background:#e8f6ec; font-style:italic; }
@@ -462,6 +467,8 @@ dd { margin:0; font-size:13px; font-weight:650; }
 /* Carried from the retired Read-through metadata strip. The hash is monospaced because it is an
    identifier a reporter may need to read character by character or copy into a filing. */
 .workspace-flag { color:#a3283a; }
+.workspace-marked { color:#c0392b; font-weight:600; }
+.workspace-mark { border-color:#c0392b; color:#c0392b; }
 .workspace-hash { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78em; color:#5b6880; }
 
 /* Read-only transcript print projection. Page geometry remains visibly provisional until the

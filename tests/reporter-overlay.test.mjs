@@ -233,3 +233,118 @@ test("a label pointed at a segment id that no longer exists is reported, not gue
   assert.ok(orphan,"a stale segment id must be reported");
   assert.match(orphan.message,/SEGMENT_NOT_FOUND/);
 });
+
+// --- the flag: one mark, one meaning
+//
+// Built through appendOperations rather than as literals: validation is where a single-word flag
+// becomes a range of one, and the API path always runs it. Bypassing it would test a shape the
+// server never produces.
+const flagOverlay = (...operations) => appendOperations(emptyOverlay("DEP-TEST"), operations);
+//
+// A scopist listening to the recording marks a passage that needs another listen, and comes back
+// to it. There is one mark type on purpose: a mark whose meaning is chosen per mark asks for a
+// decision at the moment the tool exists to make fast.
+
+test("a flagged passage reads exactly as it did unflagged",()=>{
+  // The whole guard. A flag is not an edit, and a caller that asks for the text must not be able
+  // to tell a flag was ever applied.
+  const flagged = render(flagOverlay({ op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[4] }));
+  const plain = render(flagOverlay());
+  assert.deepEqual(flagged.paragraphs.map(paragraph => paragraph.text), plain.paragraphs.map(paragraph => paragraph.text));
+  assert.equal(flagged.findings.filter(finding => finding.code === "ORPHANED_OPERATION").length, 0);
+});
+
+test("a flag covers the passage it spans, and every word names the flag it belongs to",()=>{
+  const from = ANSWER.asrWordIds[1], to = ANSWER.asrWordIds[4];
+  const words = render(flagOverlay({ op:"flag", fromWordId:from, toWordId:to })).paragraphs.flatMap(paragraph => paragraph.words);
+  const marked = words.filter(word => word.flagged);
+  assert.deepEqual(marked.map(word => word.id), ANSWER.asrWordIds.slice(1, 5), "the range is inclusive at both ends and stops there");
+  // A click anywhere inside the passage has to be able to clear the whole of it, which means
+  // every word carries the anchor rather than only the first.
+  assert.ok(marked.every(word => word.flaggedFrom === from));
+  assert.ok(words.filter(word => !word.flagged).every(word => word.flaggedFrom === undefined));
+});
+
+test("a single word is a range of one",()=>{
+  const words = render(flagOverlay({ op:"flag", fromWordId:MIDWORD })).paragraphs.flatMap(paragraph => paragraph.words);
+  assert.deepEqual(words.filter(word => word.flagged).map(word => word.id), [MIDWORD]);
+});
+
+test("clearing a flag removes it, and clearing nothing says so",()=>{
+  // Clearing is the half that makes the tool usable. A list that only grows is one the scopist
+  // stops trusting.
+  const cleared = render(flagOverlay(
+    { op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[4] },
+    { op:"unflag", fromWordId:ANSWER.asrWordIds[1] },
+  ));
+  assert.equal(cleared.paragraphs.flatMap(paragraph => paragraph.words).filter(word => word.flagged).length, 0);
+  assert.equal(cleared.counts.flags, 0);
+  // An unflag with nothing to clear is reported, not ignored: a clear that silently did nothing
+  // leaves the scopist believing a passage is resolved while it is still marked.
+  const orphan = render(flagOverlay({ op:"unflag", fromWordId:MIDWORD })).findings.find(finding => finding.code === "ORPHANED_OPERATION");
+  assert.equal(orphan?.reason, "FLAG_NOT_FOUND");
+});
+
+test("the count is passages, not words",()=>{
+  // What a scopist works through is places, and "31 flagged" for two passages would be a lie
+  // about how much is left.
+  const rendered = render(flagOverlay(
+    { op:"flag", fromWordId:ANSWER.asrWordIds[0], toWordId:ANSWER.asrWordIds[3] },
+    { op:"flag", fromWordId:ANSWER.asrWordIds[5] },
+  ));
+  assert.equal(rendered.counts.flags, 2);
+  assert.equal(rendered.paragraphs.flatMap(paragraph => paragraph.words).filter(word => word.flagged).length, 5);
+});
+
+test("flagging the same passage twice moves the mark rather than stacking two",()=>{
+  const rendered = render(flagOverlay(
+    { op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[2] },
+    { op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[4] },
+  ));
+  assert.equal(rendered.counts.flags, 1, "one passage, re-marked");
+  // And one unflag clears it, which would not hold if the second flag had stacked.
+  assert.equal(render(flagOverlay(
+    { op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[2] },
+    { op:"flag", fromWordId:ANSWER.asrWordIds[1], toWordId:ANSWER.asrWordIds[4] },
+    { op:"unflag", fromWordId:ANSWER.asrWordIds[1] },
+  )).counts.flags, 0);
+});
+
+test("a flag whose anchor no longer exists is reported, not silently dropped",()=>{
+  const orphan = render(flagOverlay({ op:"flag", fromWordId:MIDWORD, toWordId:"job:word:99999" }))
+    .findings.find(finding => finding.code === "ORPHANED_OPERATION");
+  assert.equal(orphan?.reason, "WORD_NOT_FOUND");
+  assert.equal(render(flagOverlay({ op:"flag", fromWordId:MIDWORD, toWordId:"job:word:99999" })).counts.flags, 0);
+});
+
+test("a flag survives a split of the passage it covers",()=>{
+  // Word ids are what the flag is anchored to and a split does not move words, so a paragraph
+  // boundary appearing inside a marked passage leaves the mark where it was.
+  const from = ANSWER.asrWordIds[1], to = ANSWER.asrWordIds[4];
+  const before = render(flagOverlay({ op:"flag", fromWordId:from, toWordId:to }));
+  const after = render(flagOverlay({ op:"flag", fromWordId:from, toWordId:to },{ op:"split", beforeWordId:ANSWER.asrWordIds[3] }));
+  assert.ok(after.paragraphs.length > before.paragraphs.length, "the split really happened");
+  assert.deepEqual(
+    after.paragraphs.flatMap(paragraph => paragraph.words).filter(word => word.flagged).map(word => word.id),
+    before.paragraphs.flatMap(paragraph => paragraph.words).filter(word => word.flagged).map(word => word.id));
+});
+
+test("a flag is rejected without an anchor, and undo pops it like any other operation",()=>{
+  assert.equal(validateOperation({ op:"flag" }).ok, false);
+  assert.equal(validateOperation({ op:"unflag" }).ok, false);
+  const overlay = appendOperations(emptyOverlay("DEP-TEST"), [{ op:"flag", fromWordId:MIDWORD }]);
+  assert.equal(undoLast(overlay).removed.op, "flag");
+  assert.equal(undoLast(overlay).overlay.operations.length, 0);
+});
+
+test("a flag reaches no correction pass",()=>{
+  // The mark is the scopist's working note. It carries no evidence anchor a correction could be
+  // proposed against, and applyOverlay keeps it out of the four things a chunk is built from.
+  const applied = applyOverlay(WORKING.segments, flagOverlay({ op:"flag", fromWordId:MIDWORD }));
+  const plain = applyOverlay(WORKING.segments, flagOverlay());
+  assert.deepEqual(applied.segments, plain.segments, "no segment is changed by a flag");
+  assert.equal(applied.replaced.size, 0);
+  assert.equal(applied.deleted.size, 0);
+  assert.equal(applied.inserted.size, 0);
+  assert.equal(applied.flagged.get(MIDWORD), MIDWORD, "and the flag itself is available, just not as an edit");
+});

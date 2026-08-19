@@ -13,7 +13,7 @@
 // Pure: no filesystem, no fetch. The caller reads and writes the file.
 
 export const OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "label", "replace", "delete", "insert"]);
+export const OPERATIONS = Object.freeze(["split", "label", "replace", "delete", "insert", "flag", "unflag"]);
 export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[] });
 
 const text = value => String(value ?? "");
@@ -53,6 +53,27 @@ export function validateOperation(input) {
   if (op === "delete") {
     if (!trimmed(input.wordId)) return { ok:false, message:"delete requires wordId." };
     return { ok:true, operation:{ op, wordId:trimmed(input.wordId) } };
+  }
+  // A flag marks a passage as needing another listen. It is the only mark there is, deliberately:
+  // a mark whose meaning is chosen per mark asks the scopist to make a decision at the moment the
+  // tool exists to make fast. Everything else a passage might need is already an operation --
+  // replace corrects, delete strikes, label reattributes -- so a second mark type would only ever
+  // duplicate one of those, less precisely.
+  //
+  // It is an overlay operation and not a separate sidecar because it has the overlay's exact
+  // durability requirements: anchored to asrWordId values, surviving a rebuild, ordered, and
+  // undoable by the same pop. It is NOT an edit, and applyOverlay keeps it out of the text: a
+  // flagged word reads exactly as it did before it was flagged.
+  if (op === "flag") {
+    if (!trimmed(input.fromWordId)) return { ok:false, message:"flag requires fromWordId." };
+    // A single word is a range of one, so there is one shape to apply and one to reason about.
+    return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId), toWordId:trimmed(input.toWordId) || trimmed(input.fromWordId) } };
+  }
+  // Clearing is not optional extra scope. A flag list that only grows is a flag list the scopist
+  // stops trusting, and then stops using -- the mark has to come off when the passage is resolved.
+  if (op === "unflag") {
+    if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
+    return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
   }
   if (!trimmed(input.afterWordId)) return { ok:false, message:"insert requires afterWordId." };
   if (!trimmed(input.text)) return { ok:false, message:"insert requires text." };
@@ -100,6 +121,9 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   let current = segments.map(segment => ({ ...segment, asrWordIds:[...(segment.asrWordIds || [])] }));
   const orphaned = [];
   const replaced = new Map(), deleted = new Set(), inserted = new Map();
+  // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
+  // rather than stacking two, and an unflag has one thing to address.
+  const flags = new Map();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
@@ -128,6 +152,22 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       deleted.add(operation.wordId);
       return;
     }
+    // Flags resolve against segment order rather than anchorExists, because a range needs
+    // positions and knownWordIds is a membership test. A word present in the evidence but held by
+    // no segment cannot bound a passage in the reading.
+    if (operation.op === "flag") {
+      const order = current.flatMap(segment => segment.asrWordIds);
+      const from = order.indexOf(operation.fromWordId), to = order.indexOf(operation.toWordId);
+      if (from < 0 || to < 0) return orphan("WORD_NOT_FOUND");
+      flags.set(operation.fromWordId, { fromWordId:operation.fromWordId, toWordId:operation.toWordId });
+      return;
+    }
+    if (operation.op === "unflag") {
+      // Reported rather than ignored. A clear that silently did nothing leaves the scopist
+      // believing a passage is resolved while it is still marked.
+      if (!flags.delete(operation.fromWordId)) return orphan("FLAG_NOT_FOUND");
+      return;
+    }
     if (!anchorExists(operation.afterWordId)) return orphan("WORD_NOT_FOUND");
     const list = inserted.get(operation.afterWordId) ?? [];
     // The id is positional, so the same overlay against the same projection produces the same
@@ -137,7 +177,19 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
     inserted.set(operation.afterWordId, list);
   });
 
-  return { segments:current, replaced, deleted, inserted, orphaned };
+  // Expanded to every word the passage covers, each carrying the flag it belongs to so a click
+  // anywhere in a marked passage can clear the whole of it. Splits never reorder words, so the
+  // final order resolves a range the same way the order at flag time did.
+  const order = current.flatMap(segment => segment.asrWordIds);
+  const flagged = new Map();
+  for (const flag of flags.values()) {
+    const from = order.indexOf(flag.fromWordId), to = order.indexOf(flag.toWordId);
+    if (from < 0 || to < 0) continue;
+    for (let at = Math.min(from, to); at <= Math.max(from, to); at += 1) flagged.set(order[at], flag.fromWordId);
+  }
+  // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
+  // reader reads, and a caller that only asks for the text gets the text.
+  return { segments:current, replaced, deleted, inserted, flagged, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */

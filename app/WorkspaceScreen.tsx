@@ -4,10 +4,10 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 const API = "http://127.0.0.1:4317";
 
-type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string };
+type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string };
-type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number; flags:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
 
 // One paragraph, memoized, because without this a single word click reconciles every word in the
@@ -58,8 +58,9 @@ const TranscriptParagraph = memo(function TranscriptParagraph({
               something the evidence never contained. */}
           <button
             type="button"
-            className={`wp-word ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selectedWordId===word.id?"picked":""}`}
-            aria-label={`${word.display ?? word.text}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
+            id={`w-${word.id}`}
+            className={`wp-word ${word.flagged?"flagged":""} ${word.deleted?"struck":""} ${word.edited?"edited":""} ${word.authored?"authored":""} ${inRange(word.id)?"in-range":""} ${selectedWordId===word.id?"picked":""}`}
+            aria-label={`${word.display ?? word.text}${word.flagged?", flagged for another listen":""}${word.deleted?", struck":""}${word.edited?", corrected":""}${inRange(word.id)?", in the selected range":""}. Select to edit or split here, or hold shift to extend the selection to here.`}
             onClick={event=>onSelect(paragraph.id,word.id,event.shiftKey)}
             onDoubleClick={()=>{ if(!word.authored) onEdit(word.id,word.text); }}
           >{word.display ?? word.text}</button>
@@ -306,6 +307,44 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   },[selected,wordOrder]);
   const rangeWords = range ? range.last-range.first+1 : 0;
 
+  // Every flagged word in transcript order, and the passage each belongs to. The scopist works
+  // through places rather than words, so the walker steps to the next passage, not the next word.
+  const flaggedWords = useMemo(()=>{
+    const list:{ id:string; from:string }[] = [];
+    for(const paragraph of rendered?.paragraphs ?? []) for(const word of paragraph.words) if(word.flagged&&word.flaggedFrom) list.push({ id:word.id, from:word.flaggedFrom });
+    return list;
+  },[rendered]);
+  const selectedWord = useMemo(()=>{
+    if(!selected) return null;
+    for(const paragraph of rendered?.paragraphs ?? []) for(const word of paragraph.words) if(word.id===selected.wordId) return word;
+    return null;
+  },[rendered,selected]);
+
+  // The mark. One button, one meaning: this passage needs another listen. A range marks the range,
+  // a single word marks that word -- validation turns the second into a range of one, so there is
+  // one shape on the wire.
+  function flagSelection() {
+    if(!selected) return;
+    const anchor = range ? [...wordOrder.entries()].find(([,index])=>index===range.first)?.[0] : selected.wordId;
+    const end = range ? [...wordOrder.entries()].find(([,index])=>index===range.last)?.[0] : selected.wordId;
+    if(!anchor||!end) return;
+    void append([{ op:"flag", fromWordId:anchor, toWordId:end }]);
+  }
+
+  // Steps to the first word of the next flagged passage after the selection, wrapping at the end.
+  // Without this the marks are only findable by scrolling, and a mark you have to hunt for saves
+  // the scopist nothing.
+  function nextFlag() {
+    if(!flaggedWords.length) return;
+    const starts = flaggedWords.filter((word,index)=>index===0||flaggedWords[index-1].from!==word.from);
+    const here = selected ? wordOrder.get(selected.wordId) ?? -1 : -1;
+    const target = starts.find(word=>(wordOrder.get(word.id) ?? -1) > here) ?? starts[0];
+    const paragraph = rendered?.paragraphs.find(item=>item.words.some(word=>word.id===target.id));
+    if(!paragraph) return;
+    setSelected({ paragraphId:paragraph.id, wordId:target.id, extentWordId:null });
+    document.getElementById(`w-${target.id}`)?.scrollIntoView({ block:"center", behavior:"smooth" });
+  }
+
   return (
     <main className="workspace">
       <header className="workspace-top">
@@ -327,7 +366,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           </button>
         )}
         <span className="workspace-counts">
-          {rendered ? `${rendered.counts.paragraphs} paragraphs · ${rendered.counts.words} words · ${rendered.counts.operations} edits` : "Loading…"}
+          {rendered ? `${rendered.counts.paragraphs} paragraphs · ${rendered.counts.words} words · ${rendered.counts.operations} edits and marks` : "Loading…"}
           {busy && " · saving…"}
           {/* Carried over when the Read-through screen was retired. The content hash is the
               transcript's identity -- what a correction pass invalidates against and what a
@@ -336,10 +375,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               finished, and the source-job count because more than one is how a duplicate
               transcription became visible. */}
           {rendered && unassignedSpeakers > 0 && <span className="workspace-flag"> · {unassignedSpeakers} unassigned</span>}
+          {/* Passages, not words: what is left to do is places to listen to again. */}
+          {rendered && rendered.counts.flags > 0 && <span className="workspace-marked"> · {rendered.counts.flags} to re-listen</span>}
           {rendered && (rendered.derivedFrom?.length ?? 0) > 1 && <span className="workspace-flag"> · {rendered.derivedFrom?.length} source jobs</span>}
           {rendered?.transcriptContentHash && <span className="workspace-hash" title={rendered.transcriptContentHash}> · {rendered.transcriptContentHash.slice(0,12)}</span>}
         </span>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit</button>
+        <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
       </header>
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The
@@ -434,6 +476,19 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`
               : "Click a word, then choose what its paragraph should be."}
           </p>
+          {/* One mark, one meaning. A mark whose meaning is chosen per mark asks the scopist to
+              make a decision at the moment this exists to make fast, and everything else a
+              passage might need is already an operation: replace corrects, delete strikes, label
+              reattributes. Marking changes no text -- the passage reads exactly as it did. */}
+          <button type="button" className="workspace-mark" disabled={!selected||busy} onClick={flagSelection}>
+            {range ? `Mark these ${rangeWords} words for another listen` : "Mark for another listen"}
+          </button>
+          {selectedWord?.flagged && (
+            <button type="button" disabled={busy} onClick={()=>{ const from=selectedWord.flaggedFrom; if(from) void append([{ op:"unflag", fromWordId:from }]); }}>
+              Clear this mark
+            </button>
+          )}
+          <h3>Label</h3>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="QUESTIONING_ATTORNEY")?.id??examiner??null,"QUESTIONING_ATTORNEY")}>Q.</button>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="WITNESS")?.id??null,"WITNESS")}>A.</button>
           <h3>Colloquy</h3>

@@ -100,6 +100,9 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
         // removed from the record -- I1 -- so the evidence chain survives the edit.
         ...(override === undefined ? {} : { edited:true, originalText:original }),
         ...(applied.deleted.has(id) ? { deleted:true, originalText:original } : {}),
+        // The word reads exactly as it did unflagged. `flaggedFrom` names the passage it belongs
+        // to so a click anywhere inside one can clear all of it.
+        ...(applied.flagged.has(id) ? { flagged:true, flaggedFrom:applied.flagged.get(id) } : {}),
       });
       // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
       // human-added words distinguishable at a glance.
@@ -174,7 +177,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     derivedFrom:working?.derivedFrom ?? [],
     speakerMap:working?.speakerMap ?? null, labels, examinerIdentity,
     counts:{ segments:segments.length, projectedSegments:projected.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size,
-      operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length },
+      operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length,
+      // Passages, not words. "31 flagged" would mean nothing to a scopist working through them;
+      // the number they care about is how many places still need another listen.
+      flags:new Set(applied.flagged.values()).size },
     diarized, paragraphs, findings,
   };
 }
