@@ -76,3 +76,56 @@ test("the recording process is actually given the level filter",async()=>{
     assert.ok(spawned[0].args.includes("pcm_s24le"), "while still recording losslessly");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("a channel that goes silent while recording raises an alarm",async()=>{
+  // The failure this exists for: a microphone that reads healthy to Windows, produces nothing, and
+  // is not noticed until the deposition is over. The gate catches it at arming; only this catches
+  // it at minute forty. The threshold is the gate's own -70 dB, so there is no second number to
+  // disagree with.
+  const { SIGNAL_FLOOR_DB, SILENCE_ALARM_SECONDS, _testing: t } = await import("../server/live-capture.mjs");
+  const source = t.validateSources([{ id: "ch1", deviceId: "mic" }])[0];
+  source.state = "RECORDING";
+
+  t.observeHealth(source, "lavfi.astats.Overall.RMS_level=-38.0");
+  assert.equal(source.health.silentSince, null, "audio clears any running silence");
+
+  // Distinct clocks, so a stamp that restarts on every reading cannot pass by two calls landing in
+  // the same millisecond.
+  t.observeHealth(source, `lavfi.astats.Overall.RMS_level=${SIGNAL_FLOOR_DB - 20}`, { now: () => 1_000_000 });
+  const began = source.health.silentSince;
+  assert.equal(began, 1_000_000, "silence is stamped when it starts");
+  t.observeHealth(source, `lavfi.astats.Overall.RMS_level=${SIGNAL_FLOOR_DB - 25}`, { now: () => 1_004_000 });
+  assert.equal(source.health.silentSince, began, "and is not restarted by every reading while it continues");
+
+  const session = { state: "RECORDING", sources: [source] };
+  const early = t.publicSession(session, { now: () => began + 1000 });
+  assert.equal(early.sources[0].silenceAlarm ?? early.sources[0].health.silenceAlarm, false, "a pause between questions is not an alarm");
+  const late = t.publicSession(session, { now: () => began + (SILENCE_ALARM_SECONDS + 1) * 1000 });
+  assert.equal(late.sources[0].health.silenceAlarm, true);
+  assert.ok(late.sources[0].health.silentForSeconds >= SILENCE_ALARM_SECONDS);
+
+  // Recovery needs no acknowledgement: audio returning clears it.
+  t.observeHealth(source, "lavfi.astats.Overall.RMS_level=-30.0");
+  assert.equal(t.publicSession(session, { now: () => began + 60000 }).sources[0].health.silenceAlarm, false);
+});
+
+test("a silent channel does not alarm unless the session is recording",()=>{
+  // Before going on the record, silence is the preflight's business and is reported there.
+  const source = _testing.validateSources([{ id: "ch1", deviceId: "mic" }])[0];
+  source.state = "CONFIGURED";
+  _testing.observeHealth(source, "lavfi.astats.Overall.RMS_level=-95.0");
+  const began = source.health.silentSince;
+  const idle = _testing.publicSession({ state: "CONFIGURED", sources: [source] }, { now: () => began + 60000 });
+  assert.equal(idle.sources[0].health.silenceAlarm, false);
+  assert.ok(idle.sources[0].health.silentForSeconds > 0, "the duration is still reported");
+});
+
+test("a session whose sources carry no health block is still readable",()=>{
+  // Sessions written before health existed, and finished sessions read back for handoff, reach
+  // publicSession too. Deriving silence into a missing block threw on read -- which is the path
+  // registerCaptureAudio and read-back both take.
+  const session = { state: "FINALIZED", sources: [{ id: "ch1", state: "FINALIZED", artifact: { finalized: true } }] };
+  const read = _testing.publicSession(session, { now: () => 0 });
+  assert.equal(read.sources[0].artifact.finalized, true);
+  assert.equal(read.sources[0].health, undefined);
+});
