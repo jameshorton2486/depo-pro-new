@@ -68,8 +68,11 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
   const findings = validateInsertionInput(await thomasFixture());
   const pairs = (severity) => findings.filter((finding) => finding.severity === severity)
     .map(({ code, target }) => `${code}:${target}`).sort();
+  // APPEARANCE_METHOD_MISSING is gone from this list, not silenced: the fixture sets
+  // remote: true with remotePlatform "Zoom", so the deposition states its method and there is
+  // nothing to block on. Per ADR-0020 the method is a fact about the deposition, and the
+  // per-attorney requirement blocked counsel who had appeared on a field no certified page renders.
   assert.deepEqual(pairs("blocking"), [
-    "APPEARANCE_METHOD_MISSING:appearances.participation.method",
     "CERT_COUNSEL_INCOMPLETE:cert.counselOfRecord",
     "CERT_FIRM_REGISTRATION_UNRESOLVED:reporter.firmRegistrationNumber",
     "CERT_JURISDICTION_MISMATCH:cert.jurisdiction",
