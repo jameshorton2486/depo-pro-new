@@ -42,3 +42,38 @@ test("refusing to arm names the source, the device and the level it measured",as
     });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("preflight runs for a recording that has no deposition yet",async()=>{
+  // The defect this closes: sessionPaths was taught to work without a deposition and preflight's
+  // own path helper was not, so createPreflight threw "Invalid deposition ID." on the screen. Arming
+  // was unreachable for exactly the recordings the change existed to enable, and the message named
+  // a deposition the reporter had deliberately not chosen.
+  const fs = await import("node:fs"), os = await import("node:os"), path = await import("node:path");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "depo-pf-unassigned-"));
+  const previous = process.env.DEPO_PRO_DEPOSITIONS_ROOT;
+  process.env.DEPO_PRO_DEPOSITIONS_ROOT = root;
+  try {
+    const PF = await import("../server/live-preflight.mjs");
+    const { captureSessionRoot } = await import("../server/storage-config.mjs");
+    const sources = [{ id: "local-microphone", role: "LOCAL_MICROPHONE", deviceId: "m", deviceName: "Mic" }];
+    const created = PF.createPreflight(null, { depositionId: null, sources });
+    assert.equal(created.state, "NOT_TESTED");
+
+    const captureFn = async (deviceId, file) => { fs.writeFileSync(file, Buffer.alloc(64)); return { rmsDb: -35.2, peakDb: -20 }; };
+    const tested = await PF.runTestCapture(null, { depositionId: null, preflightId: created.preflightId, captureFn });
+    assert.equal(tested.checks.audioReceived, true);
+    assert.equal(PF.confirmPlayback(null, { depositionId: null, preflightId: created.preflightId }).state, "PLAYBACK_CONFIRMED");
+    assert.equal(PF.armPreflight(null, { depositionId: null, preflightId: created.preflightId }).state, "ARMED");
+
+    // It stores beside the sessions, not inside a deposition it does not have.
+    assert.ok(fs.existsSync(path.join(captureSessionRoot(), "preflight", created.preflightId)));
+    // And the arm gate is unchanged for an unassigned recording.
+    const dead = PF.createPreflight(null, { depositionId: null, sources });
+    await PF.runTestCapture(null, { depositionId: null, preflightId: dead.preflightId, captureFn: async (deviceId, file) => { fs.writeFileSync(file, Buffer.alloc(64)); return { rmsDb: -96.7, peakDb: -90 }; } });
+    PF.confirmPlayback(null, { depositionId: null, preflightId: dead.preflightId });
+    assert.throws(() => PF.armPreflight(null, { depositionId: null, preflightId: dead.preflightId }), /Cannot arm:.*-96\.7 dB/);
+  } finally {
+    if (previous === undefined) delete process.env.DEPO_PRO_DEPOSITIONS_ROOT; else process.env.DEPO_PRO_DEPOSITIONS_ROOT = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
