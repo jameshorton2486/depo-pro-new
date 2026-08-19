@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {spawn,spawnSync} from "node:child_process";
 import {appendDepositionAudio,depositionDirectory} from "./deposition-store.mjs";
+import {captureSessionRoot} from "./storage-config.mjs";
 
 export const LIVE_CAPTURE_SCHEMA_VERSION="1.0.0";
 // Deterministic, so re-registering a channel collides with itself and is refused, and shaped as
@@ -13,7 +14,7 @@ const now=()=>new Date().toISOString();
 function atomicJson(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`,fd=fs.openSync(temp,"wx");try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}fs.renameSync(temp,file)}
 function sha256(file){const hash=crypto.createHash("sha256");return new Promise((resolve,reject)=>{const input=fs.createReadStream(file);input.on("data",chunk=>hash.update(chunk));input.on("error",reject);input.on("end",()=>resolve(hash.digest("hex")))})}
 function safeDevice(value){const name=String(value??"").trim();if(!name||/[\r\n]/.test(name))throw new Error("A valid Windows audio device is required.");return name}
-function sessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionDirectory(root,depositionId,{storageRoot}),directory=path.join(deposition,"live-capture",sessionId);return{deposition,directory,manifest:path.join(directory,"capture-session.json")}}
+function sessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{deposition,directory,manifest:path.join(directory,"capture-session.json")}}
 function readManifest(paths){return JSON.parse(fs.readFileSync(paths.manifest,"utf8"))}
 // silentForSeconds is derived at read time rather than stored, because it grows while nothing is
 // happening -- which is exactly the case it exists to report.
@@ -26,7 +27,19 @@ function publicSession(value,{now=Date.now}={}){const copy=structuredClone(value
 export function parseDirectShowDevices(text){const devices=[],lines=String(text??"").split(/\r?\n/);for(let index=0;index<lines.length;index++){const match=lines[index].match(/\]\s+"([^"]+)" \(audio\)/);if(!match)continue;const alternative=lines[index+1]?.match(/Alternative name "([^"]+)"/);devices.push({id:alternative?.[1]??match[1],name:match[1],backend:"windows-directshow",kind:/stereo mix|loopback|virtual|cable/i.test(match[1])?"loopback":"input"})}return devices}
 export function enumerateWindowsAudioSources({run=spawnSync}={}){if(process.platform!=="win32")return{platform:process.platform,supported:false,devices:[],error:"Live capture v1 requires Windows 11."};const result=run("ffmpeg",["-hide_banner","-list_devices","true","-f","dshow","-i","dummy"],{encoding:"utf8",windowsHide:true,timeout:15000});const devices=parseDirectShowDevices(`${result.stdout??""}\n${result.stderr??""}`);return{platform:"win32",supported:true,backend:"windows-directshow",devices,error:devices.length?null:(result.error?.message||"No Windows audio input or loopback sources were found.")}}
 function validateSources(sources){if(!Array.isArray(sources)||!sources.length)throw new Error("Configure at least one independent audio source.");const ids=new Set();return sources.map((source,index)=>{const id=String(source.id??`ch${index+1}`);if(!SOURCE_ID.test(id)||ids.has(id))throw new Error("Every source requires a unique stable channel ID.");ids.add(id);return{id,ordinal:index,role:String(source.role??"UNASSIGNED"),deviceId:safeDevice(source.deviceId),deviceName:safeDevice(source.deviceName??source.deviceId),backend:"windows-directshow",state:"CONFIGURED",format:{container:"wav",codec:"pcm_s24le",sampleRate:null,channels:null,bitsPerSample:24},timing:{configuredAt:now(),captureStartMonotonicNs:null,captureEndMonotonicNs:null},health:{rmsDb:null,peakDb:null,silence:true,clipping:false,receivedAudio:false,silentSince:null,droppedFrames:0,deviceLossEvents:0,errors:[]},artifact:null}})}
-export function createCaptureSession(root,{depositionId,sources,storageRoot}={}){const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validateSources(sources),events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
+/**
+ * A session that does not yet belong to a deposition is identified by its label and nothing else.
+ *
+ * Deliberately minimal: a generated id and start time, both automatic, and one line the reporter
+ * types. No case style, no witness, no counsel -- those live on the deposition, and needing them
+ * here would defeat the point of being able to press record first. The label is a finding aid for
+ * picking the right recording out of three days of them; once the session is assigned, the
+ * deposition supplies the real identity and the label stops mattering.
+ */
+export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot}={}){
+  const sessionLabel=String(label??"").trim();
+  if(!depositionId&&!sessionLabel)throw new Error("A recording that is not attached to a deposition needs a label, so it can be found again.");
+  const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validateSources(sources),events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
 function recordPath(paths,source){return path.join(paths.directory,"channels",`${String(source.ordinal+1).padStart(2,"0")}-${source.id}.wav`)}
 // astats prints "RMS level dB:" only in its end-of-stream summary, so during a recording that runs
 // for hours it prints nothing at all -- which is why the meters were dead for the whole capture
@@ -79,6 +92,98 @@ export function registerCaptureAudio(root,{depositionId,sessionId,storageRoot}={
     source:"original",
   }));
   return {...appendDepositionAudio(root,{depositionId,entries,storageRoot}),sessionId,skipped};
+}
+
+/**
+ * Attaches an unassigned recording to a deposition.
+ *
+ * The recording is MOVED, not copied. A deposition's audio must live inside its own folder --
+ * resolveDepositionAudio refuses anything else, and rightly -- and copying would duplicate several
+ * gigabytes per channel to leave a second copy nobody is going to keep in step. Same volume, so the
+ * rename is atomic; a cross-volume rename falls back to copy-then-verify-then-remove rather than
+ * failing, and never removes the source until the destination has been verified.
+ *
+ * The hash is checked twice: at the source before anything moves, and at the destination after.
+ * The first says the recording is still what was captured; the second says the move did not damage
+ * it. This is the only point in the application where evidence changes location, so it is the point
+ * that has to prove it arrived intact.
+ *
+ * Assignment is deliberately the last step. The audio exists, is finalized and is hashed long
+ * before anything decides where it belongs, so choosing the wrong deposition costs a correction and
+ * never costs the recording.
+ */
+export async function assignCaptureSession(root,{sessionId,depositionId,storageRoot,rename=fs.renameSync}={}){
+  if(!sessionId)throw new Error("A session id is required.");
+  if(!depositionId)throw new Error("Choose the deposition this recording belongs to.");
+  const paths=sessionPaths(root,null,sessionId,storageRoot),session=readManifest(paths);
+  if(session.assignedDepositionId)throw new Error(`This recording is already part of deposition ${session.assignedDepositionId}.`);
+  if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before attaching it to a deposition.");
+  const finalized=session.sources.filter(source=>source.state==="FINALIZED"&&source.artifact?.finalized&&source.artifact.sha256);
+  const skipped=session.sources.filter(source=>!finalized.includes(source)).map(source=>({id:source.id,role:source.role,state:source.state}));
+  if(!finalized.length)throw new Error("This recording has no finalized channels to attach.");
+
+  const deposition=depositionDirectory(root,depositionId,{storageRoot});
+  const target=path.join(deposition,"audio","original");
+  fs.mkdirSync(target,{recursive:true});
+
+  // Every source is verified before anything moves, so a damaged channel is found while the
+  // recording is still whole and in one place.
+  const planned=[];
+  for(const source of finalized){
+    const from=path.resolve(paths.deposition,...source.artifact.relativePath.split("/"));
+    if(!fs.existsSync(from))throw new Error(`Channel ${source.id} is missing from disk and cannot be attached.`);
+    const actual=await sha256(from);
+    if(actual!==source.artifact.sha256)throw new Error(`Channel ${source.id} failed SHA-256 verification before moving; the file on disk is not the one that was recorded.`);
+    const name=`${sessionId}-${source.id}.wav`;
+    planned.push({source,from,to:path.join(target,name),name,sha256:actual});
+  }
+  for(const item of planned)if(fs.existsSync(item.to))throw new Error(`${item.name} already exists in this deposition.`);
+
+  const moved=[];
+  try{
+    for(const item of planned){
+      try{rename(item.from,item.to)}
+      catch(error){
+        if(error?.code!=="EXDEV")throw error;
+        // Different volume: copy, verify, and only then let go of the original.
+        fs.copyFileSync(item.from,item.to,fs.constants.COPYFILE_EXCL);
+        if(await sha256(item.to)!==item.sha256)throw new Error(`Channel ${item.source.id} did not survive the copy intact.`);
+        fs.rmSync(item.from,{force:true});
+      }
+      moved.push(item);
+      if(await sha256(item.to)!==item.sha256)throw new Error(`Channel ${item.source.id} failed SHA-256 verification after moving.`);
+    }
+  }catch(error){
+    error.movedFiles=moved.map(item=>path.relative(deposition,item.to).replaceAll("\\","/"));
+    throw error;
+  }
+
+  const written=appendDepositionAudio(root,{depositionId,storageRoot,entries:moved.map(item=>({
+    uploadId:uploadIdForChannel(sessionId,item.source.id),sha256:item.sha256,
+    path:path.relative(deposition,item.to).replaceAll("\\","/"),name:item.name,source:"original",
+  }))});
+
+  for(const item of moved){item.source.artifact.relativePath=null;item.source.artifact.movedTo={depositionId,name:item.name}}
+  session.assignedDepositionId=depositionId;
+  session.assignedAt=now();
+  session.events.push({type:"ASSIGNED_TO_DEPOSITION",at:session.assignedAt,depositionId,channels:moved.map(item=>item.source.id)});
+  session.updatedAt=now();
+  atomicJson(paths.manifest,session);
+  return {sessionId,depositionId,added:written.added,skipped};
+}
+
+/** Every recording not yet attached to a deposition, newest first. */
+export function listCaptureSessions(){
+  const directory=captureSessionRoot();
+  if(!fs.existsSync(directory))return [];
+  return fs.readdirSync(directory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{
+    try{
+      const session=JSON.parse(fs.readFileSync(path.join(directory,item.name,"capture-session.json"),"utf8"));
+      return {sessionId:session.sessionId,label:session.label,state:session.state,createdAt:session.createdAt,
+        assignedDepositionId:session.assignedDepositionId??null,assignedAt:session.assignedAt??null,
+        channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,bytes:source.artifact?.bytes??null}))};
+    }catch{return null}
+  }).filter(Boolean).sort((left,right)=>String(right.createdAt).localeCompare(String(left.createdAt)));
 }
 
 export function getCaptureSession(root,{depositionId,sessionId,storageRoot}={}){const paths=sessionPaths(root,depositionId,sessionId,storageRoot);return publicSession(active.get(sessionId)?.session??readManifest(paths))}
