@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { AudioProfile } from "./IntakeScreen";
-const API="http://127.0.0.1:4317";
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 const FINDING_LABELS:Record<string,string>={lowLevel:"Low recording level",clipping:"Possible clipping",lowFrequencyEnergy:"Low-frequency noise",unevenLevels:"Uneven volume levels",lineHum:"Electrical hum",impulses:"Clicks or impulses",echo:"Room echo",uncertain:"Analysis uncertainty"};
 type Props={profile:AudioProfile;keyterms:string[];onProfile:(profile:AudioProfile)=>void};
 export default function AudioReviewCard({profile,onProfile}:Props){

@@ -35,9 +35,12 @@ test("audio-pipeline exports no second renderer for tool profiles",()=>{
 
 test("the recommended candidate profile resolves through the shared catalog",()=>{
   const profile=AUDIO_TOOL_PROFILES["low-frequency-rolloff-v2"];
-  assert.ok(profile,"the only profile recommendProcessing can return must exist in the shared catalog");
+  assert.ok(profile,"a profile recommendProcessing can return must exist in the shared catalog");
   assert.equal(profile.engine,"ffmpeg");
   assert.equal(profile.version,"2.0.0");
+  // routing v3 can also chain De-hum, which is an RX-engine profile rather than an ffmpeg one.
+  // Both go through createRxDerivative, so the single-renderer property below still holds.
+  assert.equal(AUDIO_TOOL_PROFILES["rx12-de-hum-dynamic-v1"]?.asrSafe,true);
 });
 
 test("a chain with no RX-engine profile renders without the RX editor installed",async t=>{

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API = "http://127.0.0.1:4317";
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 const TERM_GROUP_SET = "deposition-core-v1";
 
 type GroupMetric = { expected: number; matched: number; missed: number; errorRate: number | null; missedTerms: string[] };
@@ -90,7 +90,7 @@ export default function TranscriptComparisonScreen({ deposition, onBack }: { dep
         <label className="compare-field">
           <span>Reporter-verified transcript</span>
           <textarea value={reference} onChange={(event) => { setReference(event.target.value); setResults({}); setSelection(null); }} rows={8} placeholder="Paste the verified text for the excerpt being measured." />
-          <small>{reference.trim() ? `${reference.trim().split(/\s+/).length.toLocaleString()} words` : "Comparison is limited to 5,000 words per side; measure an aligned excerpt."}</small>
+          <small>{reference.trim() ? `${reference.trim().split(/\s+/).length.toLocaleString()} words` : "Paste an aligned reference excerpt. The server enforces a per-side word limit and reports it if the comparison exceeds it."}</small>
         </label>
 
         <div className="compare-actions">

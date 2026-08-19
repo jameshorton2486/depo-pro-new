@@ -60,13 +60,15 @@ jobs:
       # is load-bearing: restoring a cached working tree would reproduce exactly the blind
       # spot this workflow exists to close.
       - name: Check out a clean tree
-        uses: actions/checkout@v4
+        # v4 pinned to an immutable commit to reduce CI supply-chain drift.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           clean: true
           fetch-depth: 1
 
       - name: Use Node ${{ matrix.node }}
-        uses: actions/setup-node@v4
+        # v4 pinned to an immutable commit to reduce CI supply-chain drift.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: ${{ matrix.node }}
           # Caches the npm download cache only. node_modules is never restored -- `npm ci`
@@ -88,7 +90,7 @@ jobs:
       # Three tests measure real audio through FFmpeg and fail without it. Verified by
       # running the suite with FFmpeg off PATH rather than assumed.
       - name: Install FFmpeg
-        run: choco install ffmpeg --yes --no-progress
+        run: choco install ffmpeg --version=7.0.1 --yes --no-progress
 
       - name: Install dependencies
         run: npm ci

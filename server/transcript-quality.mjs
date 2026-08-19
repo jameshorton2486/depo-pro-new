@@ -49,7 +49,14 @@ function automaticTermGroups(referenceText) {
   };
 }
 
-const DEFAULT_MAX_COMPARISON_WORDS = 5_000;
+// Measured, not chosen: a full four-hour deposition against another run of the same audio --
+// 12,185 reference words against 12,174 -- compares in 1,064 ms. `distance` keeps two rows
+// rather than the whole matrix, so memory is O(hypothesis) and only time is quadratic; at these
+// sizes that is about 148M inner iterations. 5,000 refused a comparison the machine does in a
+// second. The bound still exists because the cost is quadratic and a long enough transcript
+// would eventually hurt, and it still refuses rather than truncating: a WER over the first
+// 5,000 words, reported as the transcript's, would be a quality claim about text nobody read.
+export const DEFAULT_MAX_COMPARISON_WORDS = 25_000;
 function comparisonWordLimit() {
   const value = Number(process.env.MAX_TRANSCRIPT_COMPARISON_WORDS ?? DEFAULT_MAX_COMPARISON_WORDS);
   return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_MAX_COMPARISON_WORDS;
@@ -114,4 +121,79 @@ export function compareTranscripts(referenceText, hypothesisText, criticalTerms 
     depositionMetrics: Object.fromEntries(Object.entries(groups).map(([name, terms]) => [name, phraseMetrics(reference, hypothesis, terms)])),
     comparedAt: new Date().toISOString(),
   };
+}
+
+// Tokenization integrity, as a qualification gate rather than a diagnostic.
+//
+// A word error rate cannot see this. Two runs of the same audio can score almost identically and
+// differ in whether six seconds of speech arrived as one addressable unit or as six -- and every
+// capability this application has downstream of the ASR depends on the second: audio seek, split
+// precision, correction anchoring, and the granularity a correction pass can propose at. A
+// single token spanning a caption is not a transcription error, it is a structural one, and it
+// is invisible to every measure that counts words.
+//
+// Reports the distribution rather than judging against a threshold. Legitimate long tokens exist
+// -- a hyphenated compound, a spelled-out cause number -- and a constant picked from intuition
+// would either miss the real anomalies or bury them in false ones. The caller reads the shape and
+// decides; percentiles are supplied so a threshold can be chosen from the population it grades.
+//
+// Keyterms are carried into the report because a count is not a mechanism. If the collapsed
+// tokens sit next to keyterm boundaries -- a keyterm adjacent to a proper noun, two in sequence
+// -- that points at which keyterms to change rather than merely at how many.
+export function tokenizationIntegrity(words = [], { keyterms = [] } = {}) {
+  const usable = words.filter(word => Number.isFinite(word?.start) && Number.isFinite(word?.end));
+  const durations = usable.map(word => Number((word.end - word.start).toFixed(3))).sort((a, b) => a - b);
+  const lengths = words.map(word => String(word?.punctuatedWord ?? word?.word ?? "").length).sort((a, b) => a - b);
+  const at = (sorted, fraction) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] : null);
+  const terms = keyterms.map(term => String(term).toLowerCase()).filter(Boolean);
+
+  // A token holding more than one canonical entity is the shape that matters, and it is checkable
+  // without a threshold: the keyterms are the entities this run was told to expect.
+  const concatenatedEntities = words
+    .map(word => {
+      const text = String(word?.punctuatedWord ?? word?.word ?? "");
+      const bare = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const contained = terms.filter(term => term.length > 3 && bare.includes(term.replace(/[^a-z0-9]/g, "")));
+      return contained.length > 1 ? { id:word.id, text, entities:contained, seconds:Number(((word.end ?? 0) - (word.start ?? 0)).toFixed(3)) } : null;
+    })
+    .filter(Boolean);
+
+  return {
+    words: words.length,
+    duration: { p50:at(durations, 0.5), p95:at(durations, 0.95), p99:at(durations, 0.99), max:durations.at(-1) ?? null },
+    length: { p50:at(lengths, 0.5), p95:at(lengths, 0.95), p99:at(lengths, 0.99), max:lengths.at(-1) ?? null },
+    longestByDuration: [...usable].sort((a, b) => (b.end - b.start) - (a.end - a.start)).slice(0, 10)
+      .map(word => ({ id:word.id, text:word.punctuatedWord ?? word.word, seconds:Number((word.end - word.start).toFixed(3)) })),
+    longestByLength: [...words].sort((a, b) => String(b?.punctuatedWord ?? "").length - String(a?.punctuatedWord ?? "").length).slice(0, 10)
+      .map(word => ({ id:word.id, text:word.punctuatedWord ?? word.word, characters:String(word.punctuatedWord ?? word.word ?? "").length })),
+    concatenatedEntities,
+    keytermCount: terms.length,
+  };
+}
+
+/**
+ * Compares tokenization between two runs of the same audio.
+ *
+ * Word count alone hides this: a run can lose eleven words overall while collapsing six seconds
+ * of one passage into a single token. Segmentation is compared over matching time windows so a
+ * local collapse is visible against an unchanged total.
+ */
+export function tokenizationDelta(baseline = [], candidate = [], { windowSeconds = 30 } = {}) {
+  const bucket = words => {
+    const counts = new Map();
+    for (const word of words) {
+      if (!Number.isFinite(word?.start)) continue;
+      const key = Math.floor(word.start / windowSeconds);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const before = bucket(baseline), after = bucket(candidate);
+  const windows = [...new Set([...before.keys(), ...after.keys()])].sort((a, b) => a - b);
+  const collapsed = windows
+    .map(key => ({ fromSeconds:key * windowSeconds, baseline:before.get(key) ?? 0, candidate:after.get(key) ?? 0 }))
+    .filter(row => row.baseline > 0 && row.candidate < row.baseline)
+    .map(row => ({ ...row, lost:row.baseline - row.candidate }))
+    .sort((a, b) => b.lost - a.lost);
+  return { windowSeconds, totalBaseline:baseline.length, totalCandidate:candidate.length, collapsed:collapsed.slice(0, 10) };
 }
