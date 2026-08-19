@@ -11,7 +11,16 @@ import { RX_PROFILES } from "../server/rx-profiles.mjs";
 const enabled=process.env.RUN_RX_INTEGRATION==="1";
 const sample=process.env.DEPO_PRO_RX_TEST_AUDIO?path.resolve(process.env.DEPO_PRO_RX_TEST_AUDIO):null;
 
-for(const profile of Object.values(RX_PROFILES)) test(`installed ${profile.module} profile renders sample-aligned disposable audio`,{skip:!enabled||!sample,timeout:120000},async t=>{
+// A bare `skip:true` prints "# SKIP" with nothing after it, which reads identically to a test
+// that was never written. These name the artifact that is missing, so a run that covers no
+// installed RX profile says so rather than looking complete.
+const unavailable=!enabled
+  ? "RUN_RX_INTEGRATION=1 is required: these tests drive the installed RX 12 plug-ins, not a mock."
+  : !sample
+    ? "DEPO_PRO_RX_TEST_AUDIO must point at the disposable RX fixture; no profile is qualified without it."
+    : false;
+
+for(const profile of Object.values(RX_PROFILES)) test(`installed ${profile.module} profile renders sample-aligned disposable audio`,{skip:unavailable,timeout:120000},async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"depo-rx-module-")); t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const uploadId=crypto.randomUUID(),directory=path.join(root,"data","audio-intake",uploadId),originalPath=path.join(directory,"original.wav"); fs.mkdirSync(directory,{recursive:true}); fs.copyFileSync(sample,originalPath);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(originalPath)).digest("hex"),audit={uploadId,storage:{original:{key:`audio-intake/${uploadId}/original.wav`,immutable:true,sha256},derivatives:[]}};
@@ -20,7 +29,7 @@ for(const profile of Object.values(RX_PROFILES)) test(`installed ${profile.modul
   const probe=spawnSync("ffprobe",["-v","error","-show_entries","format_tags","-of","json",derivativePath],{encoding:"utf8",windowsHide:true});assert.equal(probe.status,0,probe.stderr);const tags=JSON.parse(probe.stdout).format.tags;assert.equal(tags.DEPO_PRO_OPERATION_ID,result.operationId);assert.equal(tags.DEPO_PRO_SOURCE_SHA256,sha256);assert.equal(tags.DEPO_PRO_TIMELINE_POLICY,"frame-aligned-no-cuts");
 });
 
-test("installed De-click and De-hum render together with complete provenance",{skip:!enabled||!sample,timeout:180000},async t=>{
+test("installed De-click and De-hum render together with complete provenance",{skip:unavailable,timeout:180000},async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"depo-rx-chain-")); t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const uploadId=crypto.randomUUID(),directory=path.join(root,"data","audio-intake",uploadId),originalPath=path.join(directory,"original.wav"); fs.mkdirSync(directory,{recursive:true}); fs.copyFileSync(sample,originalPath);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(originalPath)).digest("hex"),audit={uploadId,storage:{original:{key:`audio-intake/${uploadId}/original.wav`,immutable:true,sha256},derivatives:[]}},profileIds=["rx12-de-click-conservative-v1","rx12-de-hum-dynamic-v1"];
@@ -29,7 +38,7 @@ test("installed De-click and De-hum render together with complete provenance",{s
   const probe=spawnSync("ffprobe",["-v","error","-show_entries","format_tags","-of","json",derivativePath],{encoding:"utf8",windowsHide:true}); assert.equal(probe.status,0,probe.stderr); const tags=JSON.parse(probe.stdout).format.tags; assert.equal(tags.DEPO_PRO_PROFILE_ID,profileIds.join("+")); assert.equal(tags.DEPO_PRO_SOURCE_SHA256,sha256);
 });
 
-test("installed De-hum and High-pass render together with complete mixed-engine provenance",{skip:!enabled||!sample,timeout:180000},async t=>{
+test("installed De-hum and High-pass render together with complete mixed-engine provenance",{skip:unavailable,timeout:180000},async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"depo-rx-mixed-chain-")); t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const uploadId=crypto.randomUUID(),directory=path.join(root,"data","audio-intake",uploadId),originalPath=path.join(directory,"original.wav"); fs.mkdirSync(directory,{recursive:true}); fs.copyFileSync(sample,originalPath);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(originalPath)).digest("hex"),audit={uploadId,storage:{original:{key:`audio-intake/${uploadId}/original.wav`,immutable:true,sha256},derivatives:[]}},profileIds=["rx12-de-hum-dynamic-v1","low-frequency-rolloff-v2"];
