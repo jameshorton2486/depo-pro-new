@@ -7,9 +7,10 @@
 // OneDrive mirror, because a synthetic path proves the string comparison and not the mechanism.
 import assert from "node:assert/strict";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { ALLOW_SYNCED_ROOT } from "../server/storage-safety.mjs";
-import { assertStorageRootIsLocal, depositionStorageRoot } from "../server/storage-config.mjs";
+import { assertStorageRootIsLocal, depositionStorageRoot, resolveDepositionStorageRoot } from "../server/storage-config.mjs";
 import { formatterRoot } from "../server/insertion-pages/word-service.mjs";
 
 const SYNCED_HOME = String.raw`C:\Users\pat\OneDrive`;
@@ -105,5 +106,39 @@ test("the formatter root the renderer is actually handed is the checked one", ()
   assert.equal(
     formatterRoot(environment({ DEPO_PRO_FORMATTER_ROOT:String.raw`C:\Users\pat\formatter` })),
     path.resolve(String.raw`C:\Users\pat\formatter`),
+  );
+});
+
+test("the status script reports on an unsafe root instead of dying on it", () => {
+  // The first version of this change routed local-status.mjs through the enforcing resolver, so
+  // `npm run status` exited with an unhandled exception in exactly the case it exists to explain.
+  // The reporter got a stack trace where the diagnostic belonged.
+  const result = spawnSync(process.execPath, ["scripts/local-status.mjs"], {
+    encoding: "utf8", windowsHide: true,
+    env: { ...process.env, DEPO_PRO_DEPOSITIONS_ROOT: String.raw`C:\Users\pat\OneDrive\depos`, OneDrive: SYNCED_HOME },
+  });
+  assert.doesNotMatch(result.stderr, /throw new Error|at assertStorageRootIsLocal/, "status must not crash on an unsafe root");
+  assert.match(result.stderr, /SYNCED_STORAGE_ROOT/);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.depositionsStorage.synced, true);
+  assert.equal(report.depositionsStorage.syncClient, "OneDrive");
+});
+
+test("resolving for classification does not enforce", () => {
+  const synced = String.raw`C:\Users\pat\OneDrive\depos`;
+  assert.equal(resolveDepositionStorageRoot(environment({ DEPO_PRO_DEPOSITIONS_ROOT:synced })), path.resolve(synced));
+  assert.throws(() => depositionStorageRoot(environment({ DEPO_PRO_DEPOSITIONS_ROOT:synced })), /SYNCED_STORAGE_ROOT/);
+});
+
+test("a verdict is not cached, so a root that becomes unsafe is caught", () => {
+  // classifyStorageRoot reads Dropbox's info.json and lstats every ancestor, so the verdict
+  // depends on filesystem state that can change while the process is alive. An earlier version
+  // memoised it and would have held a stale "safe" answer.
+  const root = String.raw`C:\Users\pat\depos`;
+  assert.equal(depositionStorageRoot({ DEPO_PRO_DEPOSITIONS_ROOT:root }), path.resolve(root));
+  assert.throws(
+    () => depositionStorageRoot({ DEPO_PRO_DEPOSITIONS_ROOT:root, OneDrive:String.raw`C:\Users\pat` }),
+    /SYNCED_STORAGE_ROOT/,
+    "the same path must be re-judged when the environment says it is now inside a sync root",
   );
 });

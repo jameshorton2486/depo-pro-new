@@ -25,18 +25,14 @@ export function resolveDefaultDepositionsRoot(homedir=os.homedir) {
  * working copy that legitimately lives in such a place is still usable and still says so.
  */
 
-// classifyStorageRoot walks the ancestry with lstat -- measured at ~320us per call on this
-// machine. base() in deposition-store.mjs resolves the root on every store operation, so an
-// unmemoised check would add that to each one. The verdict depends only on the path and on the
-// environment variables the sync roots are read from, so it is cached on exactly those, which
-// also keeps a caller passing an explicit environment from reading another caller's answer.
-const settled = new Set();
-const VERDICT_INPUTS = ["OneDrive","OneDriveConsumer","OneDriveCommercial","iCloudDrive","LOCALAPPDATA",ALLOW_SYNCED_ROOT];
-
+// Not memoised, deliberately. classifyStorageRoot costs ~320us per call, which is only worth
+// caching if something calls it in a loop -- and nothing does. base() in deposition-store.mjs
+// short-circuits to path.resolve(storageRoot) whenever a storageRoot is passed, and local-api.mjs
+// resolves once at boot and threads it into every endpoint, so a scanDepositions over the real
+// library performs zero classifications. Caching the verdict would have meant holding it across a
+// junction appearing mid-process or Dropbox being configured while the server ran, which is a
+// staleness risk taken in exchange for nothing measurable.
 export function assertStorageRootIsLocal(resolved, description, environment=process.env) {
-  const key = JSON.stringify([resolved, ...VERDICT_INPUTS.map(name => environment[name] ?? null)]);
-  if (settled.has(key)) return resolved;
-
   const classification = classifyStorageRoot(resolved, { environment });
   const findings = [...classification.warnings, ...classification.suppressedWarnings];
   if (findings.length) {
@@ -49,11 +45,22 @@ export function assertStorageRootIsLocal(resolved, description, environment=proc
     console.warn(`WARNING ${detail}: ${description} is ${resolved}. ${findings.map(finding => finding.message).join(" ")} Continuing because ${ALLOW_SYNCED_ROOT}=1.`);
   }
 
-  settled.add(key);
   return resolved;
 }
 
+/**
+ * Resolves the root without judging it.
+ *
+ * scripts/local-status.mjs exists to REPORT on an unsafe root, and it classifies the root itself
+ * a few lines later. If it resolved through the enforcing path it would die on an exception in
+ * exactly the case it was written to explain -- the reporter would get a stack trace where the
+ * diagnostic belongs. Nothing that writes should use this.
+ */
+export function resolveDepositionStorageRoot(environment=process.env,homedir=os.homedir) {
+  if(environment.DEPO_PRO_DEPOSITIONS_ROOT)return path.resolve(environment.DEPO_PRO_DEPOSITIONS_ROOT);
+  return resolveDefaultDepositionsRoot(homedir);
+}
+
 export function depositionStorageRoot(environment=process.env,homedir=os.homedir) {
-  if(environment.DEPO_PRO_DEPOSITIONS_ROOT)return assertStorageRootIsLocal(path.resolve(environment.DEPO_PRO_DEPOSITIONS_ROOT),"The deposition storage root",environment);
-  return assertStorageRootIsLocal(resolveDefaultDepositionsRoot(homedir),"The deposition storage root",environment);
+  return assertStorageRootIsLocal(resolveDepositionStorageRoot(environment,homedir),"The deposition storage root",environment);
 }
