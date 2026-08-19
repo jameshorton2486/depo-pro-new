@@ -60,11 +60,15 @@ test("the shared channel is diarized and a dedicated one is not",()=>{
   const shared = new URL(buildDeepgramLiveUrl({ id: "meeting-audio", role: "VIRTUAL_MEETING_AUDIO" }));
   assert.equal(shared.searchParams.get("diarize"), "true", "diarize_model without diarize is inert");
   assert.equal(shared.searchParams.get("diarize_model"), "latest");
-  for (const role of ["WITNESS", "LOCAL_MICROPHONE"]) {
-    const url = new URL(buildDeepgramLiveUrl({ id: "ch1", role }));
-    assert.equal(url.searchParams.has("diarize"), false, `${role} is one voice and is not diarized`);
-    assert.equal(url.searchParams.get("interim_results"), "true");
-  }
+  // Ruling, 2026-08-19: a LOCAL_MICROPHONE covers a room rather than a person, so it is diarized
+  // too. Without it that channel produces one unbroken block and there are no turn breaks at all.
+  const room = new URL(buildDeepgramLiveUrl({ id: "ch1", role: "LOCAL_MICROPHONE" }));
+  assert.equal(room.searchParams.get("diarize"), "true");
+  // A channel named for one participant keeps the original reasoning: diarizing it would invent
+  // turns the room never had.
+  const dedicated = new URL(buildDeepgramLiveUrl({ id: "ch1", role: "WITNESS" }));
+  assert.equal(dedicated.searchParams.has("diarize"), false, "a channel assigned to one person is one voice");
+  assert.equal(dedicated.searchParams.get("interim_results"), "true");
 });
 
 test("paragraphs carry a stream position, and empty transcripts are dropped",()=>{

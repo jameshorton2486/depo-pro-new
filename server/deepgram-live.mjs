@@ -6,11 +6,21 @@ import WebSocket from "ws";
 import {depositionDirectory} from "./deposition-store.mjs";
 import {getCaptureSession} from "./live-capture.mjs";
 
-export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.0.0";
+export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
+// Channels that carry more than one voice, and therefore need diarization to produce turn breaks.
+//
+// A RULING, 2026-08-19, not a defect. The earlier reasoning was that a dedicated microphone carries
+// one voice and diarizing it would invent turns the room never had -- true of a channel assigned to
+// one person, and false of the setup this is actually used in: a single microphone covering a room
+// with several speakers. Without diarization that channel produces one unbroken block, which is the
+// thing the live view exists to avoid.
+//
+// Roles naming a single participant stay undiarized, because for them the original reasoning holds.
+const SHARED_ROLES=new Set(["LOCAL_MICROPHONE","VIRTUAL_MEETING_AUDIO"]);
 const active=new Map(),now=()=>new Date().toISOString();
 function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});fs.renameSync(temp,file)}
 function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionDirectory(root,depositionId,{storageRoot}),directory=path.join(deposition,"live-capture",sessionId);return{directory,file:path.join(directory,"live-session.json")}}
-export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(source.role==="VIRTUAL_MEETING_AUDIO"){query.set("diarize","true");query.set("diarize_model","latest")}return `wss://api.deepgram.com/v1/listen?${query}`}
+export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role)){query.set("diarize","true");query.set("diarize_model","latest")}return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
 function persist(runtime){runtime.record.updatedAt=now();atomic(runtime.paths.file,runtime.record)}
 function normalizedEvent(source,epoch,payload){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
