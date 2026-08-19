@@ -5,6 +5,7 @@ import {spawn} from "node:child_process";
 import WebSocket from "ws";
 import {depositionDirectory} from "./deposition-store.mjs";
 import {getCaptureSession} from "./live-capture.mjs";
+import {captureSessionRoot} from "./storage-config.mjs";
 
 export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 // Channels that carry more than one voice, and therefore need diarization to produce turn breaks.
@@ -19,8 +20,8 @@ export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 const SHARED_ROLES=new Set(["LOCAL_MICROPHONE","VIRTUAL_MEETING_AUDIO"]);
 const active=new Map(),now=()=>new Date().toISOString();
 function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});fs.renameSync(temp,file)}
-function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionDirectory(root,depositionId,{storageRoot}),directory=path.join(deposition,"live-capture",sessionId);return{directory,file:path.join(directory,"live-session.json")}}
-export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role)){query.set("diarize","true");query.set("diarize_model","latest")}return `wss://api.deepgram.com/v1/listen?${query}`}
+function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json")}}
+export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
 function persist(runtime){runtime.record.updatedAt=now();atomic(runtime.paths.file,runtime.record)}
 function normalizedEvent(source,epoch,payload){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}

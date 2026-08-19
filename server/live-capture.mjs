@@ -37,8 +37,8 @@ function validateSources(sources){if(!Array.isArray(sources)||!sources.length)th
  * deposition supplies the real identity and the label stops mattering.
  */
 export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot}={}){
-  const sessionLabel=String(label??"").trim();
-  if(!depositionId&&!sessionLabel)throw new Error("A recording that is not attached to a deposition needs a label, so it can be found again.");
+  const startedAt=now();
+  const sessionLabel=String(label??"").trim()||`Recording ${startedAt.slice(0,10)} ${startedAt.slice(11,16)}`;
   const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validateSources(sources),events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
 function recordPath(paths,source){return path.join(paths.directory,"channels",`${String(source.ordinal+1).padStart(2,"0")}-${source.id}.wav`)}
 // astats prints "RMS level dB:" only in its end-of-stream summary, so during a recording that runs
@@ -184,6 +184,21 @@ export function listCaptureSessions(){
         channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,bytes:source.artifact?.bytes??null}))};
     }catch{return null}
   }).filter(Boolean).sort((left,right)=>String(right.createdAt).localeCompare(String(left.createdAt)));
+}
+
+/**
+ * Renames a recording. The label is a finding aid and nothing else -- it never reaches the
+ * transcript, the deposition record, or any certified output -- so it can be changed at any time,
+ * including after the session has been attached to a deposition.
+ */
+export function renameCaptureSession(root,{sessionId,depositionId=null,label,storageRoot}={}){
+  const trimmed=String(label??"").trim();
+  if(!trimmed)throw new Error("A recording needs a name.");
+  const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
+  session.label=trimmed;session.updatedAt=now();
+  session.events.push({type:"RENAMED",at:session.updatedAt,label:trimmed});
+  atomicJson(paths.manifest,session);
+  return publicSession(session);
 }
 
 export function getCaptureSession(root,{depositionId,sessionId,storageRoot}={}){const paths=sessionPaths(root,depositionId,sessionId,storageRoot);return publicSession(active.get(sessionId)?.session??readManifest(paths))}

@@ -518,3 +518,12 @@ dd { margin:0; font-size:13px; font-weight:650; }
 /* A channel recording silence is the failure the reporter must not miss while listening elsewhere. */
 .source-level{font-variant-numeric:tabular-nums;font-weight:700}
 .source-health.alarm{padding:8px;border-radius:8px;background:#fdecec;color:#a51d2d;font-weight:700}
+
+/* Press record, talk, name it after. The preflight is still there for a reporter who wants to
+   check first, but it is no longer the only road to the record button. */
+.quick-record{display:grid;gap:8px;margin-bottom:22px}
+.record-button{background:#a51d2d;color:#fff;border:0;border-radius:12px;padding:20px 24px;font-size:19px;font-weight:800;cursor:pointer}
+.record-button:disabled{background:#c9a3a8;cursor:not-allowed}
+.quick-record span{color:#62718a;font-size:13px}
+.rename-recording{display:grid;gap:6px;margin:14px 0}
+.rename-recording input{padding:11px;border:1px solid #b9c7dd;border-radius:8px}

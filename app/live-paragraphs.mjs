@@ -33,10 +33,50 @@ export function voiceLabel(speaker) {
   return `Voice ${LETTERS[speaker % LETTERS.length]}${speaker >= LETTERS.length ? String(Math.floor(speaker / LETTERS.length) + 1) : ""}`;
 }
 
-const speakerOf = event => {
-  const speakers = (event.words ?? []).map(word => word.speaker).filter(Number.isInteger);
-  return speakers.length ? speakers[0] : null;
-};
+/**
+ * Every run of consecutive words spoken by one voice.
+ *
+ * Deepgram diarizes per WORD, and an utterance regularly holds more than one speaker -- someone
+ * finishes a sentence while the next person begins. Reading the speaker off the first word and
+ * applying it to the whole utterance threw that away: a room with three voices rendered as one
+ * unbroken block attributed to Voice A, which is precisely what the paragraph breaks exist to
+ * prevent. The turn boundary lives inside the utterance, so that is where it has to be found.
+ */
+function speakerRuns(events = []) {
+  const runs = [];
+  for (const event of events) {
+    const words = (event.words ?? []).filter(word => String(word.punctuatedWord ?? word.word ?? "").trim());
+    // No word detail: the event is the smallest unit available, and its voice is unknown rather
+    // than assumed from a neighbour.
+    if (!words.length) {
+      const text = String(event.transcript ?? "").trim();
+      if (text) runs.push({ id: event.id, channelId: event.channelId ?? null, speaker: null, text,
+        start: Number.isFinite(event.start) ? event.start : null,
+        end: Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : (Number.isFinite(event.start) ? event.start : null) });
+      continue;
+    }
+    let current = null;
+    words.forEach((word, index) => {
+      const speaker = Number.isInteger(word.speaker) ? word.speaker : null;
+      const text = String(word.punctuatedWord ?? word.word ?? "").trim();
+      if (current && current.speaker === speaker) {
+        current.text = `${current.text} ${text}`;
+        if (Number.isFinite(word.end)) current.end = word.end;
+        return;
+      }
+      if (current) runs.push(current);
+      current = { id: `${event.id}:${index}`, channelId: event.channelId ?? null, speaker, text,
+        start: Number.isFinite(word.start) ? word.start : (Number.isFinite(event.start) ? event.start : null),
+        end: Number.isFinite(word.end) ? word.end : null };
+    });
+    if (current) {
+      const eventEnd = Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : null;
+      if (!Number.isFinite(current.end) && eventEnd !== null) current.end = eventEnd;
+      runs.push(current);
+    }
+  }
+  return runs;
+}
 
 /**
  * Finalized events grouped into paragraphs, newest content last.
@@ -47,31 +87,28 @@ const speakerOf = event => {
  */
 export function groupLiveEvents(events = [], { pauseSeconds = PARAGRAPH_PAUSE_SECONDS } = {}) {
   const paragraphs = [];
-  for (const event of events) {
-    const speaker = speakerOf(event);
-    const start = Number.isFinite(event.start) ? event.start : null;
-    const end = start !== null && Number.isFinite(event.duration) ? start + event.duration : start;
+  for (const run of speakerRuns(events)) {
     const current = paragraphs.at(-1);
-    const gap = current?.end !== null && current?.end !== undefined && start !== null ? start - current.end : null;
-    const sameVoice = current && current.speaker === speaker;
+    const gap = Number.isFinite(current?.end) && Number.isFinite(run.start) ? run.start - current.end : null;
+    const sameVoice = current && current.speaker === run.speaker;
     const withinPause = gap === null || gap <= pauseSeconds;
 
     if (current && sameVoice && withinPause) {
-      current.text = `${current.text} ${event.transcript}`.trim();
-      current.end = end ?? current.end;
-      current.eventIds.push(event.id);
+      current.text = `${current.text} ${run.text}`.trim();
+      current.end = run.end ?? current.end;
+      current.runIds.push(run.id);
       continue;
     }
     paragraphs.push({
-      id: event.id,
-      eventIds: [event.id],
+      id: run.id,
+      runIds: [run.id],
       // Null speaker means diarization returned nothing, and the label says so by being absent
       // rather than by defaulting to a voice that was never identified.
-      speaker,
-      voice: speaker === null ? null : voiceLabel(speaker),
-      channelId: event.channelId ?? null,
-      start, end,
-      text: String(event.transcript ?? "").trim(),
+      speaker: run.speaker,
+      voice: run.speaker === null ? null : voiceLabel(run.speaker),
+      channelId: run.channelId,
+      start: run.start, end: run.end,
+      text: run.text.trim(),
     });
   }
   return paragraphs.filter(paragraph => paragraph.text);

@@ -61,17 +61,24 @@ test("a recording can be made before anyone decides which deposition it belongs 
   } finally { cleanup(value); }
 });
 
-test("an unattached recording without a label is refused",async()=>{
-  // Unlabelled sessions become indistinguishable within a week, and the label is the only thing
-  // that will identify this one until it is assigned.
+test("a recording can start without a name, and is still findable",async()=>{
+  // RULING, 2026-08-19, reversing the earlier requirement. A reporter pressing record is not in a
+  // position to name anything yet, and requiring it put a text field between them and the one
+  // action that must not be delayed. The session still gets a label -- the start time, which is
+  // always true -- and renameCaptureSession gives it a useful one afterwards.
   const value = await fixture();
   try {
-    const { createCaptureSession } = await import("../server/live-capture.mjs");
-    const sources = [{ id: "ch1", role: "WITNESS", deviceId: "m", deviceName: "Mic" }];
-    assert.throws(() => createCaptureSession(null, { sources }), /needs a label/);
-    assert.throws(() => createCaptureSession(null, { label: "   ", sources }), /needs a label/);
-    // A session that already belongs to a deposition takes its identity from there instead.
-    assert.doesNotThrow(() => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: value.storageRoot, sources }));
+    const { createCaptureSession, renameCaptureSession, listCaptureSessions } = await import("../server/live-capture.mjs");
+    const sources = [{ id: "ch1", role: "LOCAL_MICROPHONE", deviceId: "m", deviceName: "Mic" }];
+    const unnamed = createCaptureSession(null, { sources });
+    assert.match(unnamed.label, /^Recording \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, "a default name that is a fact, not a guess");
+    assert.equal(createCaptureSession(null, { label: "   ", sources }).label.startsWith("Recording "), true, "whitespace is not a name");
+
+    const renamed = renameCaptureSession(null, { sessionId: unnamed.sessionId, label: "  Tues AM Horton — James  " });
+    assert.equal(renamed.label, "Tues AM Horton — James");
+    assert.ok(renamed.events.some(event => event.type === "RENAMED"), "and the change is recorded");
+    assert.throws(() => renameCaptureSession(null, { sessionId: unnamed.sessionId, label: "  " }), /needs a name/);
+    assert.ok(listCaptureSessions().some(item => item.label === "Tues AM Horton — James"));
   } finally { cleanup(value); }
 });
 
