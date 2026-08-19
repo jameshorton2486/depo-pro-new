@@ -20,14 +20,113 @@ export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 const SHARED_ROLES=new Set(["LOCAL_MICROPHONE","VIRTUAL_MEETING_AUDIO"]);
 const active=new Map(),now=()=>new Date().toISOString();
 function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});fs.renameSync(temp,file)}
-function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json")}}
+function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl")}}
 export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
-function persist(runtime){runtime.record.updatedAt=now();atomic(runtime.paths.file,runtime.record)}
+const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
+/*
+ * The record used to be rewritten in full on every message, interim results included. Over an
+ * eight-hour deposition that is roughly 35 GB of atomic writes to produce a 10 MB result, and each
+ * write grows as the day goes on -- the cost rises exactly when the reporter can least afford it.
+ *
+ * Finalized events are append-only facts, so they append. The manifest carries state, channels,
+ * connection history and errors, and is written when one of those changes rather than per word.
+ */
+function persist(runtime){runtime.record.updatedAt=now();const {finalizedEvents,...manifest}=runtime.record;atomic(runtime.paths.file,{...manifest,finalizedEventCount:runtime.eventCount??finalizedEvents.length})}
+function appendEvent(runtime,event){
+  runtime.eventCount=(runtime.eventCount??0)+1;
+  fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END);
+  runtime.record.finalizedEvents.push(event);
+  /* The screen shows the tail; the log holds all of it. Without this the in-memory record grows for
+     eight hours and every one-second poll serialises the whole thing. */
+  const extra=runtime.record.finalizedEvents.length-EVENTS_IN_MEMORY;
+  if(extra>0)runtime.record.finalizedEvents.splice(0,extra);
+}
+/* Finalized events read back from the append log, newest last. */
+function readEvents(file,limit=EVENTS_IN_MEMORY){
+  if(!fs.existsSync(file))return[];
+  const lines=fs.readFileSync(file,"utf8").split(LINE_END).filter(Boolean);
+  return lines.slice(-limit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean);
+}
 function normalizedEvent(source,epoch,payload){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
-export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});if(capture.state!=="RECORDING")throw new Error("Local recording must be running before Deepgram Live starts.");const paths=locations(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. The interval between the two is derived from wall clocks at read time and is approximate: the residual is the differential device-open latency between the recording and streaming processes, which is not observable from outside them.",usableFor:"Locating a moment for read-back within the same channel, where playback begins several seconds before the hit and the residual is swamped by the lead-in.",doNotUseFor:"Positioning playback in a different channel, or any use requiring an exact position in the recording."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};const runtime={paths,record,connections:[],keepalive:null};fs.mkdirSync(paths.directory,{recursive:true});atomic(paths.file,record);active.set(sessionId,runtime);
- for(const source of capture.sources){const channel=record.channels.find(item=>item.id===source.id),url=buildDeepgramLiveUrl(source),socket=new WebSocketClass(url,{headers:{Authorization:`Token ${apiKey}`}}),connection={source,socket,process:null,epoch:1};runtime.connections.push(connection);socket.binaryType="arraybuffer";socket.on("open",()=>{channel.connectionState="OPEN";record.connectionHistory.push({type:"CONNECTED",at:now(),channelId:source.id,epoch:1,url:url.replace(/keyterm=[^&]+/g,"keyterm=REDACTED")});const process=spawnProcess("ffmpeg",["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,"-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"],{windowsHide:true,stdio:["ignore","pipe","pipe"]});connection.process=process;process.stdout.on("data",chunk=>{if(socket.readyState===WebSocketClass.OPEN)socket.send(chunk)});process.stderr.on("data",chunk=>{const message=chunk.toString();if(/error|lost|failed/i.test(message))record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE",message:message.slice(-1000)})});process.once("exit",code=>{if(!connection.stopping&&record.state==="OPEN"&&code!==0)record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE_EXIT",code,message:`The audio feed for ${source.role||source.id} exited unexpectedly with code ${code}. The local recording is unaffected.`})});if(record.channels.every(item=>item.connectionState==="OPEN")){record.state="OPEN";persist(runtime)}});socket.on("message",data=>{try{const payload=JSON.parse(data.toString());if(payload.type!=="Results")return;const event=normalizedEvent(source,connection.epoch,payload);if(event.isFinal){record.finalizedEvents.push(event);delete record.interimByChannel[source.id]}else record.interimByChannel[source.id]=event;persist(runtime)}catch(error){record.errors.push({at:now(),channelId:source.id,kind:"MESSAGE_PARSE",message:error.message});persist(runtime)}});socket.on("close",(code,reason)=>{channel.connectionState="CLOSED";record.connectionHistory.push({type:"DISCONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,code,reason:reason.toString()});if(connection.process)connection.process.kill();if(record.state!=="CLOSED")record.state="DEGRADED";persist(runtime)});socket.on("error",error=>{record.errors.push({at:now(),channelId:source.id,kind:"WEBSOCKET",message:error.message});persist(runtime)})}
- runtime.keepalive=setInterval(()=>{for(const {socket} of runtime.connections)if(socket.readyState===WebSocketClass.OPEN)socket.send(JSON.stringify({type:"KeepAlive"}))},8000);return publicRecord(record)}
-export async function stopDeepgramLive(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("Deepgram Live is not active.");clearInterval(runtime.keepalive);for(const connection of runtime.connections){connection.stopping=true;if(connection.process)connection.process.kill();if(connection.socket.readyState===WebSocket.OPEN){connection.socket.send(JSON.stringify({type:"Finalize"}));await new Promise(resolve=>setTimeout(resolve,250));connection.socket.send(JSON.stringify({type:"CloseStream"}));connection.socket.close()}}runtime.record.state="CLOSED";runtime.record.closedAt=now();runtime.record.interimByChannel={};persist(runtime);active.delete(sessionId);return publicRecord(runtime.record)}
-export function getDeepgramLive(root,{depositionId,sessionId,storageRoot}={}){const runtime=active.get(sessionId);if(runtime)return publicRecord(runtime.record);const {file}=locations(root,depositionId,sessionId,storageRoot);return JSON.parse(fs.readFileSync(file,"utf8"))}
+export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
+  if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
+  const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
+  if(capture.state!=="RECORDING")throw new Error("Local recording must be running before Deepgram Live starts.");
+  const paths=locations(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. A reconnection starts a new stream and therefore a new clock, which is what epoch identifies.",usableFor:"Locating a moment for read-back within the same channel and the same epoch, where playback begins several seconds before the hit.",doNotUseFor:"Positioning playback in a different channel, or comparing times across epochs as though one clock ran throughout."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};
+  const runtime={paths,record,connections:[],keepalive:null};
+  fs.mkdirSync(paths.directory,{recursive:true});atomic(paths.file,record);active.set(sessionId,runtime);
+
+  /* One connection attempt for one channel. Re-entrant, because over an eight hours a dropped
+     socket is close to certain and used to end that channel's index for good. */
+  const connect=connection=>{
+    const {source}=connection,channel=record.channels.find(item=>item.id===source.id);
+    const url=buildDeepgramLiveUrl(source),socket=new WebSocketClass(url,{headers:{Authorization:`Token ${apiKey}`}});
+    connection.socket=socket;socket.binaryType="arraybuffer";
+    channel.connectionState="CONNECTING";channel.epoch=connection.epoch;
+
+    socket.on("open",()=>{
+      channel.connectionState="OPEN";connection.retries=0;
+      record.connectionHistory.push({type:"CONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,url:url.replace(/keyterm=[^&]+/g,"keyterm=REDACTED")});
+      const process=spawnProcess("ffmpeg",["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,"-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"],{windowsHide:true,stdio:["ignore","pipe","pipe"]});
+      connection.process=process;
+      process.stdout.on("data",chunk=>{if(socket.readyState===WebSocketClass.OPEN)socket.send(chunk)});
+      process.stderr.on("data",chunk=>{const message=chunk.toString();if(/error|lost|failed/i.test(message))record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE",message:message.slice(-1000)})});
+      process.once("exit",code=>{if(!connection.stopping&&record.state==="OPEN"&&code!==0)record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE_EXIT",code,message:`The audio feed for ${source.role||source.id} exited unexpectedly with code ${code}. The local recording is unaffected.`})});
+      if(record.channels.every(item=>item.connectionState==="OPEN"))record.state="OPEN";
+      persist(runtime);
+    });
+
+    socket.on("message",data=>{
+      try{
+        const payload=JSON.parse(data.toString());if(payload.type!=="Results")return;
+        const event=normalizedEvent(source,connection.epoch,payload);
+        if(event.isFinal){appendEvent(runtime,event);delete record.interimByChannel[source.id]}
+        else record.interimByChannel[source.id]=event;
+      }catch(error){record.errors.push({at:now(),channelId:source.id,kind:"MESSAGE_PARSE",message:error.message});persist(runtime)}
+    });
+
+    socket.on("close",(code,reason)=>{
+      channel.connectionState="CLOSED";
+      record.connectionHistory.push({type:"DISCONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,code,reason:String(reason??"")});
+      if(connection.process)connection.process.kill();
+      /* Asked to stop, or the session is already closed: this is the end, not a fault. */
+      if(connection.stopping||record.state==="CLOSED"){if(record.state!=="CLOSED")record.state="DEGRADED";persist(runtime);return}
+      record.state="RECONNECTING";
+      /* Backoff so an outage is not hammered, capped at thirty seconds so a long deposition
+         recovers rather than backing off into uselessness. Each reconnection is a new epoch,
+         because Deepgram restarts its clock at zero and a reader must be able to tell. */
+      const attempt=(connection.retries=(connection.retries??0)+1),delay=Math.min(30000,1000*2**Math.min(attempt-1,5));
+      record.connectionHistory.push({type:"RECONNECT_SCHEDULED",at:now(),channelId:source.id,attempt,delayMs:delay});
+      persist(runtime);
+      connection.timer=setTimeout(()=>{
+        if(!active.has(sessionId)||connection.stopping)return;
+        connection.epoch+=1;connect(connection);
+      },delay);
+      if(typeof connection.timer?.unref==="function")connection.timer.unref();
+    });
+
+    socket.on("error",error=>{record.errors.push({at:now(),channelId:source.id,kind:"WEBSOCKET",message:error.message});persist(runtime)});
+  };
+
+  for(const source of capture.sources){
+    const connection={source,socket:null,process:null,epoch:1,retries:0,stopping:false,timer:null};
+    runtime.connections.push(connection);connect(connection);
+  }
+  runtime.keepalive=setInterval(()=>{for(const {socket} of runtime.connections)if(socket&&socket.readyState===WebSocketClass.OPEN)socket.send(JSON.stringify({type:"KeepAlive"}))},8000);
+  runtime.heartbeat=setInterval(()=>persist(runtime),30000);
+  if(typeof runtime.heartbeat?.unref==="function")runtime.heartbeat.unref();
+  return publicRecord(record);
+}
+export async function stopDeepgramLive(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("Deepgram Live is not active.");clearInterval(runtime.keepalive);if(runtime.heartbeat)clearInterval(runtime.heartbeat);for(const connection of runtime.connections){connection.stopping=true;if(connection.timer)clearTimeout(connection.timer);if(connection.process)connection.process.kill();if(connection.socket&&connection.socket.readyState===WebSocket.OPEN){connection.socket.send(JSON.stringify({type:"Finalize"}));await new Promise(resolve=>setTimeout(resolve,250));connection.socket.send(JSON.stringify({type:"CloseStream"}));connection.socket.close()}}runtime.record.state="CLOSED";runtime.record.closedAt=now();runtime.record.interimByChannel={};persist(runtime);active.delete(sessionId);return publicRecord(runtime.record)}
+/* The manifest no longer carries the events, so a finished session reattaches them from the append
+   log. Read-back needs the whole index, so it asks for it explicitly; the live screen only ever
+   shows the tail. */
+export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLimit=EVENTS_IN_MEMORY}={}){
+  const runtime=active.get(sessionId);
+  if(runtime)return publicRecord(runtime.record);
+  const {file,events}=locations(root,depositionId,sessionId,storageRoot);
+  const record=JSON.parse(fs.readFileSync(file,"utf8"));
+  return {...record,finalizedEvents:readEvents(events,eventLimit)};
+}
 export const _testing={active,normalizedEvent};
