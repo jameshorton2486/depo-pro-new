@@ -118,6 +118,15 @@ test("a second transcription of the same audio is refused, and the refusal names
   assert.match(error.message,new RegExp(first.job.jobId.slice(0,12)));
   assert.match(error.message,/1 keyterms/);
   assert.match(error.message,/3 keyterms/);
+  // The remedy the message states must be one the reporter can actually perform. It used to say
+  // "remove the other from the working transcript", and no route removes a completed
+  // transcription -- so it directed the reporter at an operation that does not exist. Checked
+  // against the local API's route table rather than against the message itself.
+  const routes=fs.readFileSync(new URL("../server/local-api.mjs",import.meta.url),"utf8");
+  const canRemove=/\/api\/transcription\/(remove|delete|supersede)|removeTranscriptionJob|supersedeTranscription/.test(routes);
+  if(!canRemove) assert.doesNotMatch(error.message,/remove the other|remove the existing|delete the/i,
+    "the refusal must not instruct an operation the application does not implement");
+
   assert.match(error.message,/twice/);
   // Refused, not half-done: the working transcript still holds exactly the first transcription.
   const working=JSON.parse(fs.readFileSync(path.join(value.directory,"transcript","working.json"),"utf8"));
