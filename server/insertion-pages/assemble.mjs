@@ -40,7 +40,18 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
   const variant = selectInsertionVariant({ jurisdiction, signatureDisposition });
-  const counsel = (operator.appearances ?? record.counsel ?? []).map(attorneyFromCanonical);
+  // Counsel of record who did not appear are not appearances. Two certified specimens settle it
+  // and they cover both shapes: on the Etminan page Marco Crawford is absent while MARCO CRAWFORD
+  // LAW, PLLC still prints, because Bentley appeared from that firm; on the Thomas page both
+  // Cukjatis AND Cukjati Law Firm are absent entirely, because nobody from it was there. So a
+  // firm reaches the page only through an attorney who appeared, and no separate firm handling is
+  // needed -- filtering the attorney is the whole rule.
+  //
+  // `!== false` rather than `=== true`: actualAppearance defaults to missing(), and "never
+  // recorded" is a different fact from "did not appear". A strict test would silently drop
+  // counsel whose attendance nobody has entered yet.
+  const appeared = attorney => canonicalValue(attorney?.actualAppearance) !== false;
+  const counsel = (operator.appearances ?? record.counsel ?? []).filter(appeared).map(attorneyFromCanonical);
   const volumes = operator.volumes ?? record.transcript?.volumes ?? [];
   const volumeCount = operator.volumeCount ?? (volumes.length || 1);
   const court = canonicalValue(record.case?.court);
