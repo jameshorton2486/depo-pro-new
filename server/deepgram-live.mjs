@@ -48,12 +48,23 @@ function readEventLog(file){
   return fs.readFileSync(file,"utf8").split(LINE_END).filter(Boolean);
 }
 
-function normalizedEvent(source,epoch,payload){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
+// Deepgram's timestamps are relative to the STREAM, and a reconnection opens a new stream whose
+// clock restarts at zero. Left alone, a channel that drops once shows [00:00:03] partway through a
+// proceeding -- worse than no timestamp, because it reads as a real position in the recording, and
+// locating a moment in the audio is the only job the live text has.
+//
+// The offset is measured from the channel's FIRST open and recorded when the socket opens, so it is
+// persisted evidence rather than the reading machine's clock. It carries the imprecision of a
+// wall-clock difference between two connects -- sub-second, against a gap of minutes -- and it is
+// the only cross-epoch anchor the stream provides.
+//
+// Deepgram's own `start` is never touched. The offset is carried alongside it.
+function normalizedEvent(source,epoch,payload,sessionOffsetSeconds){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,sessionOffsetSeconds,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
 export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
   const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
   if(capture.state!=="RECORDING")throw new Error("Local recording must be running before Deepgram Live starts.");
-  const paths=locations(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. A reconnection starts a new stream and therefore a new clock, which is what epoch identifies.",usableFor:"Locating a moment for read-back within the same channel and the same epoch, where playback begins several seconds before the hit.",doNotUseFor:"Positioning playback in a different channel, or comparing times across epochs as though one clock ran throughout."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};
+  const paths=locations(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. A reconnection starts a new stream and therefore a new clock, which is what epoch identifies.",usableFor:"Locating a moment for read-back within the same channel and the same epoch, where playback begins several seconds before the hit.",doNotUseFor:"Positioning playback in a different channel, or comparing times across epochs as though one clock ran throughout."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1,streamOriginAt:null,sessionOffsetSeconds:0})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};
   const runtime={paths,record,connections:[],keepalive:null};
   fs.mkdirSync(paths.directory,{recursive:true});atomic(paths.file,record);active.set(sessionId,runtime);
 
@@ -67,6 +78,10 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
 
     socket.on("open",()=>{
       channel.connectionState="OPEN";connection.retries=0;
+      // First open for this channel is the origin of its continuous session clock.
+      if(!channel.streamOriginAt)channel.streamOriginAt=now();
+      connection.sessionOffsetSeconds=Math.max(0,(Date.parse(now())-Date.parse(channel.streamOriginAt))/1000);
+      channel.sessionOffsetSeconds=connection.sessionOffsetSeconds;
       record.connectionHistory.push({type:"CONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,url:url.replace(/keyterm=[^&]+/g,"keyterm=REDACTED")});
       const process=spawnProcess("ffmpeg",["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,"-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"],{windowsHide:true,stdio:["ignore","pipe","pipe"]});
       connection.process=process;
@@ -80,7 +95,7 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
     socket.on("message",data=>{
       try{
         const payload=JSON.parse(data.toString());if(payload.type!=="Results")return;
-        const event=normalizedEvent(source,connection.epoch,payload);
+        const event=normalizedEvent(source,connection.epoch,payload,connection.sessionOffsetSeconds??0);
         if(event.isFinal){appendEvent(runtime,event);delete record.interimByChannel[source.id]}
         else record.interimByChannel[source.id]=event;
       }catch(error){record.errors.push({at:now(),channelId:source.id,kind:"MESSAGE_PARSE",message:error.message});persist(runtime)}
