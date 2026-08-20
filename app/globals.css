@@ -534,3 +534,21 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .quick-record span{color:#62718a;font-size:13px}
 .rename-recording{display:grid;gap:6px;margin:14px 0}
 .rename-recording input{padding:11px;border:1px solid #b9c7dd;border-radius:8px}
+
+/* Live transcript: timestamp, voice, and the selection-triggered red mark.
+   The timestamp is scannable but never louder than the words -- a reporter reads the transcript
+   and glances at the clock, not the other way round. */
+.live-turn h4 { display: flex; align-items: baseline; gap: 0.5rem; margin: 0 0 0.15rem; }
+.live-stamp { font-variant-numeric: tabular-nums; font-size: 0.78rem; opacity: 0.55; font-weight: 400; }
+.live-voice { font-size: 0.82rem; letter-spacing: 0.02em; }
+.live-red { color: #c00000; }
+.live-turn p[contenteditable] { outline: none; }
+.live-turn p[contenteditable]:focus-visible { outline: 1px solid rgba(120, 120, 120, 0.4); outline-offset: 2px; }
+/* Floating, so it sits by the words the reporter just highlighted rather than in a toolbar they
+   have to travel to. Fixed positioning keeps it put while the transcript scrolls underneath. */
+.live-mark-button { position: fixed; transform: translate(-50%, -100%); z-index: 20;
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18); border-radius: 6px; background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); cursor: pointer; }
+.live-mark-swatch { width: 14px; height: 14px; border-radius: 3px; background: #c00000; }
+.live-mark-swatch.normal { background: linear-gradient(135deg, #c00000 46%, #1a1a1a 46%); }

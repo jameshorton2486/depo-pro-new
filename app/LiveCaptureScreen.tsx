@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { groupLiveEvents } from "./live-paragraphs.mjs";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { groupLiveEvents, paragraphTimestamp } from "./live-paragraphs.mjs";
+import { markRed, redWordIds, removeRed } from "./live-annotations.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 type Device = { id: string; name: string; kind: "input" | "loopback" };
 type Health = {
@@ -52,6 +53,9 @@ const isRunning = (session: Session | null) =>
 // it never writes the working transcript. Surfaced here so the screen can state it rather than
 // leaving a reporter to assume the text on screen is the record.
 type LiveChannel = { id: string; role: string; connectionState: string };
+type LiveWord = { id: string; text: string; rawText: string };
+type Annotation = { annotationId: string; paragraphId: string; wordIds: string[]; value: string };
+type MarkTarget = { paragraphId: string | null; wordIds: string[]; allRed: boolean; x: number; y: number };
 type Hit = {
   eventId: string;
   channelId: string;
@@ -394,6 +398,58 @@ export default function LiveCaptureScreen({
           }),
         );
       });
+  // Red marks live in React state, not the DOM, so they survive every rerender the live stream
+  // causes. Anchored to word ids: an edit changes the text under a mark, never which word it is on.
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [marker, setMarker] = useState<MarkTarget | null>(null);
+  const paragraphs = useMemo(() => groupLiveEvents(live?.finalizedEvents ?? []), [live?.finalizedEvents]);
+  const red = useMemo(() => redWordIds(annotations), [annotations]);
+
+  /**
+   * Resolves the current selection to finalized word ids and a place to put the control.
+   *
+   * Only spans carrying data-word-id count. Interim text is rendered as a plain string with no ids,
+   * so a selection over it resolves to nothing and no control appears -- which is what keeps a mark
+   * off words Deepgram is about to replace.
+   */
+  const readSelection = useCallback((): MarkTarget | null => {
+    const selection = typeof window === "undefined" ? null : window.getSelection();
+    const scope = scroller.current;
+    if (!selection || selection.isCollapsed || !selection.rangeCount || !scope) return null;
+    const range = selection.getRangeAt(0);
+    const wordIds: string[] = [];
+    for (const node of Array.from(scope.querySelectorAll("[data-word-id]"))) {
+      if (range.intersectsNode(node)) wordIds.push((node as HTMLElement).dataset.wordId as string);
+    }
+    if (!wordIds.length) return null;
+    const box = range.getBoundingClientRect();
+    // Above the selection, clamped so the control cannot leave the viewport at either edge.
+    return {
+      paragraphId: paragraphs.find((item: { id: string; wordIds: string[] }) => item.wordIds.includes(wordIds[0]))?.id ?? null,
+      wordIds,
+      allRed: wordIds.every((id) => red.has(id)),
+      x: Math.min(Math.max(box.left + box.width / 2, 60), window.innerWidth - 60),
+      y: Math.max(box.top - 8, 44),
+    };
+  }, [paragraphs, red]);
+
+  useEffect(() => {
+    const update = () => setMarker(readSelection());
+    document.addEventListener("selectionchange", update);
+    return () => document.removeEventListener("selectionchange", update);
+  }, [readSelection]);
+
+  const applyRed = useCallback(() => {
+    if (!marker) return;
+    setAnnotations((current) =>
+      marker.allRed
+        ? removeRed(current, { wordIds: marker.wordIds })
+        : markRed(current, { paragraphId: marker.paragraphId ?? "", wordIds: marker.wordIds, createdAt: new Date().toISOString() }),
+    );
+    window.getSelection()?.removeAllRanges();
+    setMarker(null);
+  }, [marker]);
+
   const recording = running,
     tested = preflight?.state === "TEST_CAPTURED",
     confirmed = preflight?.state === "PLAYBACK_CONFIRMED",
@@ -824,14 +880,23 @@ export default function LiveCaptureScreen({
                   );
                 }}
               >
-                {groupLiveEvents(live.finalizedEvents ?? [])
-                  .slice(-60)
-                  .map((paragraph) => (
-                    <article className="live-turn" key={paragraph.id}>
-                      {paragraph.voice && <h4>{paragraph.voice}</h4>}
-                      <p>{paragraph.text}</p>
-                    </article>
-                  ))}
+                {paragraphs.map((paragraph: { id: string; voice: string | null; text: string; words: LiveWord[] }) => (
+                  <article className="live-turn" key={paragraph.id}>
+                    <h4>
+                      <span className="live-stamp">[{paragraphTimestamp(paragraph)}]</span>
+                      {paragraph.voice && <span className="live-voice">{paragraph.voice}</span>}
+                    </h4>
+                    {/* Editable, and every word is a span so a selection resolves to word ids.
+                        rawText keeps what Deepgram heard whatever the reporter types over it. */}
+                    <p contentEditable suppressContentEditableWarning spellCheck={false}>
+                      {paragraph.words.length
+                        ? paragraph.words.map((word) => (
+                            <span key={word.id} data-word-id={word.id} className={red.has(word.id) ? "live-red" : undefined}>{word.text} </span>
+                          ))
+                        : paragraph.text}
+                    </p>
+                  </article>
+                ))}
                 {Object.values(live.interimByChannel ?? {}).map((item) =>
                   item?.transcript ? (
                     <article className="live-turn interim" key={item.id}>
@@ -845,6 +910,19 @@ export default function LiveCaptureScreen({
                   </p>
                 )}
               </div>
+              {marker && (
+                <button
+                  type="button"
+                  className="live-mark-button"
+                  style={{ left: marker.x, top: marker.y }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={applyRed}
+                  aria-label={marker.allRed ? "Return the selected text to normal" : "Mark the selected text red"}
+                  title={marker.allRed ? "Return to normal" : "Mark red"}
+                >
+                  <span className={marker.allRed ? "live-mark-swatch normal" : "live-mark-swatch"} aria-hidden="true" />
+                </button>
+              )}
               {!following && (
                 <button
                   className="secondary-button scroll-to-bottom"
