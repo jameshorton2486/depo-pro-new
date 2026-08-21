@@ -54,7 +54,7 @@ function speakerRuns(events = []) {
     // than assumed from a neighbour.
     if (!words.length) {
       const text = String(event.transcript ?? "").trim();
-      if (text) runs.push({ id: event.id, channelId: event.channelId ?? null, speaker: null, text,
+      if (text) runs.push({ id: event.id, channelId: event.channelId ?? null, speaker: null, text, words: [],
         start: at(event.start),
         end: at(Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : event.start) });
       continue;
@@ -63,13 +63,20 @@ function speakerRuns(events = []) {
     words.forEach((word, index) => {
       const speaker = Number.isInteger(word.speaker) ? word.speaker : null;
       const text = String(word.punctuatedWord ?? word.word ?? "").trim();
+      // Every word carries an id because a red mark hangs on one. The id is `${eventId}:w${index}`
+      // and finalized events are append-only, so the anchor cannot move as the transcript grows.
+      const carried = { id: `${event.id}:w${index}`, text,
+        start: word.start ?? null, end: word.end ?? null,
+        sessionStart: at(word.start), sessionEnd: at(word.end),
+        confidence: Number.isFinite(word.confidence) ? word.confidence : null };
       if (current && current.speaker === speaker) {
         current.text = `${current.text} ${text}`;
+        current.words.push(carried);
         if (Number.isFinite(word.end)) current.end = at(word.end);
         return;
       }
       if (current) runs.push(current);
-      current = { id: `${event.id}:${index}`, channelId: event.channelId ?? null, speaker, text,
+      current = { id: `${event.id}:${index}`, channelId: event.channelId ?? null, speaker, text, words: [carried],
         start: at(Number.isFinite(word.start) ? word.start : event.start),
         end: at(word.end) };
     });
@@ -101,6 +108,7 @@ export function groupLiveEvents(events = [], { pauseSeconds = PARAGRAPH_PAUSE_SE
       current.text = `${current.text} ${run.text}`.trim();
       current.end = run.end ?? current.end;
       current.runIds.push(run.id);
+      current.words.push(...run.words);
       continue;
     }
     paragraphs.push({
@@ -112,10 +120,12 @@ export function groupLiveEvents(events = [], { pauseSeconds = PARAGRAPH_PAUSE_SE
       voice: run.speaker === null ? null : voiceLabel(run.speaker),
       channelId: run.channelId,
       start: run.start, end: run.end,
+      words: run.words,
       text: run.text.trim(),
     });
   }
-  return paragraphs.filter(paragraph => paragraph.text);
+  return paragraphs.filter(paragraph => paragraph.text)
+    .map(paragraph => ({ ...paragraph, wordIds: paragraph.words.map(word => word.id), finalized: true }));
 }
 
 /** mm:ss for a stream time, so a reporter can relate a paragraph to the recording clock. */
@@ -136,4 +146,10 @@ export function sessionClock(seconds) {
   const total = Math.max(0, Math.floor(seconds));
   return [Math.floor(total / 3600), Math.floor(total / 60) % 60, total % 60]
     .map(part => String(part).padStart(2, "0")).join(":");
+}
+
+/** The timestamp a paragraph displays: the start of its first finalized word. */
+export function paragraphTimestamp(paragraph) {
+  const first = paragraph?.words?.find(word => Number.isFinite(word.sessionStart));
+  return sessionClock(first ? first.sessionStart : paragraph?.start);
 }
