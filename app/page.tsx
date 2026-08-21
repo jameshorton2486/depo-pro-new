@@ -8,6 +8,7 @@ import TranscriptComparisonScreen from "./TranscriptComparisonScreen";
 import WorkspaceScreen from "./WorkspaceScreen";
 import TranscriptPreviewScreen from "./TranscriptPreviewScreen";
 import LiveCaptureScreen from "./LiveCaptureScreen";
+import OpeningProceduresScreen from "./OpeningProceduresScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
@@ -59,13 +60,13 @@ const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionI
 // The views that mean nothing without an open deposition. Restoring the flag without restoring
 // the deposition is why widening the guard above is not on its own enough: the view flag would be
 // restored, active would be null, and `if (active)` would drop to the library anyway.
-const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","preview","compare","review","insertion-pages"];
+const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","opening","preview","compare","review","insertion-pages"];
 // The one list. The type is derived from it rather than declared beside it, so a view added to
 // the union without being added here is a type error at the assignment below -- which is the
 // drift that let the writer persist ten views while the reader accepted six. "transcript" stays
 // on the list although its screen is gone: a session stored before the deletion must still be
 // readable, and it falls through to the Workspace.
-const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","preview","live-capture","audio-tools","admin","insertion-pages","compare","review"] as const;
+const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","opening","preview","live-capture","audio-tools","admin","insertion-pages","compare","review"] as const;
 type WorkflowView=typeof WORKFLOW_VIEWS[number];
 function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&(WORKFLOW_VIEWS as readonly string[]).includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
@@ -115,6 +116,8 @@ export default function Home() {
   const [showCompare, setShowCompare] = useState(false);
   const [showPreview,setShowPreview]=useState(false);
   const [showLiveCapture,setShowLiveCapture]=useState(false);
+  const [showOpening,setShowOpening]=useState(false);
+  const [liveRecording,setLiveRecording]=useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
@@ -139,14 +142,14 @@ export default function Home() {
       setShowModal(resumeSession.view==="setup");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
-      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowPreview(resumeSession.view==="preview");setShowLiveCapture(resumeSession.view==="live-capture");
+      setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowPreview(resumeSession.view==="preview");setShowLiveCapture(resumeSession.view==="live-capture");setShowOpening(resumeSession.view==="opening");
       try{const response=await fetch(`${API}/api/depositions`),result=await response.json(),disk=result.depositions||[],migrated=await migrateLegacyDepositions(disk),loaded=(migrated||disk).sort((a:Deposition,b:Deposition)=>b.createdAt.localeCompare(a.createdAt));if(cancelled)return;setDepositions(loaded);if(DEPOSITION_VIEWS.includes(resumeSession.view)&&resumeSession.activeDepositionId)setActive(loaded.find((item:Deposition)=>item.id===resumeSession.activeDepositionId)||null);setStoreIssues(result.issues||[])}catch(error){if(!cancelled)setNotice(error instanceof Error?error.message:"Could not load depositions from disk.")}finally{if(!cancelled)setLibraryLoaded(true)}
     }
     void restore();
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showLiveCapture?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showLiveCapture,showModal,showPreview]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showOpening&&active?"opening":showLiveCapture?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showLiveCapture,showModal,showOpening,showPreview]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -223,25 +226,25 @@ export default function Home() {
   }
 
 
-  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":showLiveCapture?"live-capture":active?(showInsertionPages?"insertion-pages":showCompare?"compare":showPreview?"preview":"workspace"):"library";
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":showLiveCapture?"live-capture":active?(showOpening?"opening":showInsertionPages?"insertion-pages":showCompare?"compare":showPreview?"preview":"workspace"):"library";
   function navigate(next:NavView){
     if(next==="intake"){startNewDeposition();return}
     // One place decides which screen is showing. Every entry clears the others, so two
     // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
     setShowAdmin(next==="admin"); setShowIntake(false); setShowAudioTools(next==="audio-tools");
-    setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowPreview(next==="preview"); setShowLiveCapture(next==="live-capture");
+    setShowOpening(next==="opening"); setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowPreview(next==="preview"); setShowLiveCapture(next==="live-capture");
     if(next==="library") setActive(null);
   }
   const frame=(node:React.ReactNode)=>(
     <div className="app-frame">
-      <WorkspaceNav current={currentView} hasDeposition={Boolean(active)} depositionLabel={active?.witness} onNavigate={navigate} />
+      <WorkspaceNav current={currentView} hasDeposition={Boolean(active)} depositionLabel={active?.witness} navigationLocked={liveRecording} onNavigate={navigate} />
       <div className="app-frame-body">{node}</div>
     </div>
   );
   if (showAdmin) {
     return frame(<AdminSettings onClose={() => setShowAdmin(false)} />);
   }
-  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowIntake(false);setShowLiveCapture(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowCreationChoice(true)}
+  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowIntake(false);setShowLiveCapture(false);setShowOpening(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowCreationChoice(true)}
   function chooseCreationMode(mode:DepositionCreationMode){setCreationMode(mode);setShowCreationChoice(false);setShowIntake(true)}
   async function openAudioTools() {
     if (intakeDraft?.audioFiles.length) setAudioToolFiles(intakeDraft.audioFiles);
@@ -259,7 +262,7 @@ export default function Home() {
   // where it belongs afterwards, so this sits beside Audio tools rather than inside the
   // open-deposition block. An open deposition is still passed when there is one.
   if (showLiveCapture) {
-    return frame(<LiveCaptureScreen deposition={active} onDepositionUpdated={(value)=>{const updated=value as Deposition;setActive(updated);setDepositions(current=>current.map(item=>item.id===updated.id?updated:item))}} onBack={() => setShowLiveCapture(false)} />);
+    return frame(<LiveCaptureScreen deposition={active} onRecordingChange={setLiveRecording} onDepositionUpdated={(value)=>{const updated=value as Deposition;setActive(updated);setDepositions(current=>current.map(item=>item.id===updated.id?updated:item))}} onBack={() => setShowLiveCapture(false)} />);
   }
 
   if (showIntake) {
@@ -270,6 +273,7 @@ export default function Home() {
     return frame(<IntakeScreen creationMode={creationMode} onCancel={() => { setShowIntake(false); setActive(null); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
+    if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(true)}} />);
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
     if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} />);

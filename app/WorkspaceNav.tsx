@@ -1,6 +1,6 @@
 "use client";
 
-export type NavView = "library" | "intake" | "audio-tools" | "live-capture" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
+export type NavView = "library" | "intake" | "audio-tools" | "live-capture" | "opening" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
 
 type Item = {
   view: NavView;
@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
   {
     heading: "Open deposition",
     items: [
+      { view: "opening", label: "Opening", note: "Deposition Opening Procedures", needsDeposition: true },
       { view: "workspace", label: "Workspace", note: "Transcribe, assign speakers, correct the record", needsDeposition: true },
       { view: "preview", label: "Print preview", note: "Continuous and 25-line body pages", needsDeposition: true },
       { view: "compare", label: "Compare transcripts", note: "Measured source selection", needsDeposition: true },
@@ -44,10 +45,11 @@ const GROUPS: Group[] = [
   },
 ];
 
-export default function WorkspaceNav({ current, hasDeposition, depositionLabel, onNavigate }: {
+export default function WorkspaceNav({ current, hasDeposition, depositionLabel, navigationLocked=false, onNavigate }: {
   current: NavView;
   hasDeposition: boolean;
   depositionLabel?: string;
+  navigationLocked?: boolean;
   onNavigate: (view: NavView) => void;
 }) {
   return (
@@ -64,8 +66,8 @@ export default function WorkspaceNav({ current, hasDeposition, depositionLabel, 
             {group.items.map((item) => {
               // An item that needs a deposition is shown rather than hidden, with the reason,
               // so the absence reads as a precondition instead of a missing feature.
-              const blocked = Boolean(item.needsDeposition) && !hasDeposition;
               const isCurrent = current === item.view;
+              const blocked = (Boolean(item.needsDeposition) && !hasDeposition) || (navigationLocked && !isCurrent);
               return (
                 <li key={item.view}>
                   <button
@@ -73,12 +75,12 @@ export default function WorkspaceNav({ current, hasDeposition, depositionLabel, 
                     className={`workspace-nav-item ${isCurrent ? "current" : ""}`}
                     aria-current={isCurrent ? "page" : undefined}
                     disabled={blocked}
-                    title={blocked ? "Open a deposition first" : undefined}
+                    title={blocked ? navigationLocked ? "Stop and finalize the active recording before leaving Live Deposition" : "Open a deposition first" : undefined}
                     onClick={() => onNavigate(item.view)}
                   >
                     <span className="workspace-nav-label">{item.label}</span>
                     {blocked
-                      ? <span className="workspace-nav-note">Open a deposition first</span>
+                      ? <span className="workspace-nav-note">{navigationLocked?"Recording in progress":"Open a deposition first"}</span>
                       : item.note && <span className="workspace-nav-note">{item.note}</span>}
                   </button>
                 </li>

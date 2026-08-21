@@ -88,13 +88,16 @@ type Unassigned = {
   channels: { id: string; role: string; state: string; bytes: number | null }[];
 };
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
+type OpeningSummary={completeCount:number;totalCount:number;readiness:Record<string,boolean>;state:{interpreterDisposition:string};scripts:Array<{id:string;title:string;text:string;applicable:boolean;completedOnRecord:boolean}>};
 export default function LiveCaptureScreen({
   deposition,
   onDepositionUpdated,
+  onRecordingChange,
   onBack,
 }: {
   deposition: LibraryDeposition | null;
   onDepositionUpdated?: (deposition: LibraryDeposition) => void;
+  onRecordingChange?: (recording:boolean) => void;
   onBack: () => void;
 }) {
   const [devices, setDevices] = useState<Device[]>([]),
@@ -116,16 +119,24 @@ export default function LiveCaptureScreen({
     [assignTo, setAssignTo] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [opening,setOpening]=useState<OpeningSummary|null>(null);
   const running = isRunning(session),
     sessionId = session?.sessionId ?? null;
   const openDepositionId = deposition?.id ?? "";
   const scroller = useRef<HTMLDivElement | null>(null),
     [following, setFollowing] = useState(true);
+  useEffect(()=>{onRecordingChange?.(running);return()=>onRecordingChange?.(false)},[onRecordingChange,running]);
   // Newest card, whenever one arrives -- but only while the reporter has not scrolled away.
   useEffect(() => {
     if (following && scroller.current)
       scroller.current.scrollTop = scroller.current.scrollHeight;
   });
+  useEffect(() => {
+    if(!deposition)return;
+    let current=true;
+    fetch(`${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);if(current)setOpening(body)}).catch(()=>{if(current)setOpening(null)});
+    return()=>{current=false};
+  },[deposition]);
   useEffect(() => {
     let current = true;
     fetch(`${API}/api/live-capture/devices`)
@@ -455,6 +466,7 @@ export default function LiveCaptureScreen({
         <div><span className="eyebrow">SCHEDULED DEPOSITION</span><h2 id="live-readiness-title">Confirm the case, then test both audio channels</h2></div>
         <dl><div><dt>Case</dt><dd>{deposition.caseStyle}</dd></div><div><dt>Witness</dt><dd>{deposition.witness}</dd></div><div><dt>Deposition ID</dt><dd>{deposition.id}</dd></div></dl>
         <p>Live text is preserved as a provisional transcript. The working transcript is created only after the verified local recordings are finalized.</p>
+        {opening&&<><dl className="live-opening-summary"><div><dt>Caption</dt><dd>{opening.readiness.caption?"Verified":"Needs review"}</dd></div><div><dt>Appearances</dt><dd>{opening.readiness.appearances?"Verified":"Needs review"}</dd></div><div><dt>Interpreter</dt><dd>{opening.state.interpreterDisposition==="NOT_APPLICABLE"?"Not required":opening.state.interpreterDisposition==="REQUIRED"?"Required":"Unresolved"}</dd></div><div><dt>Opening Procedures</dt><dd>{opening.completeCount}/{opening.totalCount} ready</dd></div></dl><details className="live-opening-scripts"><summary>Opening scripts and oaths</summary>{opening.scripts.filter(item=>item.applicable).map(item=><article key={item.id}><h3>{item.title}{item.completedOnRecord?" · Completed on record":""}</h3><p>{item.text}</p></article>)}</details></>}
       </section>}
       <section className="live-capture-card">
         <h2>Local recording preflight</h2>
