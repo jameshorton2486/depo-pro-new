@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { groupLiveEvents, paragraphTimestamp } from "./live-paragraphs.mjs";
 import { redWordIds } from "./live-annotations.mjs";
+import { CHOOSE, chooseRecovery, orphanedNotice, REATTACH } from "./live-recovery.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 type Device = { id: string; name: string; kind: "input" | "loopback" };
 type Health = {
@@ -36,6 +37,13 @@ type Session = {
   state: string;
   sources: Source[];
   events?: SessionEvent[];
+};
+type Recoverable = {
+  sessionId: string;
+  depositionId: string | null;
+  label: string | null;
+  state: string;
+  startedAt: string;
 };
 // DEGRADED means two different things depending on when it was set. startCaptureSession sets it
 // when a channel's ffmpeg exits mid-recording -- the surviving channels are still being written,
@@ -124,6 +132,13 @@ export default function LiveCaptureScreen({
   const running = isRunning(session),
     sessionId = session?.sessionId ?? null;
   const openDepositionId = deposition?.id ?? "";
+  // Which deposition the running capture belongs to. Normally the one open on screen -- but a
+  // session picked back up after a reload carries its own, and it may have been started with a
+  // different deposition open, or with none.
+  const [recoveredDepositionId, setRecoveredDepositionId] = useState<string | null>(null);
+  const captureDepositionId = recoveredDepositionId ?? openDepositionId;
+  const [choices, setChoices] = useState<Recoverable[]>([]);
+  const [orphaned, setOrphaned] = useState<string>("");
   const scroller = useRef<HTMLDivElement | null>(null),
     [following, setFollowing] = useState(true);
   // Newest card, whenever one arrives -- but only while the reporter has not scrolled away.
@@ -162,14 +177,14 @@ export default function LiveCaptureScreen({
     if (!running || !sessionId) return;
     const timer = setInterval(() => {
       fetch(
-        `${API}/api/live-capture/session?depositionId=${encodeURIComponent(openDepositionId)}&sessionId=${encodeURIComponent(sessionId)}`,
+        `${API}/api/live-capture/session?depositionId=${encodeURIComponent(captureDepositionId)}&sessionId=${encodeURIComponent(sessionId)}`,
       )
         .then((response) => response.json())
         .then((payload) => setSession(payload))
         .catch(() => undefined);
     }, 1000);
     return () => clearInterval(timer);
-  }, [openDepositionId, sessionId, running]);
+  }, [captureDepositionId, sessionId, running]);
   // Polls the live aid separately from the capture session, because they fail independently and are
   // meant to: Deepgram dropping must show as Deepgram dropping, never as a problem with the
   // recording. Keyed on live.state rather than the live object so an identical poll result does not
@@ -179,14 +194,57 @@ export default function LiveCaptureScreen({
     if (!sessionId || !liveState || liveState === "CLOSED") return;
     const timer = setInterval(() => {
       fetch(
-        `${API}/api/live-capture/deepgram?depositionId=${encodeURIComponent(openDepositionId)}&sessionId=${encodeURIComponent(sessionId)}`,
+        `${API}/api/live-capture/deepgram?depositionId=${encodeURIComponent(captureDepositionId)}&sessionId=${encodeURIComponent(sessionId)}`,
       )
         .then((response) => response.json())
         .then((payload) => setLive(payload))
         .catch(() => undefined);
     }, 1000);
     return () => clearInterval(timer);
-  }, [openDepositionId, sessionId, liveState]);
+  }, [captureDepositionId, sessionId, liveState]);
+  /**
+   * Picks a running recording back up when the screen loads.
+   *
+   * The reporter reloads at hour three and every bit of client state is gone; ffmpeg does not
+   * notice and keeps writing. Before this the screen came back offering "Start recording" while the
+   * recording was still running, and there was no way to stop it, hash it, or attach it -- the
+   * deliverable, with no way to close it out.
+   *
+   * The server is asked rather than the browser remembering. A remembered sessionId is a second
+   * answer to a question the server can already answer, and the two disagree exactly when it
+   * matters: after a crash, after a restart, in a second tab.
+   */
+  const reattach = useCallback((item: Recoverable) => {
+    setChoices([]);
+    setRecoveredDepositionId(item.depositionId ?? "");
+    const query = `depositionId=${encodeURIComponent(item.depositionId ?? "")}&sessionId=${encodeURIComponent(item.sessionId)}`;
+    fetch(`${API}/api/live-capture/session?${query}`)
+      .then((response) => response.json())
+      .then((payload) => setSession(payload))
+      .catch(() => setError("A recording is running but could not be picked back up."));
+    // The live text is a separate concern and fails separately: Deepgram may never have been
+    // started for this session. Not finding it must not cost the reporter the stop control.
+    fetch(`${API}/api/live-capture/deepgram?${query}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => payload && setLive(payload))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    let current = true;
+    fetch(`${API}/api/live-capture/recoverable`)
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!current) return;
+        const decision = chooseRecovery(payload);
+        setOrphaned(orphanedNotice(decision.orphaned) ?? "");
+        if (decision.kind === REATTACH && decision.session) reattach(decision.session);
+        if (decision.kind === CHOOSE) setChoices(decision.sessions);
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [reattach]);
   const slots = [
     {
       id: "local-microphone",
@@ -255,12 +313,12 @@ export default function LiveCaptureScreen({
   const beginTest = () =>
       act(async () => {
         const created = await post("/api/live-capture/preflight", {
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           sources: sources(),
         });
         setPreflight(
           await post("/api/live-capture/preflight/test", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             preflightId: created.preflightId,
           }),
         );
@@ -269,7 +327,7 @@ export default function LiveCaptureScreen({
       act(async () =>
         setPreflight(
           await post("/api/live-capture/preflight/confirm", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             preflightId: preflight?.preflightId,
           }),
         ),
@@ -278,7 +336,7 @@ export default function LiveCaptureScreen({
       act(async () =>
         setPreflight(
           await post("/api/live-capture/preflight/arm", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             preflightId: preflight?.preflightId,
           }),
         ),
@@ -286,13 +344,14 @@ export default function LiveCaptureScreen({
     start = () =>
       act(async () => {
         const configured = await post("/api/live-capture/session", {
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           label,
           sources: sources(),
         });
+        setRecoveredDepositionId(null);
         setSession(
           await post("/api/live-capture/start", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             sessionId: configured.sessionId,
             preflightId: preflight?.preflightId,
           }),
@@ -301,7 +360,7 @@ export default function LiveCaptureScreen({
     search = () =>
       act(async () => {
         const result = await post("/api/live-capture/read-back", {
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           sessionId: session?.sessionId,
           channelId: channel,
           query,
@@ -312,7 +371,7 @@ export default function LiveCaptureScreen({
     addToDeposition = () =>
       act(async () => {
         const result = await post("/api/live-capture/add-to-deposition", {
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           sessionId: session?.sessionId,
         });
         setHandoff(
@@ -331,20 +390,20 @@ export default function LiveCaptureScreen({
     startRecording = () =>
       act(async () => {
         const configured = await post("/api/live-capture/session", {
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           label,
           sources: sources(),
         });
         setSession(
           await post("/api/live-capture/start", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             sessionId: configured.sessionId,
           }),
         );
         try {
           setLive(
             await post("/api/live-capture/deepgram/start", {
-              depositionId: deposition?.id ?? null,
+              depositionId: captureDepositionId || null,
               sessionId: configured.sessionId,
             }),
           );
@@ -360,7 +419,7 @@ export default function LiveCaptureScreen({
       act(async () => {
         await post("/api/live-capture/rename", {
           sessionId,
-          depositionId: deposition?.id ?? null,
+          depositionId: captureDepositionId || null,
           label: next,
         });
         refreshSessions();
@@ -369,7 +428,7 @@ export default function LiveCaptureScreen({
       act(async () =>
         setLive(
           await post("/api/live-capture/deepgram/start", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             sessionId: session?.sessionId,
           }),
         ),
@@ -384,7 +443,7 @@ export default function LiveCaptureScreen({
           try {
             setLive(
               await post("/api/live-capture/deepgram/stop", {
-                depositionId: deposition?.id ?? null,
+                depositionId: captureDepositionId || null,
                 sessionId: session?.sessionId,
               }),
             );
@@ -398,7 +457,7 @@ export default function LiveCaptureScreen({
         }
         setSession(
           await post("/api/live-capture/stop", {
-            depositionId: deposition?.id ?? null,
+            depositionId: captureDepositionId || null,
             sessionId: session?.sessionId,
           }),
         );
@@ -468,7 +527,7 @@ export default function LiveCaptureScreen({
     // their head on the strength of a mark that was never stored. On localhost the wait is a few
     // milliseconds, so nothing is traded for it.
     post("/api/live-capture/annotation", {
-      depositionId: openDepositionId || null,
+      depositionId: captureDepositionId || null,
       sessionId,
       action: target.allRed ? "UNMARK" : "MARK",
       paragraphId: target.paragraphId,
@@ -505,6 +564,33 @@ export default function LiveCaptureScreen({
           Back to Workspace
         </button>
       </header>
+      {choices.length > 1 && (
+        <section className="live-capture-card" role="alert">
+          <h2>More than one recording is running</h2>
+          <p>
+            Pick the one this screen should follow. The others keep recording
+            and can be picked up in another window.
+          </p>
+          <ul className="live-recoverable">
+            {choices.map((item) => (
+              <li key={item.sessionId}>
+                <span>
+                  {item.label || item.sessionId} · started{" "}
+                  {new Date(item.startedAt).toLocaleTimeString()}
+                </span>
+                <button type="button" className="secondary-button" onClick={() => reattach(item)}>
+                  Follow this recording
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {orphaned && (
+        <p className="analysis-error" role="alert">
+          {orphaned}
+        </p>
+      )}
       <section className="live-capture-card">
         <h2>Local recording preflight</h2>
         <p>
@@ -798,7 +884,7 @@ export default function LiveCaptureScreen({
                             controls
                             preload="none"
                             crossOrigin="anonymous"
-                            src={`${API}/api/live-capture/channel-audio?depositionId=${encodeURIComponent(openDepositionId)}&sessionId=${encodeURIComponent(session.sessionId)}&channelId=${encodeURIComponent(hit.channelId)}#t=${hit.playFromSeconds}`}
+                            src={`${API}/api/live-capture/channel-audio?depositionId=${encodeURIComponent(captureDepositionId)}&sessionId=${encodeURIComponent(session.sessionId)}&channelId=${encodeURIComponent(hit.channelId)}#t=${hit.playFromSeconds}`}
                           />
                         ) : (
                           <span>

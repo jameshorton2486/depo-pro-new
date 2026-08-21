@@ -9,7 +9,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
-import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, getCaptureSession, listCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
+import {assignCaptureSession,createCaptureSession,enumerateWindowsAudioSources,getCaptureSession,listCaptureSessions,recoverableCaptureSessions,registerCaptureAudio,renameCaptureSession,startCaptureSession,stopCaptureSession} from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
@@ -150,6 +150,7 @@ const server = http.createServer(async (req,res) => {
     if (req.url?.startsWith("/api/correction/pass?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,readCorrectionPass(root,{depositionId:url.searchParams.get("depositionId"),passId:url.searchParams.get("passId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/read-back" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await readBackSearch(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/channel-audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=await readBackChannelFile(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),channelId:url.searchParams.get("channelId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
+    if (req.url === "/api/live-capture/recoverable" && req.method === "GET") return json(res,200,recoverableCaptureSessions(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/live-capture/sessions" && req.method === "GET") return json(res,200,{sessions:listCaptureSessions()},origin);
     if (req.url === "/api/live-capture/rename" && req.method === "POST") { const input=await body(req,8*1024); return json(res,200,renameCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/assign" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await assignCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
