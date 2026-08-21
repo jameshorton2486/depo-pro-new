@@ -147,22 +147,14 @@ test("no word is lost or duplicated by paragraph regrouping", () => {
   assert.equal(new Set(paragraphs().flatMap(paragraph => paragraph.wordIds)).size, fromEvents.length, "no id appears twice");
 });
 
-test("Deepgram's original word text is retained whatever is displayed", () => {
-  // The index has to keep pointing at what the audio says. rawText is that; text is what the screen
-  // shows and what a reporter may edit over.
-  for (const paragraph of paragraphs()) {
-    for (const word of paragraph.words) assert.equal(word.rawText, word.text, "unedited, the two agree");
-    assert.ok(paragraph.words.every(word => typeof word.rawText === "string" && word.rawText));
-  }
-});
-
-test("a red mark stays on the word when the text under it is edited", () => {
-  // Anchoring is by word id, so an edit changes what the word says and not which word is marked.
-  const { target, annotations } = marked(2);
-  const markedIds = target.wordIds.slice(1, 3);
-  const edited = { ...target, words: target.words.map(word => markedIds.includes(word.id) ? { ...word, text: "EDITED" } : word) };
-  for (const id of markedIds) assert.ok(isRed(annotations, id), "the mark did not move or vanish");
-  assert.deepEqual(edited.words.filter(word => markedIds.includes(word.id)).map(word => word.rawText),
-    target.words.filter(word => markedIds.includes(word.id)).map(word => word.text),
-    "and Deepgram's original survives the edit");
+test("the words on screen are Deepgram's, unchanged", () => {
+  // The live text is an index into the audio, so it has to keep saying what the audio said. It is
+  // read-only on screen and nothing in this path rewrites a finalized word.
+  const displayed = paragraphs().flatMap(paragraph => paragraph.words.map(word => word.text));
+  const heard = FIXTURE.flatMap(item => item.words.map(word => word.punctuatedWord));
+  assert.deepEqual(displayed, heard);
+  // No shadow copy of the text. One existed to survive reporter edits; there are no edits, and a
+  // second version of a word is a second thing that can disagree with the audio.
+  for (const paragraph of paragraphs())
+    for (const word of paragraph.words) assert.equal("rawText" in word, false);
 });

@@ -542,8 +542,6 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .live-stamp { font-variant-numeric: tabular-nums; font-size: 0.78rem; opacity: 0.55; font-weight: 400; }
 .live-voice { font-size: 0.82rem; letter-spacing: 0.02em; }
 .live-red { color: #c00000; }
-.live-turn p[contenteditable] { outline: none; }
-.live-turn p[contenteditable]:focus-visible { outline: 1px solid rgba(120, 120, 120, 0.4); outline-offset: 2px; }
 /* Floating, so it sits by the words the reporter just highlighted rather than in a toolbar they
    have to travel to. Fixed positioning keeps it put while the transcript scrolls underneath. */
 .live-mark-button { position: fixed; transform: translate(-50%, -100%); z-index: 20;

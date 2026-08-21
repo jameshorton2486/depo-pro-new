@@ -63,10 +63,9 @@ function speakerRuns(events = []) {
     words.forEach((word, index) => {
       const speaker = Number.isInteger(word.speaker) ? word.speaker : null;
       const text = String(word.punctuatedWord ?? word.word ?? "").trim();
-      // `rawText` is what Deepgram heard and is never written over. A reporter may edit what the
-      // screen shows; the index into the audio has to keep pointing at what the audio says, which
-      // is the one job the live text has. Same principle as rawSpeaker.
-      const carried = { id: `${event.id}:w${index}`, text, rawText: text, rawSpeaker: speaker,
+      // Every word carries an id because a red mark hangs on one. The id is `${eventId}:w${index}`
+      // and finalized events are append-only, so the anchor cannot move as the transcript grows.
+      const carried = { id: `${event.id}:w${index}`, text,
         start: word.start ?? null, end: word.end ?? null,
         sessionStart: at(word.start), sessionEnd: at(word.end),
         confidence: Number.isFinite(word.confidence) ? word.confidence : null };

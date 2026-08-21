@@ -14,12 +14,22 @@
 // annotation attached to it would anchor to words Deepgram is about to withdraw.
 //
 // Pure: no DOM, no state, no storage. The caller holds the list.
+//
+// Marks ARE persisted, by the server, as an append-only log of MARK and UNMARK runs beside the
+// event log. `removeRed` narrows an annotation rather than dropping it, which a log of finished
+// annotations cannot express, so the file holds what the reporter did and the current list is a
+// fold of it through these functions. A mark lost to a reload during an eight-hour deposition is
+// worse than no mark, because the reporter believes it is there.
 
 export const ANNOTATION_TYPE = "TEXT_COLOR";
 export const RED = "RED";
 
 let counter = 0;
-/** Ids are unique within a session; annotations are never persisted across one. */
+/**
+ * Fallback only. Persisted marks carry an id assigned by the server when the line was appended, and
+ * the fold passes it back in. This counter resets whenever the module is loaded, so an id it
+ * produces is unique within one process and nowhere else -- never write one to the log.
+ */
 const nextId = () => `annotation-${++counter}`;
 
 /**
@@ -36,7 +46,7 @@ export function markRed(annotations = [], options = {}) {
   const fresh = wordIds.filter(id => id && !isRed(annotations, id));
   if (!paragraphId || !fresh.length) return annotations;
   return [...annotations, {
-    annotationId: nextId(),
+    annotationId: options.annotationId ?? nextId(),
     paragraphId,
     startWordId: fresh[0],
     endWordId: fresh.at(-1),
@@ -81,6 +91,11 @@ export function redWordIds(annotations = []) {
  * Not expected to fire: finalized events are append-only, so a marked word does not vanish. It
  * exists so that if one ever does, the annotation goes with it rather than surviving as a mark on
  * nothing.
+ *
+ * NEVER call this with the word ids of the rendered paragraphs. The screen shows a tail of the
+ * event log, so by mid-morning most marked words are outside it, and pruning against the tail
+ * would delete every mark older than the window -- silently, and while looking like housekeeping.
+ * The only defensible argument is the full set of words in the log.
  */
 export function pruneAnnotations(annotations = [], liveWordIds) {
   const present = liveWordIds instanceof Set ? liveWordIds : new Set(liveWordIds ?? []);

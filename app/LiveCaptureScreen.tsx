@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { groupLiveEvents, paragraphTimestamp } from "./live-paragraphs.mjs";
-import { markRed, redWordIds, removeRed } from "./live-annotations.mjs";
+import { redWordIds } from "./live-annotations.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 type Device = { id: string; name: string; kind: "input" | "loopback" };
 type Health = {
@@ -53,7 +53,7 @@ const isRunning = (session: Session | null) =>
 // it never writes the working transcript. Surfaced here so the screen can state it rather than
 // leaving a reporter to assume the text on screen is the record.
 type LiveChannel = { id: string; role: string; connectionState: string };
-type LiveWord = { id: string; text: string; rawText: string };
+type LiveWord = { id: string; text: string };
 type Annotation = { annotationId: string; paragraphId: string; wordIds: string[]; value: string };
 type MarkTarget = { paragraphId: string | null; wordIds: string[]; allRed: boolean; x: number; y: number };
 type Hit = {
@@ -82,6 +82,11 @@ type Live = {
   finalizedEvents: LiveEvent[];
   interimByChannel?: Record<string, LiveEvent>;
   errors: { message?: string }[];
+  // The reporter's red marks come back with every poll, whole rather than tailed. A reload restores
+  // from this; there is no second request and no separate restore path to get wrong.
+  annotations?: Annotation[];
+  annotationLogLength?: number;
+  unreadableLines?: number;
 };
 type Unassigned = {
   sessionId: string;
@@ -398,10 +403,23 @@ export default function LiveCaptureScreen({
           }),
         );
       });
-  // Red marks live in React state, not the DOM, so they survive every rerender the live stream
-  // causes. Anchored to word ids: an edit changes the text under a mark, never which word it is on.
+  // Red marks are the server's, not the screen's. Every poll brings the current set, so a reload
+  // in the middle of the day comes back with the morning's marks still on the words they were made
+  // on. State here is a copy of that, kept so a mark appears the moment its write returns rather
+  // than up to a second later on the next poll.
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [marker, setMarker] = useState<MarkTarget | null>(null);
+  // The log only grows, so its length orders two answers about the same marks. A poll that left
+  // before a mark was appended arrives after the write's own reply and would otherwise take the
+  // red back off for a tick.
+  const annotationsApplied = useRef(-1);
+  const applyAnnotations = useCallback((payload: { annotations?: Annotation[]; annotationLogLength?: number } | null) => {
+    const length = payload?.annotationLogLength ?? -1;
+    if (length < annotationsApplied.current) return;
+    annotationsApplied.current = length;
+    setAnnotations(payload?.annotations ?? []);
+  }, []);
+  useEffect(() => { applyAnnotations(live); }, [live, applyAnnotations]);
   const paragraphs = useMemo(() => groupLiveEvents(live?.finalizedEvents ?? []), [live?.finalizedEvents]);
   const red = useMemo(() => redWordIds(annotations), [annotations]);
 
@@ -439,16 +457,28 @@ export default function LiveCaptureScreen({
     return () => document.removeEventListener("selectionchange", update);
   }, [readSelection]);
 
-  const applyRed = useCallback(() => {
+  // A plain handler: it is the click, nothing memoises it, and it has to see the current post().
+  const applyRed = () => {
     if (!marker) return;
-    setAnnotations((current) =>
-      marker.allRed
-        ? removeRed(current, { wordIds: marker.wordIds })
-        : markRed(current, { paragraphId: marker.paragraphId ?? "", wordIds: marker.wordIds, createdAt: new Date().toISOString() }),
-    );
+    const target = marker;
     window.getSelection()?.removeAllRanges();
     setMarker(null);
-  }, [marker]);
+    // The word turns red on the way back from the write, never on the way in. Optimistic red that
+    // reverts is the one state a reporter must not be left in -- they stop holding the passage in
+    // their head on the strength of a mark that was never stored. On localhost the wait is a few
+    // milliseconds, so nothing is traded for it.
+    post("/api/live-capture/annotation", {
+      depositionId: openDepositionId || null,
+      sessionId,
+      action: target.allRed ? "UNMARK" : "MARK",
+      paragraphId: target.paragraphId,
+      wordIds: target.wordIds,
+    })
+      .then(applyAnnotations)
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : "The mark was not saved."),
+      );
+  };
 
   const recording = running,
     tested = preflight?.state === "TEST_CAPTURED",
@@ -886,9 +916,9 @@ export default function LiveCaptureScreen({
                       <span className="live-stamp">[{paragraphTimestamp(paragraph)}]</span>
                       {paragraph.voice && <span className="live-voice">{paragraph.voice}</span>}
                     </h4>
-                    {/* Editable, and every word is a span so a selection resolves to word ids.
-                        rawText keeps what Deepgram heard whatever the reporter types over it. */}
-                    <p contentEditable suppressContentEditableWarning spellCheck={false}>
+                    {/* Read-only. Every word is a span so a selection resolves to word ids, which
+                        is what a red mark anchors to. */}
+                    <p>
                       {paragraph.words.length
                         ? paragraph.words.map((word) => (
                             <span key={word.id} data-word-id={word.id} className={red.has(word.id) ? "live-red" : undefined}>{word.text} </span>
@@ -934,6 +964,13 @@ export default function LiveCaptureScreen({
               )}
             </>
           )}
+          {live?.unreadableLines ? (
+            <p className="analysis-error" role="alert">
+              {live.unreadableLines} saved mark
+              {live.unreadableLines === 1 ? "" : "s"} could not be read back. The
+              marks shown are the ones that could — treat the set as incomplete.
+            </p>
+          ) : null}
           {live?.errors?.length ? (
             <p className="analysis-error" role="alert">
               Deepgram reported {live.errors.length} error

@@ -11,7 +11,7 @@ import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, getCaptureSession, listCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
-import { getDeepgramLive, startDeepgramLive, stopDeepgramLive } from "./deepgram-live.mjs";
+import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
 import { listCorrectionPasses, readCorrectionPass, runEntityPass } from "./entity-pass.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
@@ -140,6 +140,7 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); if(input.preflightId){const session=getCaptureSession(root,{depositionId:input.depositionId,sessionId:input.sessionId,storageRoot:depositionStorageRoot});assertArmed(root,{depositionId:input.depositionId,preflightId:input.preflightId,sources:session.sources,storageRoot:depositionStorageRoot});}return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/deepgram/start" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();return json(res,200,startDeepgramLive(root,{...input,apiKey:config?.deepgramApiKey,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/deepgram/stop" && req.method === "POST") { const input=await body(req,64*1024);return json(res,200,await stopDeepgramLive(root,input),origin); }
+    if (req.url === "/api/live-capture/annotation" && req.method === "POST") { const input=await body(req,64*1024); return json(res,201,recordLiveAnnotation(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/deepgram?") && req.method === "GET") { const url=new URL(req.url,"http://localhost");return json(res,200,getDeepgramLive(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
