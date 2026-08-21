@@ -48,9 +48,34 @@ function validateCredentials(input, findings) {
   }
 }
 
+// How the deposition was conducted is a fact about the deposition, not about each attorney --
+// ADR-0020, grounded in three certified specimens that state it once in the page-1 preamble and
+// list every attorney plainly. This replaced a per-attorney APPEARANCE_METHOD_MISSING that
+// blocked counsel who had appeared, on a field the certified record does not render.
+//
+// Blocking, and deliberately so. The preamble cannot be written without knowing whether testimony
+// was taken in person or by remote platform, and a certificate that guesses is worse than one
+// that is refused. It fails where the fact is missing rather than where it is finally needed.
+function validateDepositionMethod(input, findings) {
+  const remote = input.deposition?.remote;
+  const platform = input.deposition?.proceedingLocation?.platform;
+  const physical = input.deposition?.proceedingLocation?.physicalAddress;
+  if (remote === null || remote === undefined) {
+    findings.push(blocking("DEPOSITION_METHOD_MISSING", "deposition.remote",
+      "The record does not say whether this deposition was taken in person or remotely, and the page-1 preamble states that for every participant."));
+    return;
+  }
+  if (remote === true && !platform) {
+    findings.push(blocking("DEPOSITION_METHOD_MISSING", "deposition.remotePlatform",
+      "The deposition is recorded as remote, but no platform is named. The preamble reads \"via <platform>\"."));
+  }
+  if (remote === false && !physical) {
+    findings.push(blocking("DEPOSITION_METHOD_MISSING", "deposition.location",
+      "The deposition is recorded as in person, but no location is recorded. The preamble names where testimony was taken."));
+  }
+}
+
 function validateCounsel(input, findings) {
-  const missingMethods = input.appearances.filter((attorney) => !attorney.participation?.method).map((attorney) => attorney.name);
-  if (missingMethods.length) findings.push(blocking("APPEARANCE_METHOD_MISSING", "appearances.participation.method", `Participation method is missing for: ${missingMethods.join(", ")}.`, { details: { names: missingMethods } }));
   const appearing = new Set(input.appearances.map((attorney) => normalizedName(attorney.name)));
   const missing = input.counselReconciliation.expectedNames.filter((name) => !appearing.has(normalizedName(name)));
   if (missing.length && !input.counselReconciliation.appearingCounselPhrasingDecision?.reason) {
@@ -107,6 +132,7 @@ export function validateInsertionInput(input) {
   const findings = [];
   validateVariant(input, findings);
   validateCredentials(input, findings);
+  validateDepositionMethod(input, findings);
   validateCounsel(input, findings);
   validateIndex(input, findings);
   if ((input.deposition?.volumeCount ?? 1) > 1) findings.push(blocking("MULTI_VOLUME_UNSUPPORTED", "deposition.volumeCount", `This renderer supports one volume; received ${input.deposition.volumeCount}.`));

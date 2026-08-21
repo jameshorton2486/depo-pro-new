@@ -45,14 +45,18 @@ export function voiceLabel(speaker) {
 function speakerRuns(events = []) {
   const runs = [];
   for (const event of events) {
+    // Stream time plus the offset recorded when that stream opened, so a reconnection continues the
+    // clock instead of restarting it. See normalizedEvent in server/deepgram-live.mjs.
+    const offset = Number.isFinite(event.sessionOffsetSeconds) ? event.sessionOffsetSeconds : 0;
+    const at = value => (Number.isFinite(value) ? value + offset : null);
     const words = (event.words ?? []).filter(word => String(word.punctuatedWord ?? word.word ?? "").trim());
     // No word detail: the event is the smallest unit available, and its voice is unknown rather
     // than assumed from a neighbour.
     if (!words.length) {
       const text = String(event.transcript ?? "").trim();
       if (text) runs.push({ id: event.id, channelId: event.channelId ?? null, speaker: null, text,
-        start: Number.isFinite(event.start) ? event.start : null,
-        end: Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : (Number.isFinite(event.start) ? event.start : null) });
+        start: at(event.start),
+        end: at(Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : event.start) });
       continue;
     }
     let current = null;
@@ -61,16 +65,16 @@ function speakerRuns(events = []) {
       const text = String(word.punctuatedWord ?? word.word ?? "").trim();
       if (current && current.speaker === speaker) {
         current.text = `${current.text} ${text}`;
-        if (Number.isFinite(word.end)) current.end = word.end;
+        if (Number.isFinite(word.end)) current.end = at(word.end);
         return;
       }
       if (current) runs.push(current);
       current = { id: `${event.id}:${index}`, channelId: event.channelId ?? null, speaker, text,
-        start: Number.isFinite(word.start) ? word.start : (Number.isFinite(event.start) ? event.start : null),
-        end: Number.isFinite(word.end) ? word.end : null };
+        start: at(Number.isFinite(word.start) ? word.start : event.start),
+        end: at(word.end) };
     });
     if (current) {
-      const eventEnd = Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : null;
+      const eventEnd = at(Number.isFinite(event.start) && Number.isFinite(event.duration) ? event.start + event.duration : null);
       if (!Number.isFinite(current.end) && eventEnd !== null) current.end = eventEnd;
       runs.push(current);
     }
@@ -119,4 +123,17 @@ export function streamClock(seconds) {
   if (!Number.isFinite(seconds)) return "--:--";
   const total = Math.max(0, Math.floor(seconds));
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * HH:MM:SS for continuous session time, so a reporter can find the moment in the recording.
+ *
+ * One width whether the reading is under an hour or over it, because a column of stamps is scanned
+ * rather than read. The value already includes the reconnection offset, so it does not restart.
+ */
+export function sessionClock(seconds) {
+  if (!Number.isFinite(seconds)) return "--:--:--";
+  const total = Math.max(0, Math.floor(seconds));
+  return [Math.floor(total / 3600), Math.floor(total / 60) % 60, total % 60]
+    .map(part => String(part).padStart(2, "0")).join(":");
 }

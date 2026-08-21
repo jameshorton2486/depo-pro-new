@@ -1,5 +1,5 @@
 export type IntakeAttorney = {
-  name:string; firm?:string; represents?:string; email?:string; phone?:string;
+  name:string; firm?:string; represents?:string[]; email?:string; phone?:string;
   barNumber?:string; address?:string; appearanceRole?:string; honorific?:string|null;
 };
 

@@ -219,3 +219,23 @@ test("events survive a crash with no clean stop",async()=>{
     assert.deepEqual(recovered.finalizedEvents.map(e=>e.words[0].speaker),Array.from({length:12},(_,n)=>n%2),"with their diarization intact");
   }finally{fs.rmSync(value.root,{recursive:true,force:true})}
 });
+
+test("a finalized event carries the offset of the stream it arrived on",async()=>{
+  // Without this the clock is only correct because a fixture said so. The offset has to be stamped
+  // by the server at connect time, from the channel's first open, or a reconnected stream hands the
+  // screen a time that restarts at zero.
+  const value=recordingFixture(),{Socket,spawnProcess,handlers}=fakes();
+  try{
+    startDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot,apiKey:"k",WebSocketClass:Socket,spawnProcess});
+    handlers.open();
+    handlers.message(JSON.stringify({type:"Results",is_final:true,start:3,duration:1,
+      channel:{alternatives:[{transcript:"After reconnect",words:[{word:"After",punctuated_word:"After",start:3,end:3.4,speaker:1,confidence:0.9}]}]}}));
+    const record=getDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot});
+    const [event]=record.finalizedEvents;
+    assert.ok(event,"a finalized event is recorded");
+    assert.equal(typeof event.sessionOffsetSeconds,"number","every event carries the offset of its stream");
+    assert.equal(event.sessionOffsetSeconds,record.channels[0].sessionOffsetSeconds,"and it is the offset the server stamped for that channel");
+    assert.equal(event.start,3,"Deepgram's own stream time is never overwritten");
+    assert.ok(record.channels[0].streamOriginAt,"the channel records when its clock started");
+  }finally{await stopDeepgramLive(null,{sessionId:value.sessionId}).catch(()=>{});fs.rmSync(value.root,{recursive:true,force:true})}
+});

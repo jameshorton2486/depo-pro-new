@@ -130,7 +130,11 @@ test("reporter-typed counsel is never recorded as having come off the Notice",()
 
 test("counsel that did come off the Notice still says so",()=>{
   // The other half: narrowing the typed path must not relabel extraction.
-  const record=createCanonicalDepositionRecord({ attorneys:[{ name:"Dennis J. Bentley", firm:"F", represents:"Plaintiff" }] });
+  //
+  // noticeSupplied is now explicit. It used to be assumed, which is how a deposition created with
+  // no Notice still produced a record claiming one -- so saying "this came off the Notice" is now
+  // something the caller states rather than something the builder presumes.
+  const record=createCanonicalDepositionRecord({ attorneys:[{ name:"Dennis J. Bentley", firm:"F", represents:"Plaintiff" }] },{ noticeSupplied:true });
   assert.equal(record.counsel[0].fullName.source,"NOD_EXTRACTED");
   assert.equal(record.counsel[0].fullName.state,"EXTRACTED");
   assert.equal(counselEntry({ name:"X" },0).fullName.source,"NOD_EXTRACTED");

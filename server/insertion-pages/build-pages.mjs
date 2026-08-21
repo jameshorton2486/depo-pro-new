@@ -25,12 +25,20 @@ function appearanceLines(input) {
   for (const attorney of input.appearances) {
     lines.push(`FOR ${Array.isArray(attorney.representing) ? attorney.representing.join(", ") : attorney.representing}:`);
     lines.push(`${attorney.name}${methodLabel(attorney.participation.method, attorney.participation.detail)}`);
-    lines.push(attorney.firm ?? "");
-    lines.push(attorney.address ?? "");
+    // Omitted, not blanked. The specimens carry no empty lines where a field is absent -- Nunez
+    // prints with no phone and no email at all, rather than with labels holding nothing.
+    if (attorney.firm) lines.push(attorney.firm);
+    if (attorney.address) lines.push(attorney.address);
     if (attorney.phone) lines.push(`Phone: ${attorney.phone}`);
   }
+  // ALSO PRESENT prints whether or not anyone was. All three certified specimens carry the block
+  // and a videographer line; Thomas renders "THE VIDEOGRAPHER:  NONE". Suppressing the block when
+  // empty would leave a reader unable to tell "no videographer" from "not recorded".
+  const videographers = input.record.participants?.videographers ?? [];
   const others = input.record.participants?.otherAttendees ?? [];
-  if (others.length) lines.push("ALSO PRESENT:", ...others.map((person) => value(person.name) ?? String(person)));
+  lines.push("ALSO PRESENT:");
+  lines.push(`THE VIDEOGRAPHER:  ${videographers.map((person) => value(person.fullName) ?? value(person.name) ?? String(person)).join(", ") || "NONE"}`);
+  lines.push(...others.map((person) => value(person.name) ?? String(person)));
   return lines;
 }
 
