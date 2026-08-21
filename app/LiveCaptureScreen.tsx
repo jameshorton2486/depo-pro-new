@@ -83,6 +83,9 @@ type Unassigned = {
   sessionId: string;
   label: string | null;
   state: string;
+  // Whether this application instance is the one recording it. See listCaptureSessions: state
+  // alone cannot tell a live capture from one whose instance died mid-recording.
+  running: boolean;
   createdAt: string;
   assignedDepositionId: string | null;
   channels: { id: string; role: string; state: string; bytes: number | null }[];
@@ -341,6 +344,14 @@ export default function LiveCaptureScreen({
           depositionId: assignTo,
         });
         setHandoff("Recording attached. It is now this deposition's audio.");
+        refreshSessions();
+      }),
+    recover = (sessionId: string) =>
+      act(async () => {
+        await post("/api/live-capture/recover", { sessionId });
+        setHandoff(
+          "Recording finalized and hashed. It is marked degraded because the capture was interrupted and the moment it ended was not observed.",
+        );
         refreshSessions();
       }),
     startRecording = () =>
@@ -772,7 +783,9 @@ export default function LiveCaptureScreen({
         )}
         {!recording &&
           unassigned.filter(
-            (item) => !item.assignedDepositionId && item.state !== "RECORDING",
+            (item) =>
+              !item.assignedDepositionId &&
+              !(item.state === "RECORDING" && item.running),
           ).length > 0 && (
             <div className="unassigned-sessions">
               <h3>Recordings not yet attached to a case</h3>
@@ -796,30 +809,53 @@ export default function LiveCaptureScreen({
                 {unassigned
                   .filter(
                     (item) =>
-                      !item.assignedDepositionId && item.state !== "RECORDING",
+                      // A session reading RECORDING is hidden only while this instance is the one
+                      // recording it -- that capture belongs to the screen above, not to a list of
+                      // finished work. One that reads RECORDING with nothing running is an
+                      // interrupted capture, and hiding it was how a real recording became
+                      // invisible: unfinalizable, unattachable, and absent from the only screen
+                      // that would have shown the reporter it existed.
+                      !item.assignedDepositionId &&
+                      !(item.state === "RECORDING" && item.running),
                   )
-                  .map((item) => (
-                    <li key={item.sessionId}>
-                      <strong>{item.label ?? item.sessionId}</strong>
-                      <span>
-                        {new Date(item.createdAt).toLocaleString()} ·{" "}
-                        {
-                          item.channels.filter(
-                            (channel) => channel.state === "FINALIZED",
-                          ).length
-                        }{" "}
-                        channel(s)
-                      </span>
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={busy || !assignTo}
-                        onClick={() => void assign(item.sessionId)}
-                      >
-                        Attach to this deposition
-                      </button>
-                    </li>
-                  ))}
+                  .map((item) => {
+                    const interrupted =
+                      item.state === "RECORDING" && !item.running;
+                    return (
+                      <li key={item.sessionId}>
+                        <strong>{item.label ?? item.sessionId}</strong>
+                        <span>
+                          {new Date(item.createdAt).toLocaleString()} ·{" "}
+                          {interrupted
+                            ? "interrupted before it was finalized"
+                            : `${
+                                item.channels.filter(
+                                  (channel) => channel.state === "FINALIZED",
+                                ).length
+                              } channel(s)`}
+                        </span>
+                        {interrupted ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void recover(item.sessionId)}
+                          >
+                            Finalize this recording
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy || !assignTo}
+                            onClick={() => void assign(item.sessionId)}
+                          >
+                            Attach to this deposition
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           )}
