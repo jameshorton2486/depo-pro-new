@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {spawn,spawnSync} from "node:child_process";
-import {appendDepositionAudio,depositionDirectory} from "./deposition-store.mjs";
+import {appendDepositionAudio,depositionDirectories,depositionDirectory} from "./deposition-store.mjs";
 import {captureSessionRoot} from "./storage-config.mjs";
 
 export const LIVE_CAPTURE_SCHEMA_VERSION="1.0.0";
@@ -173,6 +173,54 @@ export async function assignCaptureSession(root,{sessionId,depositionId,storageR
 }
 
 /** Every recording not yet attached to a deposition, newest first. */
+/* A session is still going if its manifest says so and nothing wrote the ending. Same rule the
+   screen uses, deliberately: a stopped session is DEGRADED when a channel failed, so the state
+   alone cannot tell a running recording from a finished one that lost a device. */
+const stillOpen=session=>(session.state==="RECORDING"||session.state==="DEGRADED")&&!(session.events??[]).some(event=>event.type==="LOCAL_RECORDING_STOPPED");
+function openManifests(root,storageRoot){
+  const found=[],roots=[captureSessionRoot()];
+  /* Recordings started with a deposition open live inside it, not in the session root, so a scan of
+     one place would miss half of them -- including, always, the ones attached to real work. */
+  try{for(const deposition of depositionDirectories(root,{storageRoot}))roots.push(path.join(deposition,"live-capture"))}catch{/* no storage root yet */}
+  for(const directory of roots){
+    if(!fs.existsSync(directory))continue;
+    for(const item of fs.readdirSync(directory,{withFileTypes:true})){
+      if(!item.isDirectory())continue;
+      try{
+        const session=JSON.parse(fs.readFileSync(path.join(directory,item.name,"capture-session.json"),"utf8"));
+        if(stillOpen(session))found.push(session);
+      }catch{continue}
+    }
+  }
+  return found;
+}
+/**
+ * What can still be stopped, and what can no longer be.
+ *
+ * A reporter who reloads the page mid-deposition loses every bit of client state, and the recording
+ * does not care -- ffmpeg keeps writing. Without this the session is unreachable: no stop, no hash,
+ * no attach, and the audio the whole application exists to produce cannot be closed out. The server
+ * already knows which sessions it is running, so this is a question, not new state to keep in sync.
+ *
+ * RECOVERABLE comes from the runtime map and nothing else. A manifest saying RECORDING is not
+ * evidence that anything is recording -- it is evidence that nobody wrote the ending, which is also
+ * what an unclean shutdown leaves behind. Reattaching to one of those would show a live screen for
+ * a recording that stopped hours ago.
+ *
+ * ORPHANED is that second case, reported rather than repaired. stopCaptureSession needs the runtime
+ * to finalize and hash, so a session left open by an earlier run cannot be closed here at all, and
+ * registering or attaching it is refused while its manifest says RECORDING. Saying so is the least
+ * that can be done: the alternative is a reporter believing the recording was put away.
+ */
+export function recoverableCaptureSessions(root,{storageRoot}={}){
+  const describe=session=>({sessionId:session.sessionId,depositionId:session.depositionId??null,
+    label:session.label??null,state:session.state,startedAt:session.createdAt,
+    channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state}))});
+  const recoverable=[...active.values()].map(runtime=>describe(runtime.session));
+  const running=new Set(recoverable.map(item=>item.sessionId));
+  const orphaned=openManifests(root,storageRoot).filter(session=>!running.has(session.sessionId)).map(describe);
+  return {recoverable,orphaned};
+}
 export function listCaptureSessions(){
   const directory=captureSessionRoot();
   if(!fs.existsSync(directory))return [];

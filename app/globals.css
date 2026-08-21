@@ -550,3 +550,11 @@ dd { margin:0; font-size:13px; font-weight:650; }
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); cursor: pointer; }
 .live-mark-swatch { width: 14px; height: 14px; border-radius: 3px; background: #c00000; }
 .live-mark-swatch.normal { background: linear-gradient(135deg, #c00000 46%, #1a1a1a 46%); }
+
+/* The list shown when more than one recording is running: one line each, and the action beside it.
+   Deliberately plain -- it appears when something has already gone sideways, and the reporter needs
+   to read it, not admire it. */
+.live-recoverable { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.live-recoverable li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid #b9c7dd; border-radius: 8px; }
+.live-recoverable span { font-size: 13px; }
