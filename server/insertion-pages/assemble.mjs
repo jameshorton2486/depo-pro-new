@@ -23,6 +23,8 @@ function attorneyFromCanonical(attorney) {
   };
 }
 
+const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, reason:String(reason).trim() } : null);
+
 function reporterFromCanonical(reporter = {}, override = {}) {
   return {
     name: override.name ?? canonicalValue(reporter.fullName),
@@ -32,7 +34,10 @@ function reporterFromCanonical(reporter = {}, override = {}) {
     phone: override.phone ?? canonicalValue(reporter.phone),
     firmName: override.firmName ?? canonicalValue(reporter.firm),
     firmRegistrationNumber: override.firmRegistrationNumber ?? canonicalValue(reporter.firmRegistrationNumber),
-    firmRegistration: override.firmRegistration ?? null,
+    // A recorded waiver reason satisfies the certificate requirement the same way a registration
+    // number does. The reason travels so a reader can see what the omission rests on, rather than
+    // finding a field that is simply empty.
+    firmRegistration: override.firmRegistration ?? waiverFrom(canonicalValue(reporter.firmRegistrationWaiver)),
   };
 }
 

@@ -2,7 +2,18 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-const REPORTER_FIELDS = ["name", "company", "email", "phone", "licenseNumber", "taxId", "address"];
+// firmRegistrationWaiver is the reason a firm registration number does not apply to this reporter,
+// and its presence IS the waiver -- there is no separate applicable flag, so the record cannot hold
+// "not applicable" with nothing to say why, which is the state a certificate could not defend.
+//
+// It is a fact about the reporter, not about any deposition, so it applies to everything she
+// certifies. Miah Bardot certifies under an individual Texas CSR: three certified transcripts,
+// both jurisdictions, six signature blocks, and not one prints a firm registration number.
+//
+// No firmRegistrationNumber field here on purpose. No certified document in the library carries
+// one. The validator's number branch stays intact for a firm-employed reporter; it needs no store
+// field until such a reporter exists.
+const REPORTER_FIELDS = ["name", "company", "email", "phone", "licenseNumber", "taxId", "address", "firmRegistrationWaiver"];
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 function storeFile(storageRoot) {
