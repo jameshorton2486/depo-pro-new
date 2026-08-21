@@ -28,3 +28,11 @@ export function allowedApiOrigins(environment = process.env) {
     throw new Error(`PORT is "${raw}", which is not a port number, so the local API cannot tell which origin to trust.`);
   return new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
 }
+
+export function localApiPort(environment = process.env) {
+  const raw = environment.LOCAL_API_PORT;
+  const port = raw === undefined || raw === "" ? 4317 : Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error(`LOCAL_API_PORT is "${raw}", which is not a port number.`);
+  return port;
+}

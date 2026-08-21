@@ -105,6 +105,20 @@ type Unassigned = {
   channels: { id: string; role: string; state: string; bytes: number | null }[];
 };
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
+type OpeningScript = {
+  id: string;
+  title: string;
+  classification: string;
+  text: string;
+  missing: string[];
+  completedOnRecord: boolean;
+  applicable: boolean;
+};
+type OpeningProjection = {
+  scripts: OpeningScript[];
+  completeCount: number;
+  totalCount: number;
+};
 export default function LiveCaptureScreen({
   deposition,
   onBack,
@@ -127,6 +141,8 @@ export default function LiveCaptureScreen({
     [unassigned, setUnassigned] = useState<Unassigned[]>([]),
     [library, setLibrary] = useState<LibraryDeposition[]>([]),
     [assignTo, setAssignTo] = useState(""),
+    [opening, setOpening] = useState<OpeningProjection | null>(null),
+    [openingError, setOpeningError] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const running = isRunning(session),
@@ -141,6 +157,29 @@ export default function LiveCaptureScreen({
   const [orphaned, setOrphaned] = useState<string>("");
   const scroller = useRef<HTMLDivElement | null>(null),
     [following, setFollowing] = useState(true);
+  useEffect(() => {
+    let current = true;
+    if (!captureDepositionId) return () => { current = false; };
+    fetch(`${API}/api/opening?depositionId=${encodeURIComponent(captureDepositionId)}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Opening scripts could not be loaded.");
+        return payload as OpeningProjection;
+      })
+      .then((payload) => {
+        if (current) {
+          setOpening(payload);
+          setOpeningError("");
+        }
+      })
+      .catch((reason) => {
+        if (current)
+          setOpeningError(reason instanceof Error ? reason.message : "Opening scripts could not be loaded.");
+      });
+    return () => { current = false; };
+  }, [captureDepositionId]);
   // Newest card, whenever one arrives -- but only while the reporter has not scrolled away.
   useEffect(() => {
     if (following && scroller.current)
@@ -955,6 +994,37 @@ export default function LiveCaptureScreen({
             </div>
           )}
         <div className="deepgram-readiness">
+          {captureDepositionId && (
+            <details className="live-opening-scripts">
+              <summary>
+                <strong>Opening scripts</strong>
+                <span>
+                  {opening
+                    ? `${opening.completeCount}/${opening.totalCount} readiness steps`
+                    : "Read-only reference"}
+                </span>
+              </summary>
+              <p className="live-aid-notice">
+                Read-only during Live Deposition. Opening readiness never blocks or changes local recording.
+              </p>
+              {openingError && <p className="analysis-error" role="alert">{openingError}</p>}
+              <div className="opening-scripts">
+                {opening?.scripts.filter((script) => script.applicable).map((script) => (
+                  <details key={script.id}>
+                    <summary>
+                      <strong>{script.title}</strong>
+                      <span>{script.completedOnRecord ? "Completed on record" : script.missing.length ? "Needs information" : "Ready"}</span>
+                    </summary>
+                    <small>{script.classification}</small>
+                    {script.missing.length > 0 && (
+                      <p className="opening-warning">Missing: {script.missing.join(", ")}</p>
+                    )}
+                    <blockquote>{script.text}</blockquote>
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
           <p>
             Deepgram Live: {live ? live.state.toLowerCase() : "not connected"} ·
             Does not block local recording

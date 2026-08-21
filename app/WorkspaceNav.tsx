@@ -1,6 +1,6 @@
 "use client";
 
-export type NavView = "library" | "intake" | "audio-tools" | "live-capture" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
+export type NavView = "library" | "intake" | "audio-tools" | "live-capture" | "opening" | "workspace" | "preview" | "compare" | "insertion-pages" | "admin";
 
 type Item = {
   view: NavView;
@@ -16,6 +16,7 @@ const GROUPS: Group[] = [
   {
     heading: "Library",
     items: [
+      { view: "opening", label: "Opening", note: "Deposition Opening Procedures", needsDeposition: true },
       { view: "library", label: "Depositions" },
       { view: "intake", label: "New Deposition" },
     ],

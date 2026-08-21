@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
-import {allowedApiOrigins} from "./api-origins.mjs";
+import {allowedApiOrigins,localApiPort} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
@@ -45,6 +45,7 @@ import { depositionStorageRoot as configuredDepositionStorageRoot } from "./stor
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
+import {getOpeningProjection,saveOpeningState} from "./opening-procedures.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -52,7 +53,7 @@ if (fs.existsSync(localEnvironment)) process.loadEnvFile(localEnvironment);
 const depositionStorageRoot = configuredDepositionStorageRoot();
 const terminologyPrompt = fs.readFileSync(path.join(root, "prompts", "extraction", "case_terms", "v2.md"), "utf8");
 const secretFile = path.join(root, "data", "secrets.dat");
-const port = 4317;
+const port = localApiPort();
 const allowedOrigins = allowedApiOrigins();
 
 function dpapi(mode, value) {
@@ -253,6 +254,8 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
     if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/opening?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getOpeningProjection(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url==="/api/opening"&&req.method==="POST"){const input=await body(req,256*1024);saveOpeningState(root,{depositionId:input.depositionId,state:input.state,storageRoot:depositionStorageRoot});return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
       // What the Workspace reads: the projection joined to its evidence, carrying transcript
       // labels and addressable word spans. GET only -- nothing here writes, and the render is

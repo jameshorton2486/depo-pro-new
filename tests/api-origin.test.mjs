@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { allowedApiOrigins } from "../server/api-origins.mjs";
+import { allowedApiOrigins, localApiPort } from "../server/api-origins.mjs";
 
 test("the allowed origins follow the port this tree serves on", () => {
   assert.deepEqual([...allowedApiOrigins({ PORT: "3005" })],
@@ -45,4 +45,18 @@ test("the API asks for the allowlist rather than carrying one", () => {
   const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
   assert.match(source, /allowedApiOrigins\(\)/, "the allowlist is derived");
   assert.doesNotMatch(source, /new Set\(\[\s*"http:\/\/localhost:\d+"/, "and not written out");
+});
+
+test("the local API port has an explicit development override and preserves its default", () => {
+  assert.equal(localApiPort({}), 4317);
+  assert.equal(localApiPort({ LOCAL_API_PORT: "" }), 4317);
+  assert.equal(localApiPort({ LOCAL_API_PORT: "4327" }), 4327);
+  for (const raw of ["abc", "99999", "0", "-1", "43 17"])
+    assert.throws(() => localApiPort({ LOCAL_API_PORT: raw }), /not a port number/);
+});
+
+test("the browser API origin preserves 4317 and permits an explicit Vite override", () => {
+  const source = fs.readFileSync(new URL("../app/api-client.ts", import.meta.url), "utf8");
+  assert.match(source, /VITE_LOCAL_API_ORIGIN/);
+  assert.match(source, /configuredOrigin \|\| "http:\/\/127\.0\.0\.1:4317"/);
 });
