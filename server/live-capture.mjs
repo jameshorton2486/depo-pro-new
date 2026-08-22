@@ -13,6 +13,10 @@ const active=new Map(),SOURCE_ID=/^[a-z][a-z0-9-]{0,63}$/;
 const now=()=>new Date().toISOString();
 function atomicJson(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`,fd=fs.openSync(temp,"wx");try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}fs.renameSync(temp,file)}
 function sha256(file){const hash=crypto.createHash("sha256");return new Promise((resolve,reject)=>{const input=fs.createReadStream(file);input.on("data",chunk=>hash.update(chunk));input.on("error",reject);input.on("end",()=>resolve(hash.digest("hex")))})}
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Absent rather than zero: a file that is not there yet and a file of no length are different
+// answers, and only one of them means a channel never started.
+function fileSize(file){try{return fs.statSync(file).size}catch{return null}}
 function safeDevice(value){const name=String(value??"").trim();if(!name||/[\r\n]/.test(name))throw new Error("A valid Windows audio device is required.");return name}
 function sessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{deposition,directory,manifest:path.join(directory,"capture-session.json")}}
 function readManifest(paths){return JSON.parse(fs.readFileSync(paths.manifest,"utf8"))}
@@ -63,6 +67,55 @@ async function stopChild(item){return await new Promise(resolve=>{let settled=fa
 function probe(file){const result=spawnSync("ffprobe",["-v","error","-select_streams","a:0","-show_entries","stream=sample_rate,channels,bits_per_sample,duration_ts","-of","json",file],{encoding:"utf8",windowsHide:true,timeout:15000});if(result.status!==0)return null;return JSON.parse(result.stdout).streams?.[0]??null}
 export async function stopCaptureSession(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("The local capture process is not active in this application instance.");await Promise.all(runtime.children.map(stopChild));const end=process.hrtime.bigint();for(const source of runtime.session.sources){const file=recordPath(runtime.paths,source),child=runtime.children.find(item=>item.sourceId===source.id),media=fs.existsSync(file)?probe(file):null;source.state=fs.existsSync(file)?"FINALIZED":"FAILED";source.timing.captureEndMonotonicNs=(end-runtime.origin).toString();if(child?.stderr&&/device|buffer|overrun|lost|error/i.test(child.stderr))source.health.errors.push({at:now(),message:child.stderr.slice(-2000)});if(fs.existsSync(file)){source.format.sampleRate=Number(media?.sample_rate)||null;source.format.channels=Number(media?.channels)||null;source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true}}}runtime.session.state=runtime.session.sources.every(source=>source.state==="FINALIZED")?"FINALIZED":"DEGRADED";runtime.session.events.push({type:"LOCAL_RECORDING_STOPPED",at:now()});runtime.session.updatedAt=now();atomicJson(runtime.paths.manifest,runtime.session);active.delete(sessionId);return publicSession(runtime.session)}
 /**
+ * Finalizes a capture whose application instance ended before it was stopped.
+ *
+ * ffmpeg outlives the process that spawned it. When the local API dies mid-recording the audio
+ * keeps arriving, but the handle that stops it is gone with the Map above, so stopCaptureSession
+ * can only report that it is not holding the session. The manifest then stays at RECORDING for
+ * good: unhashed, not finalized, and refused by registerCaptureAudio and assignCaptureSession
+ * alike. The recording exists on disk and cannot be attached to anything.
+ *
+ * This finalizes it from the file instead of from the process. What it will not do is pretend the
+ * stop was seen:
+ *
+ *   - captureEndMonotonicNs stays null. The moment capture ended is not recoverable after the
+ *     fact, and a plausible number here would be a guess written into an evidentiary record.
+ *   - The session lands in DEGRADED, never FINALIZED, so a recovered capture is never mistaken
+ *     for one that was stopped cleanly. DEGRADED already means usable-but-something-went-wrong,
+ *     and both attachment paths already accept it.
+ *   - health is left as it was. The meters live in the dead process's memory and were never
+ *     written, so the stored levels are unobserved rather than measured, and inventing them from
+ *     the file would put a measurement in the record that nothing measured.
+ *
+ * A channel whose file is missing or will not decode is marked FAILED rather than finalized, so a
+ * truncated capture is skipped at attachment instead of carrying a hash of something unplayable.
+ */
+export async function finalizeOrphanedSession(root,{depositionId,sessionId,storageRoot,settleMs=1200,wait=delay}={}){
+  if(active.has(sessionId))throw new Error("This capture is running in this application instance. Stop it from the Live Deposition screen instead.");
+  const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
+  if(session.state!=="RECORDING")throw new Error(`Only an interrupted capture can be recovered. This session is ${session.state}.`);
+  const channels=session.sources.map(source=>({source,file:recordPath(paths,source)}));
+  // Hashing a file something is still writing hashes a moving target, and the hash is the whole
+  // point. Capture is constant-bitrate PCM, so a file that is still being recorded grows every
+  // moment; a size that changes across the settle window means a writer is still attached.
+  const before=channels.map(item=>fileSize(item.file));
+  await wait(settleMs);
+  const growing=channels.filter((item,index)=>fileSize(item.file)!==before[index]);
+  if(growing.length)throw new Error(`Still being recorded: ${growing.map(item=>item.source.id).join(", ")}. End the capture process before recovering this session.`);
+  for(const {source,file} of channels){
+    const media=fs.existsSync(file)?probe(file):null;
+    if(!media){source.state="FAILED";source.health.errors.push({at:now(),message:fs.existsSync(file)?"The recorded file could not be decoded, so it was not finalized.":"The recorded file is missing."});continue}
+    source.format.sampleRate=Number(media.sample_rate)||null;source.format.channels=Number(media.channels)||null;
+    source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true};
+    source.state="FINALIZED";
+  }
+  session.state="DEGRADED";
+  session.events.push({type:"LOCAL_RECORDING_RECOVERED",at:now(),reason:"The application instance that started this capture ended before it was stopped. The channels were finalized and hashed from the files on disk. The moment capture ended was not observed."});
+  session.updatedAt=now();
+  atomicJson(paths.manifest,session);
+  return publicSession(session);
+}
+/**
  * Registers a finished capture session's channels as this deposition's audio.
  *
  * This is the seam between the two halves of the application: the live screen makes the recording,
@@ -78,6 +131,30 @@ export async function stopCaptureSession(_root,{sessionId}={}){const runtime=act
  * into the loss of the record, which is the outcome the per-channel design exists to prevent. What
  * was skipped is returned rather than passed over.
  */
+/**
+ * The capture this application instance is recording right now for a given context, if any.
+ *
+ * The server owns this. A reload, a crash, a closed tab, a different browser and a different
+ * machine all arrive with no local state, and every one of them has to be able to find a recording
+ * that is still running -- which is only possible if the answer comes from the process holding the
+ * ffmpeg handles rather than from something a client stored. A sessionId in localStorage fails on a
+ * cleared cache and cannot help a second machine at all, and it makes the client authoritative over
+ * state it does not own.
+ *
+ * `active` is the source and the manifest on disk is not. A manifest reading RECORDING says a
+ * capture was started; `active` says it is still being written here and can therefore be stopped.
+ * A session on disk that this instance is not holding is orphaned, which is a different condition
+ * with a different remedy -- see finalizeOrphanedSession, which finalizes rather than reattaches.
+ * Confusing the two is how a stray page load could end a live deposition.
+ */
+export function runningCaptureSession(_root,{depositionId=null}={}){
+  const wanted=depositionId||null;
+  for(const runtime of active.values()){
+    if((runtime.session.depositionId??null)!==wanted)continue;
+    return publicSession(runtime.session);
+  }
+  return null;
+}
 export function registerCaptureAudio(root,{depositionId,sessionId,storageRoot}={}){
   const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
   if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before adding it to the deposition.");
@@ -179,7 +256,11 @@ export function listCaptureSessions(){
   return fs.readdirSync(directory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{
     try{
       const session=JSON.parse(fs.readFileSync(path.join(directory,item.name,"capture-session.json"),"utf8"));
-      return {sessionId:session.sessionId,label:session.label,state:session.state,createdAt:session.createdAt,
+      // State comes off the disk and says what the session was doing; running says whether this
+      // instance is the one doing it. A session that reads RECORDING with nothing running is a
+      // capture whose application instance died -- the only way to tell the two apart from
+      // outside, and the difference between "leave it alone" and "this needs finalizing".
+      return {sessionId:session.sessionId,label:session.label,state:session.state,running:active.has(session.sessionId),createdAt:session.createdAt,
         assignedDepositionId:session.assignedDepositionId??null,assignedAt:session.assignedAt??null,
         channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,bytes:source.artifact?.bytes??null}))};
     }catch{return null}

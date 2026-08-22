@@ -83,6 +83,9 @@ type Unassigned = {
   sessionId: string;
   label: string | null;
   state: string;
+  // Whether this application instance is the one recording it. See listCaptureSessions: state
+  // alone cannot tell a live capture from one whose instance died mid-recording.
+  running: boolean;
   createdAt: string;
   assignedDepositionId: string | null;
   channels: { id: string; role: string; state: string; bytes: number | null }[];
@@ -182,18 +185,41 @@ export default function LiveCaptureScreen({
     }, 1000);
     return () => clearInterval(timer);
   }, [openDepositionId, sessionId, liveState]);
+  // A client that mounts with no local state must still find a recording that is running. The
+  // server is asked, because it is the only party that knows: this browser may have just been
+  // reloaded, reopened, or opened on another machine entirely.
+  //
+  // This reattaches and nothing else. It never stops or finalizes the session it finds -- a
+  // recovery path that treated a discovered recording as stale would end a live deposition on a
+  // stray page load.
+  useEffect(() => {
+    let current = true;
+    fetch(`${API}/api/live-capture/running?depositionId=${encodeURIComponent(openDepositionId)}`)
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!current || !payload?.sessionId) return;
+        setSession(payload);
+        setLabel(payload.label ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [openDepositionId]);
   const slots = [
     {
       id: "local-microphone",
       role: "LOCAL_MICROPHONE",
-      value: mic,
+      // While a session is running the devices it is actually recording are the truth, whoever
+      // selected them and whenever. A reattached client never selected anything.
+      value: session?.sources.find((source) => source.id === "local-microphone")?.deviceId ?? mic,
       set: setMic,
       required: true,
     },
     {
       id: "meeting-audio",
       role: "VIRTUAL_MEETING_AUDIO",
-      value: meeting,
+      value: session?.sources.find((source) => source.id === "meeting-audio")?.deviceId ?? meeting,
       set: setMeeting,
       required: false,
     },
@@ -341,6 +367,20 @@ export default function LiveCaptureScreen({
           depositionId: assignTo,
         });
         setHandoff("Recording attached. It is now this deposition's audio.");
+        refreshSessions();
+      }),
+    stopSession = (sessionId: string) =>
+      act(async () => {
+        await post("/api/live-capture/stop", { depositionId: null, sessionId });
+        setHandoff("Recording stopped and hashed.");
+        refreshSessions();
+      }),
+    recover = (sessionId: string) =>
+      act(async () => {
+        await post("/api/live-capture/recover", { sessionId });
+        setHandoff(
+          "Recording finalized and hashed. It is marked degraded because the capture was interrupted and the moment it ended was not observed.",
+        );
         refreshSessions();
       }),
     startRecording = () =>
@@ -771,9 +811,7 @@ export default function LiveCaptureScreen({
           </div>
         )}
         {!recording &&
-          unassigned.filter(
-            (item) => !item.assignedDepositionId && item.state !== "RECORDING",
-          ).length > 0 && (
+          unassigned.filter((item) => !item.assignedDepositionId).length > 0 && (
             <div className="unassigned-sessions">
               <h3>Recordings not yet attached to a case</h3>
               <p className="unassigned-note">
@@ -794,32 +832,64 @@ export default function LiveCaptureScreen({
               </select>
               <ul>
                 {unassigned
-                  .filter(
-                    (item) =>
-                      !item.assignedDepositionId && item.state !== "RECORDING",
-                  )
-                  .map((item) => (
-                    <li key={item.sessionId}>
-                      <strong>{item.label ?? item.sessionId}</strong>
-                      <span>
-                        {new Date(item.createdAt).toLocaleString()} ·{" "}
-                        {
-                          item.channels.filter(
-                            (channel) => channel.state === "FINALIZED",
-                          ).length
-                        }{" "}
-                        channel(s)
-                      </span>
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={busy || !assignTo}
-                        onClick={() => void assign(item.sessionId)}
-                      >
-                        Attach to this deposition
-                      </button>
-                    </li>
-                  ))}
+                  // Nothing reading RECORDING is filtered out any more. Hiding them was how a live
+                  // recording became unreachable: the screen that started it had lost it on a
+                  // reload, and the one list that would have shown it excluded it by state. A
+                  // reporter on another machine, or after a crash, had no path back to their own
+                  // audio. This block is that path -- and the whole block is already hidden while
+                  // this client is the one recording, so a reattached session is never listed twice.
+                  .filter((item) => !item.assignedDepositionId)
+                  .map((item) => {
+                    const stillRecording =
+                      item.state === "RECORDING" && item.running;
+                    const interrupted =
+                      item.state === "RECORDING" && !item.running;
+                    return (
+                      <li key={item.sessionId}>
+                        <strong>{item.label ?? item.sessionId}</strong>
+                        <span>
+                          {new Date(item.createdAt).toLocaleString()} ·{" "}
+                          {stillRecording
+                            ? "recording now on this computer"
+                            : interrupted
+                            ? "interrupted before it was finalized"
+                            : `${
+                                item.channels.filter(
+                                  (channel) => channel.state === "FINALIZED",
+                                ).length
+                              } channel(s)`}
+                        </span>
+                        {stillRecording ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void stopSession(item.sessionId)}
+                          >
+                            Stop this recording
+                          </button>
+                        ) : interrupted ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void recover(item.sessionId)}
+                          >
+                            Finalize this recording
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy || !assignTo}
+                            onClick={() => void assign(item.sessionId)}
+                          >
+                            Attach to this deposition
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           )}
