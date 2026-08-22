@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   FILE_CAPTURE_FLAG,
+  IN_PROCESS_FILE_SOURCES,
   assignCaptureSession,
   createCaptureSession,
   registerCaptureAudio,
@@ -51,7 +52,7 @@ test("a file-backed source is refused unless the flag is set", () => {
   const s = scratch();
   withFileCapture(false, () => {
     assert.throws(
-      () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 1) }),
+      () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 1) }),
       new RegExp(FILE_CAPTURE_FLAG),
       "a reporter's machine must not be able to reach this at all",
     );
@@ -62,7 +63,7 @@ test("a file-backed source is refused unless the flag is set", () => {
 test("four channels of one fixture become four distinct sources", () => {
   const s = scratch();
   withFileCapture(true, () => {
-    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 4) });
+    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 4) });
     assert.equal(session.sources.length, 4);
     assert.equal(new Set(session.sources.map((source) => source.deviceId)).size, 4,
       "the preflight signature and the duplicate checks both key on deviceId, so four channels of one file must not collapse to one");
@@ -77,7 +78,7 @@ test("four channels of one fixture become four distinct sources", () => {
 test("a session with a file source is marked synthetic and says so in its timeline", () => {
   const s = scratch();
   withFileCapture(true, () => {
-    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 2) });
+    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 2) });
     assert.equal(session.synthetic, true);
     assert.equal(session.timeline.channelsSampleAligned, true, "every channel is read from position zero of one file");
     assert.match(session.timeline.doNotUseFor, /synthetic/i);
@@ -105,7 +106,7 @@ test("the capture process is paced in real time and given one channel of the fil
   // -re would still produce four correct recordings, in seconds, exercising none of the live path.
   const s = scratch();
   withFileCapture(true, () => {
-    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 4) });
+    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 4) });
     const spawned = [];
     const spawnProcess = (command, args) => { spawned.push({ command, args }); return { stderr: { on() {} }, once() {}, kill() {} }; };
     startCaptureSession(null, { depositionId: DEPOSITION, sessionId: session.sessionId, storageRoot: s.storageRoot, spawnProcess });
@@ -129,7 +130,7 @@ test("the capture process is paced in real time and given one channel of the fil
 // on the ground that it is synthetic. `home` decides whether it lives in the deposition (which
 // registerCaptureAudio reads) or in the unassigned capture root (which assignCaptureSession reads).
 function finishedSession(s, { depositionId, home }) {
-  const session = createCaptureSession(null, { depositionId, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 2) });
+  const session = createCaptureSession(null, { depositionId, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 2) });
   const directory = depositionId ? path.join(home, "live-capture", session.sessionId) : path.join(home, session.sessionId);
   const manifestPath = path.join(directory, "capture-session.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -182,15 +183,15 @@ test("a file that is not there, and a channel that is not a channel, are both re
   withFileCapture(true, () => {
     assert.throws(
       () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot,
-        sources: [{ id: "ch1", kind: "file", filePath: path.join(s.storageRoot, "absent.wav") }] }),
+        fileSources: IN_PROCESS_FILE_SOURCES, sources: [{ id: "ch1", kind: "file", filePath: path.join(s.storageRoot, "absent.wav") }] }),
       /was not found/);
     assert.throws(
       () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot,
-        sources: [{ id: "ch1", kind: "file", filePath: s.fixture, channelIndex: -1 }] }),
+        fileSources: IN_PROCESS_FILE_SOURCES, sources: [{ id: "ch1", kind: "file", filePath: s.fixture, channelIndex: -1 }] }),
       /non-negative integer/);
     assert.throws(
       () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot,
-        sources: [{ id: "ch1", kind: "file", filePath: "  " }] }),
+        fileSources: IN_PROCESS_FILE_SOURCES, sources: [{ id: "ch1", kind: "file", filePath: "  " }] }),
       /requires the path/);
   });
   s.cleanup();
@@ -203,7 +204,7 @@ test("the live aid reads one channel of the fixture, not a mix of all four", asy
   const { feedArgs } = await import("../server/deepgram-live.mjs");
   const s = scratch();
   withFileCapture(true, () => {
-    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 4) });
+    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 4) });
     for (const [index, source] of session.sources.entries()) {
       const args = feedArgs(source);
       assert.ok(args.includes("-re"), "the feed is paced like the room it stands in for");
@@ -220,4 +221,75 @@ test("the live aid reads one channel of the fixture, not a mix of all four", asy
     assert.ok(!micArgs.includes("-re"), "a live device is already paced by the clock it runs on");
   });
   s.cleanup();
+});
+
+test("a file-backed source cannot be reached from a request, whatever the body says", () => {
+  // The guard this branch was held on. The session route spreads the request body straight into
+  // createCaptureSession, so before this the environment flag was the only thing between a POST and
+  // a synthetic session -- a runtime toggle, not a structure.
+  //
+  // Everything below is a value a request could actually carry. None of them is the symbol, because
+  // JSON has no way to express one.
+  const s = scratch();
+  withFileCapture(true, () => {
+    const asRequestBody = [
+      undefined,
+      true,
+      "IN_PROCESS_FILE_SOURCES",
+      "Symbol(depo-pro:in-process-file-sources)",
+      { description: "depo-pro:in-process-file-sources" },
+      String(IN_PROCESS_FILE_SOURCES.toString()),
+    ];
+    for (const forged of asRequestBody) {
+      assert.throws(
+        () => createCaptureSession(null, {
+          depositionId: DEPOSITION, storageRoot: s.storageRoot,
+          fileSources: forged, sources: fileSources(s.fixture, 1),
+        }),
+        /cannot be requested/,
+        `a body carrying ${JSON.stringify(String(forged))} must not reach the file source`,
+      );
+    }
+    // And a body that has been through JSON, which is what actually arrives.
+    const throughJson = JSON.parse(JSON.stringify({ fileSources: "anything", sources: fileSources(s.fixture, 1) }));
+    assert.throws(
+      () => createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, ...throughJson }),
+      /cannot be requested/,
+      "the route spreads the parsed body; nothing that survives JSON can satisfy the capability",
+    );
+  });
+  s.cleanup();
+});
+
+test("the capability alone is not enough: the operator must still have turned it on", () => {
+  const s = scratch();
+  withFileCapture(false, () => {
+    assert.throws(
+      () => createCaptureSession(null, {
+        depositionId: DEPOSITION, storageRoot: s.storageRoot,
+        fileSources: IN_PROCESS_FILE_SOURCES, sources: fileSources(s.fixture, 1),
+      }),
+      new RegExp(FILE_CAPTURE_FLAG),
+      "an in-process caller still needs the deliberate act; both conditions, not either",
+    );
+  });
+  s.cleanup();
+});
+
+test("a microphone session is unaffected by the capability it does not need", () => {
+  const s = scratch();
+  const session = createCaptureSession(null, {
+    depositionId: DEPOSITION, storageRoot: s.storageRoot,
+    sources: [{ id: "ch1", role: "LOCAL_MICROPHONE", deviceId: "mic", deviceName: "Mic" }],
+  });
+  assert.equal(session.synthetic, false, "the ordinary path needs nothing new and is not gated");
+  s.cleanup();
+});
+
+test("the session route never hands the capability on", () => {
+  // The route spreads the body. That is safe only because the symbol cannot come from JSON -- but
+  // if the route were ever edited to pass the capability itself, the structure would be gone.
+  const api = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
+  assert.ok(!/IN_PROCESS_FILE_SOURCES/.test(api),
+    "nothing reachable from HTTP may hold the file-source capability");
 });

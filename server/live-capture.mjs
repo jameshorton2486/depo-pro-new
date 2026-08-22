@@ -46,8 +46,26 @@ export function enumerateWindowsAudioSources({run=spawnSync}={}){if(process.plat
  * itself rather than the whole process inheriting it.
  */
 export const FILE_CAPTURE_FLAG="DEPO_PRO_ALLOW_FILE_CAPTURE";
+/**
+ * The capability to read audio from a file, held as a symbol.
+ *
+ * The environment flag alone was a runtime toggle, not a structure. The session route spreads the
+ * request body into createCaptureSession, so with the flag set, a POST carrying
+ * sources:[{kind:"file",...}] would have produced a synthetic session -- and a request is exactly
+ * where this must never be reachable from.
+ *
+ * A symbol closes that. JSON cannot carry one: no request body, however shaped, and no amount of
+ * spreading it into the call, can produce this value. Only a caller that imported this module holds
+ * it, which is the driver script and nothing that arrives over HTTP. The flag stays as the second
+ * condition, so the capability needs both an in-process caller and a deliberate act by the operator.
+ *
+ * This is the same shape as the catalog injection seam and the transcribable-proxy guard: not
+ * "off by default", but unreachable from the direction the danger comes from.
+ */
+export const IN_PROCESS_FILE_SOURCES=Symbol("depo-pro:in-process-file-sources");
 const fileCaptureAllowed=(environment=process.env)=>environment[FILE_CAPTURE_FLAG]==="1";
-function validateFileSource(source,environment){
+function validateFileSource(source,environment,capability){
+  if(capability!==IN_PROCESS_FILE_SOURCES)throw new Error("A file-backed capture source cannot be requested. It is available only to a caller inside this process, and never over the API.");
   if(!fileCaptureAllowed(environment))throw new Error(`A file-backed capture source is a development instrument and is refused unless ${FILE_CAPTURE_FLAG}=1 is set.`);
   const filePath=String(source.filePath??"").trim();
   if(!filePath)throw new Error("A file-backed source requires the path of the audio file to read.");
@@ -60,8 +78,8 @@ function validateFileSource(source,environment){
   const stat=fs.statSync(resolved);
   return {filePath:resolved,channelIndex,bytes:stat.size,modifiedAt:stat.mtime.toISOString(),sha256:null};
 }
-function validateSources(sources,{environment=process.env}={}){if(!Array.isArray(sources)||!sources.length)throw new Error("Configure at least one independent audio source.");const ids=new Set();return sources.map((source,index)=>{const id=String(source.id??`ch${index+1}`);if(!SOURCE_ID.test(id)||ids.has(id))throw new Error("Every source requires a unique stable channel ID.");ids.add(id);
-  const file=source.kind==="file"?validateFileSource(source,environment):null;
+function validateSources(sources,{environment=process.env,fileSources}={}){if(!Array.isArray(sources)||!sources.length)throw new Error("Configure at least one independent audio source.");const ids=new Set();return sources.map((source,index)=>{const id=String(source.id??`ch${index+1}`);if(!SOURCE_ID.test(id)||ids.has(id))throw new Error("Every source requires a unique stable channel ID.");ids.add(id);
+  const file=source.kind==="file"?validateFileSource(source,environment,fileSources):null;
   // A file source is identified by the file it reads and the channel it takes from it, so that two
   // channels of one fixture are two distinct sources rather than one repeated -- which is what the
   // preflight device signature and the duplicate checks both rely on.
@@ -78,11 +96,11 @@ const isSynthetic=session=>(session.sources??[]).some(source=>source.backend==="
  * picking the right recording out of three days of them; once the session is assigned, the
  * deposition supplies the real identity and the label stops mattering.
  */
-export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot}={}){
+export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot,fileSources}={}){
   const startedAt=now();
   const sessionLabel=String(label??"").trim()||`Recording ${startedAt.slice(0,10)} ${startedAt.slice(11,16)}`;
   const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});
-  const validated=validateSources(sources),synthetic=isSynthetic({sources:validated});
+  const validated=validateSources(sources,{fileSources}),synthetic=isSynthetic({sources:validated});
   const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:synthetic?{channelsSampleAligned:true,interChannelOffsetMeasured:false,reason:"Every channel is read from position zero of a file, so the channels carry the same span of source audio and are aligned in content. This is a property of reading a file and says nothing about microphones: it is the reason a synthetic session cannot stand in for a captured one when the question is timing.",doNotUseFor:"Anything. This session is synthetic. It is not a recording of a proceeding and cannot be attached to a deposition."}:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validated,synthetic,events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
 function recordPath(paths,source){return path.join(paths.directory,"channels",`${String(source.ordinal+1).padStart(2,"0")}-${source.id}.wav`)}
 // astats prints "RMS level dB:" only in its end-of-stream summary, so during a recording that runs

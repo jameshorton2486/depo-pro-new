@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   FILE_CAPTURE_FLAG,
+  IN_PROCESS_FILE_SOURCES,
   createCaptureSession,
   getCaptureSession,
   startCaptureSession,
@@ -75,7 +76,9 @@ console.log(`fixture   : ${resolved}`);
 console.log(`channels  : ${channels} (${duration.toFixed(1)}s of audio)`);
 console.log(`capturing : ${seconds.toFixed(1)}s, paced in real time`);
 
-const session = createCaptureSession(null, { label, sources });
+// The capability this script holds because it imports the module. Nothing arriving over the API
+// can produce this value, which is what keeps a synthetic session out of the request path.
+const session = createCaptureSession(null, { label, sources, fileSources: IN_PROCESS_FILE_SOURCES });
 console.log(`session   : ${session.sessionId}  synthetic=${session.synthetic}\n`);
 
 startCaptureSession(null, { sessionId: session.sessionId });
