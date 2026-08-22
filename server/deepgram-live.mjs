@@ -196,6 +196,13 @@ export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLi
    what was stored rather than what it hoped would be. */
 export function recordLiveAnnotation(root,{depositionId,sessionId,storageRoot,action,paragraphId,wordIds}={}){
   const paths=liveSessionPaths(root,depositionId,sessionId,storageRoot);
+  // A mark belongs to a live session that exists -- the record startDeepgramLive writes, which is
+  // the transcript being marked. appendLiveAnnotation creates the directory it writes
+  // into, so without this a single POST naming any session id at all conjured the folder and the
+  // log -- and with a depositionId, it did so inside that deposition's own record, for a session
+  // that never ran and against word ids from events that never arrived. Nothing downstream would
+  // have read it, which is precisely why it could sit there.
+  if(!fs.existsSync(paths.file))throw new Error("A live annotation belongs to a live session that exists.");
   appendLiveAnnotation(paths.annotations,{action,paragraphId,wordIds});
   return readLiveAnnotations(paths.annotations);
 }
