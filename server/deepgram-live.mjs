@@ -19,7 +19,27 @@ export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 // Roles naming a single participant stay undiarized, because for them the original reasoning holds.
 const SHARED_ROLES=new Set(["LOCAL_MICROPHONE","VIRTUAL_MEETING_AUDIO"]);
 const active=new Map(),now=()=>new Date().toISOString();
-function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});fs.renameSync(temp,file)}
+function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});
+  try{fs.renameSync(temp,file)}catch(error){try{fs.rmSync(temp,{force:true})}catch{/* the directory is gone; there is nothing left to remove */}throw error}}
+/**
+ * A write to the live aid that failed, reported without ending anything.
+ *
+ * The local recording is authoritative and the aid is an aid -- the screen says so. Both writes
+ * below run inside a WebSocket data handler, so unguarded, one failed write threw out of the
+ * handler, went unhandled, and took the whole local API process down. That ends the recording the
+ * aid was never permitted to affect. A vanished directory, a permission blip, a sync client or a
+ * scanner holding a handle is enough to cause it; this was found by moving a session folder while
+ * its writer was still attached.
+ *
+ * The failure is reported in memory, because disk is exactly what just failed. getDeepgramLive
+ * reads the in-memory record, so the reporter sees the aid degrade rather than watching the
+ * application disappear. One entry then a count: a failing disk fails on every message, and an
+ * unbounded error list would consume the memory the capture still needs.
+ */
+function recordWriteFailure(runtime,kind,error){
+  runtime.record.aidWriteFailures=(runtime.record.aidWriteFailures??0)+1;
+  if(runtime.record.aidWriteFailures===1)runtime.record.errors.push({at:now(),kind,message:`The live transcript aid could not be written: ${error.message}. The local recording is unaffected and continues.`});
+}
 function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl")}}
 export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
@@ -32,10 +52,14 @@ const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
  * Finalized events are append-only facts, so they append. The manifest carries state, channels,
  * connection history and errors, and is written when one of those changes rather than per word.
  */
-function persist(runtime){runtime.record.updatedAt=now();const manifest={...runtime.record};delete manifest.finalizedEvents;atomic(runtime.paths.file,manifest)}
+function persist(runtime){runtime.record.updatedAt=now();const manifest={...runtime.record};delete manifest.finalizedEvents;
+  try{atomic(runtime.paths.file,manifest)}catch(error){recordWriteFailure(runtime,"AID_WRITE",error)}}
 function appendEvent(runtime,event){
   runtime.eventCount=(runtime.eventCount??0)+1;
-  fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END);
+  // The append is the durable copy and the push is what the screen shows. If the log cannot be
+  // written the reporter should still see the text that arrived, so the push is not conditional on
+  // the write -- losing both would make a disk fault look like a transcription fault.
+  try{fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END)}catch(error){recordWriteFailure(runtime,"AID_APPEND",error)}
   runtime.record.finalizedEvents.push(event);
   /* The screen shows the tail; the log holds all of it. Without this the in-memory record grows for
      eight hours and every one-second poll serialises the whole thing. */
@@ -161,4 +185,4 @@ export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLi
   return {...record,finalizedEventCount:lines.length,
     finalizedEvents:lines.slice(-eventLimit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean)};
 }
-export const _testing={active,normalizedEvent};
+export const _testing={active,normalizedEvent,persist,appendEvent,recordWriteFailure};
