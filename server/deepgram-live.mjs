@@ -60,6 +60,21 @@ function readEventLog(file){
 //
 // Deepgram's own `start` is never touched. The offset is carried alongside it.
 function normalizedEvent(source,epoch,payload,sessionOffsetSeconds){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,sessionOffsetSeconds,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
+// The live aid reads the source a second time, independently of the recording -- the recording is
+// authoritative and must not depend on this working. That means this needs to know about a
+// file-backed source in the same way live-capture does, or the fixture reaches dshow as a device
+// name and the feed dies before the socket ever carries audio.
+//
+// -ac 1 downmixes whatever it is given, so for a multi-channel fixture the pan has to come first:
+// without it, all four channels would be summed and every stream would receive the same mix of
+// four people talking over each other, which is the one thing four channels exist to avoid.
+export function feedArgs(source){
+  const output=["-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"];
+  if(source.backend!=="file")return ["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,...output];
+  const {filePath,channelIndex}=source.sourceFile;
+  const select=channelIndex===null?[]:["-af",`pan=mono|c0=c${channelIndex}`];
+  return ["-hide_banner","-loglevel","warning","-re","-i",filePath,...select,...output];
+}
 export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
   const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
@@ -83,7 +98,7 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
       connection.sessionOffsetSeconds=Math.max(0,(Date.parse(now())-Date.parse(channel.streamOriginAt))/1000);
       channel.sessionOffsetSeconds=connection.sessionOffsetSeconds;
       record.connectionHistory.push({type:"CONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,url:url.replace(/keyterm=[^&]+/g,"keyterm=REDACTED")});
-      const process=spawnProcess("ffmpeg",["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,"-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"],{windowsHide:true,stdio:["ignore","pipe","pipe"]});
+      const process=spawnProcess("ffmpeg",feedArgs(source),{windowsHide:true,stdio:["ignore","pipe","pipe"]});
       connection.process=process;
       process.stdout.on("data",chunk=>{if(socket.readyState===WebSocketClass.OPEN)socket.send(chunk)});
       process.stderr.on("data",chunk=>{const message=chunk.toString();if(/error|lost|failed/i.test(message))record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE",message:message.slice(-1000)})});
