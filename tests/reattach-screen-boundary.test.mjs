@@ -15,7 +15,7 @@ test("only one screen can own the surface, so a reattach cannot fire underneath 
   // future edit sets one of these without clearing the others, two screens are open at once and
   // the live screen -- which returns first -- would silently mount under the one the reporter
   // chose, firing a reattach the reporter never asked for.
-  const navigate = PAGE.match(/function navigate\(next:NavView\)\{[\s\S]*?\n  \}/);
+  const navigate = PAGE.match(/function navigate\(next:NavView\)\{[\s\S]*?\n {2}\}/);
   assert.ok(navigate, "navigate is the one place that decides which screen is showing");
   assert.match(navigate[0], /setShowOpening\(next==="opening"\)/);
   assert.match(navigate[0], /setShowLiveCapture\(next==="live-capture"\)/);
@@ -26,7 +26,7 @@ test("only one screen can own the surface, so a reattach cannot fire underneath 
 });
 
 test("the live screen is only reachable through the flag navigate controls", () => {
-  const guard = PAGE.match(/if \(showLiveCapture\) \{[\s\S]*?\n  \}/);
+  const guard = PAGE.match(/if \(showLiveCapture\) \{[\s\S]*?\n {2}\}/);
   assert.ok(guard, "the live screen is returned behind its own flag");
   assert.match(guard[0], /<LiveCaptureScreen[\s\S]*deposition=\{active\}/,
     "and it is handed the open deposition, which is what scopes the reattach");

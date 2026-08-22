@@ -92,6 +92,24 @@ type Unassigned = {
 };
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
 type OpeningSummary={completeCount:number;totalCount:number;readiness:Record<string,boolean>;state:{interpreterDisposition:string};scripts:Array<{id:string;title:string;text:string;applicable:boolean;completedOnRecord:boolean}>};
+// Four channels because a deposition room can have four microphones -- not because four is a limit
+// anything below this screen imposes. validateSources, startCaptureSession and the live aid are all
+// N-channel already; this array was the only thing holding capture to two.
+//
+// CH1 and CH2 each cover several voices -- a room, and whoever is on the remote platform -- so they
+// are diarized (SHARED_ROLES in deepgram-live.mjs). CH3 and CH4 are dedicated participant
+// microphones carrying one voice each, and are deliberately outside that set: diarizing a single
+// speaker invents turns the room never had.
+const CHANNEL_SLOTS: {
+  id: string;
+  role: string;
+  required: boolean;
+}[] = [
+  { id: "local-microphone", role: "LOCAL_MICROPHONE", required: true },
+  { id: "meeting-audio", role: "VIRTUAL_MEETING_AUDIO", required: false },
+  { id: "participant-3", role: "PARTICIPANT_MICROPHONE", required: false },
+  { id: "participant-4", role: "PARTICIPANT_MICROPHONE", required: false },
+];
 export default function LiveCaptureScreen({
   deposition,
   onDepositionUpdated,
@@ -104,8 +122,7 @@ export default function LiveCaptureScreen({
   onBack: () => void;
 }) {
   const [devices, setDevices] = useState<Device[]>([]),
-    [mic, setMic] = useState(""),
-    [meeting, setMeeting] = useState(""),
+    [channelDevices, setChannelDevices] = useState<Record<string, string>>({}),
     [preflight, setPreflight] = useState<Preflight | null>(null),
     [session, setSession] = useState<Session | null>(null),
     [monitor, setMonitor] = useState("ALL"),
@@ -151,8 +168,10 @@ export default function LiveCaptureScreen({
       .then((available: Device[]) => {
         if (current) {
           setDevices(available);
-          setMic(available.find((item) => item.kind === "input")?.id || "");
-          setMeeting("");
+          setChannelDevices({
+            "local-microphone":
+              available.find((item) => item.kind === "input")?.id || "",
+          });
         }
       })
       .catch((reason) => {
@@ -217,24 +236,26 @@ export default function LiveCaptureScreen({
       current = false;
     };
   }, [openDepositionId]);
-  const slots = [
-    {
-      id: "local-microphone",
-      role: "LOCAL_MICROPHONE",
-      // While a session is running the devices it is actually recording are the truth, whoever
-      // selected them and whenever. A reattached client never selected anything.
-      value: session?.sources.find((source) => source.id === "local-microphone")?.deviceId ?? mic,
-      set: setMic,
-      required: true,
-    },
-    {
-      id: "meeting-audio",
-      role: "VIRTUAL_MEETING_AUDIO",
-      value: session?.sources.find((source) => source.id === "meeting-audio")?.deviceId ?? meeting,
-      set: setMeeting,
-      required: false,
-    },
-  ];
+  const slots = CHANNEL_SLOTS.map((slot) => ({
+    ...slot,
+    // While a session is running, the devices it is actually recording are the truth -- whoever
+    // selected them and whenever. A reattached client selected nothing, and what it shows has to be
+    // what is being written, not an empty picker beside a live meter.
+    value:
+      session?.sources.find((source) => source.id === slot.id)?.deviceId ??
+      channelDevices[slot.id] ??
+      "",
+    set: (deviceId: string) =>
+      setChannelDevices((current) => ({ ...current, [slot.id]: deviceId })),
+  }));
+  const chosen = slots.filter((slot) => slot.value);
+  // Two channels pointed at one device is not a configuration, it is a channel that will not
+  // record: DirectShow hands the device to the first ffmpeg and refuses the second. The screen used
+  // to compare the first two channels to each other, which stopped covering the case the moment a
+  // third existed. Offering a device only where it is not already taken removes the mistake instead
+  // of reporting it.
+  const duplicateDevice = new Set(chosen.map((slot) => slot.value)).size !== chosen.length;
+  const requiredMissing = slots.some((slot) => slot.required && !slot.value);
   const refreshSessions = () => {
     fetch(`${API}/api/live-capture/sessions`)
       .then((response) => response.json())
@@ -538,7 +559,7 @@ export default function LiveCaptureScreen({
             <button
               className="record-button"
               type="button"
-              disabled={busy || !mic}
+              disabled={busy || requiredMissing || duplicateDevice}
               onClick={() => void startRecording()}
             >
               {busy ? "Starting…" : "Start recording"}
@@ -589,11 +610,17 @@ export default function LiveCaptureScreen({
                   <option value="">
                     {slot.required ? "Select device" : "Not used"}
                   </option>
-                  {devices.map((device) => (
-                    <option value={device.id} key={`${slot.id}-${device.id}`}>
-                      {device.name}
-                    </option>
-                  ))}
+                  {devices
+                    .filter(
+                      (device) =>
+                        device.id === slot.value ||
+                        !chosen.some((other) => other.value === device.id),
+                    )
+                    .map((device) => (
+                      <option value={device.id} key={`${slot.id}-${device.id}`}>
+                        {device.name}
+                      </option>
+                    ))}
                 </select>
                 {health ? (
                   <div
@@ -654,7 +681,7 @@ export default function LiveCaptureScreen({
             <button
               className="secondary-button"
               type="button"
-              disabled={busy || !mic || (Boolean(meeting) && mic === meeting)}
+              disabled={busy || requiredMissing || duplicateDevice}
               onClick={() => void beginTest()}
             >
               {busy
