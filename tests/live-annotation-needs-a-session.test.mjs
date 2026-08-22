@@ -54,9 +54,18 @@ test("a mark against a real session is stored", () => {
 });
 
 test("an unassigned session is checked the same way, in its own root", () => {
-  // The capture root is derived from the environment rather than passed, so this asserts the
-  // refusal rather than the storage location: a session id that names nothing is still refused.
+  // An unassigned session lives under the capture root, which comes from the environment rather
+  // than the arguments -- so the root is redirected here. Without that, this test writes into the
+  // real deposition storage the moment the guard it is testing is absent, which is exactly what
+  // happened while mutation-testing it.
   const s = scratch();
-  assert.throws(() => mark(s, "LIVE-no-such-session", null), /live session that exists/);
-  s.cleanup();
+  const previous = process.env.DEPO_PRO_DEPOSITIONS_ROOT;
+  process.env.DEPO_PRO_DEPOSITIONS_ROOT = s.storageRoot;
+  try {
+    assert.throws(() => mark(s, "LIVE-no-such-session", null), /live session that exists/);
+  } finally {
+    if (previous === undefined) delete process.env.DEPO_PRO_DEPOSITIONS_ROOT;
+    else process.env.DEPO_PRO_DEPOSITIONS_ROOT = previous;
+    s.cleanup();
+  }
 });
