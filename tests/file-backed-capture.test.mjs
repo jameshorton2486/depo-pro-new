@@ -195,3 +195,29 @@ test("a file that is not there, and a channel that is not a channel, are both re
   });
   s.cleanup();
 });
+
+test("the live aid reads one channel of the fixture, not a mix of all four", async () => {
+  // -ac 1 downmixes whatever it is handed. Without the pan in front of it every stream would get
+  // the same sum of four people talking at once -- four sockets, one indistinguishable feed, and a
+  // four-channel run that looks like it worked.
+  const { feedArgs } = await import("../server/deepgram-live.mjs");
+  const s = scratch();
+  withFileCapture(true, () => {
+    const session = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot, sources: fileSources(s.fixture, 4) });
+    for (const [index, source] of session.sources.entries()) {
+      const args = feedArgs(source);
+      assert.ok(args.includes("-re"), "the feed is paced like the room it stands in for");
+      assert.ok(!args.includes("dshow"), "a file source must not reach for an audio device");
+      assert.equal(args[args.indexOf("-af") + 1], `pan=mono|c0=c${index}`);
+      assert.ok(args.indexOf("-af") < args.indexOf("-ac"), "the channel is selected before the downmix, or the downmix sums all four");
+      assert.equal(args[args.indexOf("-ar") + 1], "16000", "the streaming rate is unchanged by any of this");
+    }
+    // A microphone source still reaches dshow exactly as before.
+    const mic = createCaptureSession(null, { depositionId: DEPOSITION, storageRoot: s.storageRoot,
+      sources: [{ id: "ch1", role: "LOCAL_MICROPHONE", deviceId: "mic", deviceName: "Mic" }] });
+    const micArgs = feedArgs(mic.sources[0]);
+    assert.ok(micArgs.includes("dshow"));
+    assert.ok(!micArgs.includes("-re"), "a live device is already paced by the clock it runs on");
+  });
+  s.cleanup();
+});

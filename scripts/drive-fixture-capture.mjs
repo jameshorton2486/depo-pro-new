@@ -24,6 +24,19 @@ import {
   startCaptureSession,
   stopCaptureSession,
 } from "../server/live-capture.mjs";
+import { getDeepgramLive, startDeepgramLive, stopDeepgramLive } from "../server/deepgram-live.mjs";
+
+// Read the same DPAPI-protected store the local API reads, so the key is never typed on a command
+// line, never placed in the environment, and never printed. Only its presence is ever reported.
+function deepgramKey(secretsPath) {
+  if (!fs.existsSync(secretsPath)) throw new Error(`No secrets store at ${secretsPath}. Point --secrets at the tree that has one.`);
+  const script = 'Add-Type -AssemblyName System.Security;$v=[Console]::In.ReadToEnd();$b=[Convert]::FromBase64String($v);$d=[Security.Cryptography.ProtectedData]::Unprotect($b,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[Text.Encoding]::UTF8.GetString($d)';
+  const out = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { input: fs.readFileSync(secretsPath, "utf8"), encoding: "utf8", windowsHide: true });
+  if (out.status !== 0) throw new Error("The secrets store could not be decrypted by this user.");
+  const key = JSON.parse(out.stdout.trim()).deepgramApiKey;
+  if (!key) throw new Error("No Deepgram API key is configured in that store.");
+  return key;
+}
 
 const ROLES = ["EXAMINING_COUNSEL", "WITNESS", "DEFENDING_COUNSEL", "PARTICIPANT_MICROPHONE"];
 const argv = process.argv.slice(2);
@@ -67,7 +80,22 @@ console.log(`session   : ${session.sessionId}  synthetic=${session.synthetic}\n`
 
 startCaptureSession(null, { sessionId: session.sessionId });
 
+// The live aid starts after the recording, and its failure never stops the run: the local
+// recording is the authoritative artifact and does not depend on Deepgram working.
+const wantLive = argv.includes("--deepgram");
+let live = false;
+if (wantLive) {
+  try {
+    await startDeepgramLive(null, { sessionId: session.sessionId, apiKey: deepgramKey(path.resolve(option("secrets", "data/secrets.dat"))) });
+    live = true;
+    console.log(`deepgram  : opening ${channels} streams\n`);
+  } catch (error) {
+    console.log(`deepgram  : not started -- ${error.message}\n`);
+  }
+}
+
 const started = Date.now();
+const seen = new Set();
 const meters = setInterval(() => {
   const current = getCaptureSession(null, { sessionId: session.sessionId });
   const elapsed = ((Date.now() - started) / 1000).toFixed(0).padStart(3);
@@ -76,11 +104,18 @@ const meters = setInterval(() => {
     return `${source.id}:${rms === null ? "  --  " : `${rms.toFixed(1).padStart(6)}`}`;
   }).join("  ");
   console.log(`  ${elapsed}s  ${levels}`);
+  if (!live) return;
+  for (const event of getDeepgramLive(null, { sessionId: session.sessionId }).finalizedEvents ?? []) {
+    if (seen.has(event.id) || !event.transcript?.trim()) continue;
+    seen.add(event.id);
+    console.log(`        ${String(event.channelId).padEnd(4)} ${event.transcript.trim().slice(0, 96)}`);
+  }
 }, 5000);
 
 await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 clearInterval(meters);
 
+if (live) { try { await stopDeepgramLive(null, { sessionId: session.sessionId }); } catch { /* the recording matters; this does not */ } }
 const stopped = await stopCaptureSession(null, { sessionId: session.sessionId });
 const wall = (Date.now() - started) / 1000;
 
@@ -93,5 +128,16 @@ const provenance = stopped.sources[0]?.sourceFile;
 if (provenance) {
   console.log(`\nsource file: ${provenance.filePath}`);
   console.log(`             ${provenance.bytes} bytes, sha256 ${provenance.sha256}`);
+}
+if (live) {
+  const record = getDeepgramLive(null, { sessionId: session.sessionId });
+  const events = record.finalizedEvents ?? [];
+  console.log(`\ndeepgram  : ${record.state}, ${events.length} finalized events, ${record.errors?.length ?? 0} errors`);
+  for (const source of stopped.sources) {
+    const mine = events.filter((event) => event.channelId === source.id);
+    const words = mine.reduce((total, event) => total + (event.transcript?.trim().split(/\s+/).filter(Boolean).length ?? 0), 0);
+    console.log(`  ${source.id.padEnd(4)} ${String(mine.length).padStart(4)} events  ${String(words).padStart(5)} words`);
+  }
+  for (const error of (record.errors ?? []).slice(0, 5)) console.log(`  error: ${error.channelId ?? "-"} ${error.kind ?? ""} ${error.message ?? ""}`);
 }
 console.log(`\nThis session is synthetic. It cannot be attached to a deposition.`);
