@@ -131,6 +131,30 @@ export async function finalizeOrphanedSession(root,{depositionId,sessionId,stora
  * into the loss of the record, which is the outcome the per-channel design exists to prevent. What
  * was skipped is returned rather than passed over.
  */
+/**
+ * The capture this application instance is recording right now for a given context, if any.
+ *
+ * The server owns this. A reload, a crash, a closed tab, a different browser and a different
+ * machine all arrive with no local state, and every one of them has to be able to find a recording
+ * that is still running -- which is only possible if the answer comes from the process holding the
+ * ffmpeg handles rather than from something a client stored. A sessionId in localStorage fails on a
+ * cleared cache and cannot help a second machine at all, and it makes the client authoritative over
+ * state it does not own.
+ *
+ * `active` is the source and the manifest on disk is not. A manifest reading RECORDING says a
+ * capture was started; `active` says it is still being written here and can therefore be stopped.
+ * A session on disk that this instance is not holding is orphaned, which is a different condition
+ * with a different remedy -- see finalizeOrphanedSession, which finalizes rather than reattaches.
+ * Confusing the two is how a stray page load could end a live deposition.
+ */
+export function runningCaptureSession(_root,{depositionId=null}={}){
+  const wanted=depositionId||null;
+  for(const runtime of active.values()){
+    if((runtime.session.depositionId??null)!==wanted)continue;
+    return publicSession(runtime.session);
+  }
+  return null;
+}
 export function registerCaptureAudio(root,{depositionId,sessionId,storageRoot}={}){
   const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
   if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before adding it to the deposition.");
