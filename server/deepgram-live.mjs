@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import {depositionDirectory} from "./deposition-store.mjs";
 import {getCaptureSession} from "./live-capture.mjs";
 import {captureSessionRoot} from "./storage-config.mjs";
+import {appendLiveAnnotation,readLiveAnnotations} from "./live-annotation-log.mjs";
 
 export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 // Channels that carry more than one voice, and therefore need diarization to produce turn breaks.
@@ -40,7 +41,9 @@ function recordWriteFailure(runtime,kind,error){
   runtime.record.aidWriteFailures=(runtime.record.aidWriteFailures??0)+1;
   if(runtime.record.aidWriteFailures===1)runtime.record.errors.push({at:now(),kind,message:`The live transcript aid could not be written: ${error.message}. The local recording is unaffected and continues.`});
 }
-function locations(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl")}}
+/* One owner of where a live session's files sit, so the annotation log cannot drift into a
+   different directory from the events it annotates. */
+export function liveSessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl"),annotations:path.join(directory,"live-annotations.jsonl")}}
 export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
 const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
@@ -103,7 +106,7 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
   const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
   if(capture.state!=="RECORDING")throw new Error("Local recording must be running before Deepgram Live starts.");
-  const paths=locations(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. A reconnection starts a new stream and therefore a new clock, which is what epoch identifies.",usableFor:"Locating a moment for read-back within the same channel and the same epoch, where playback begins several seconds before the hit.",doNotUseFor:"Positioning playback in a different channel, or comparing times across epochs as though one clock ran throughout."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1,streamOriginAt:null,sessionOffsetSeconds:0})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};
+  const paths=liveSessionPaths(root,depositionId,sessionId,storageRoot),record={schemaVersion:"1.0.0",recordType:"REPORTER_LIVE_TRANSCRIPT_AID",configurationVersion:DEEPGRAM_LIVE_CONFIGURATION_VERSION,sessionId,depositionId,state:"CONNECTING",canonicalTranscriptAuthority:false,workingTranscriptWrites:false,sourceOfCanonicalEvidence:false,timeline:{timesRelativeTo:"deepgram-stream",reason:"Deepgram timestamps are relative to the stream it received, which begins when this connection opens -- not when recording began. A reconnection starts a new stream and therefore a new clock, which is what epoch identifies.",usableFor:"Locating a moment for read-back within the same channel and the same epoch, where playback begins several seconds before the hit.",doNotUseFor:"Positioning playback in a different channel, or comparing times across epochs as though one clock ran throughout."},channels:capture.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,connectionState:"CONNECTING",epoch:1,streamOriginAt:null,sessionOffsetSeconds:0})),connectionHistory:[],finalizedEvents:[],interimByChannel:{},errors:[],createdAt:now(),updatedAt:now()};
   const runtime={paths,record,connections:[],keepalive:null};
   fs.mkdirSync(paths.directory,{recursive:true});atomic(paths.file,record);active.set(sessionId,runtime);
 
@@ -175,14 +178,25 @@ export async function stopDeepgramLive(_root,{sessionId}={}){const runtime=activ
    log. Read-back needs the whole index, so it asks for it explicitly; the live screen only ever
    shows the tail. */
 export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLimit=EVENTS_IN_MEMORY}={}){
+  const {file,events,annotations}=liveSessionPaths(root,depositionId,sessionId,storageRoot);
+  /* Read from the log every time rather than held in the runtime: a mark made in one tab is then
+     on screen in another, and a reload restores from the same place a cold start reads. */
+  const marks=readLiveAnnotations(annotations);
   const runtime=active.get(sessionId);
-  if(runtime)return publicRecord(runtime.record);
-  const {file,events}=locations(root,depositionId,sessionId,storageRoot);
+  if(runtime)return{...publicRecord(runtime.record),...marks};
   const record=JSON.parse(fs.readFileSync(file,"utf8"));
   const lines=readEventLog(events);
   /* Count and tail both come from the log. The manifest is a summary of state and is allowed to
      lag -- after an unclean stop it will, and the log is what says what was actually captured. */
   return {...record,finalizedEventCount:lines.length,
-    finalizedEvents:lines.slice(-eventLimit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean)};
+    finalizedEvents:lines.slice(-eventLimit).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean),
+    ...marks};
+}
+/* One red mark, or one clearing of it. Returns the marks as they now stand, so the caller renders
+   what was stored rather than what it hoped would be. */
+export function recordLiveAnnotation(root,{depositionId,sessionId,storageRoot,action,paragraphId,wordIds}={}){
+  const paths=liveSessionPaths(root,depositionId,sessionId,storageRoot);
+  appendLiveAnnotation(paths.annotations,{action,paragraphId,wordIds});
+  return readLiveAnnotations(paths.annotations);
 }
 export const _testing={active,normalizedEvent,persist,appendEvent,recordWriteFailure};
