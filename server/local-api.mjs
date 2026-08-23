@@ -10,7 +10,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
-import {assignCaptureSession,createCaptureSession,enumerateWindowsAudioSources,getCaptureSession,listCaptureSessions,recoverableCaptureSessions,registerCaptureAudio,renameCaptureSession,startCaptureSession,stopCaptureSession} from "./live-capture.mjs";
+import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
@@ -45,6 +45,7 @@ import { depositionStorageRoot as configuredDepositionStorageRoot } from "./stor
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
+import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -144,6 +145,7 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/annotation" && req.method === "POST") { const input=await body(req,64*1024); return json(res,201,recordLiveAnnotation(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/deepgram?") && req.method === "GET") { const url=new URL(req.url,"http://localhost");return json(res,200,getDeepgramLive(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/recover" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await finalizeOrphanedSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
       if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
       return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
@@ -253,6 +255,15 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
     if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/opening?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,getOpeningProjection(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/opening"&&req.method==="POST"){
+      const input=await body(req,256*1024);
+      saveOpeningState(root,{depositionId:input.depositionId,state:input.state,storageRoot:depositionStorageRoot});
+      return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
       // What the Workspace reads: the projection joined to its evidence, carrying transcript
       // labels and addressable word spans. GET only -- nothing here writes, and the render is

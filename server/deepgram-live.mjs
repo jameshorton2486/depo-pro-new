@@ -20,7 +20,27 @@ export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
 // Roles naming a single participant stay undiarized, because for them the original reasoning holds.
 const SHARED_ROLES=new Set(["LOCAL_MICROPHONE","VIRTUAL_MEETING_AUDIO"]);
 const active=new Map(),now=()=>new Date().toISOString();
-function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});fs.renameSync(temp,file)}
+function atomic(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),{flag:"wx"});
+  try{fs.renameSync(temp,file)}catch(error){try{fs.rmSync(temp,{force:true})}catch{/* the directory is gone; there is nothing left to remove */}throw error}}
+/**
+ * A write to the live aid that failed, reported without ending anything.
+ *
+ * The local recording is authoritative and the aid is an aid -- the screen says so. Both writes
+ * below run inside a WebSocket data handler, so unguarded, one failed write threw out of the
+ * handler, went unhandled, and took the whole local API process down. That ends the recording the
+ * aid was never permitted to affect. A vanished directory, a permission blip, a sync client or a
+ * scanner holding a handle is enough to cause it; this was found by moving a session folder while
+ * its writer was still attached.
+ *
+ * The failure is reported in memory, because disk is exactly what just failed. getDeepgramLive
+ * reads the in-memory record, so the reporter sees the aid degrade rather than watching the
+ * application disappear. One entry then a count: a failing disk fails on every message, and an
+ * unbounded error list would consume the memory the capture still needs.
+ */
+function recordWriteFailure(runtime,kind,error){
+  runtime.record.aidWriteFailures=(runtime.record.aidWriteFailures??0)+1;
+  if(runtime.record.aidWriteFailures===1)runtime.record.errors.push({at:now(),kind,message:`The live transcript aid could not be written: ${error.message}. The local recording is unaffected and continues.`});
+}
 /* One owner of where a live session's files sit, so the annotation log cannot drift into a
    different directory from the events it annotates. */
 export function liveSessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl"),annotations:path.join(directory,"live-annotations.jsonl")}}
@@ -35,10 +55,14 @@ const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
  * Finalized events are append-only facts, so they append. The manifest carries state, channels,
  * connection history and errors, and is written when one of those changes rather than per word.
  */
-function persist(runtime){runtime.record.updatedAt=now();const manifest={...runtime.record};delete manifest.finalizedEvents;atomic(runtime.paths.file,manifest)}
+function persist(runtime){runtime.record.updatedAt=now();const manifest={...runtime.record};delete manifest.finalizedEvents;
+  try{atomic(runtime.paths.file,manifest)}catch(error){recordWriteFailure(runtime,"AID_WRITE",error)}}
 function appendEvent(runtime,event){
   runtime.eventCount=(runtime.eventCount??0)+1;
-  fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END);
+  // The append is the durable copy and the push is what the screen shows. If the log cannot be
+  // written the reporter should still see the text that arrived, so the push is not conditional on
+  // the write -- losing both would make a disk fault look like a transcription fault.
+  try{fs.appendFileSync(runtime.paths.events,JSON.stringify(event)+LINE_END)}catch(error){recordWriteFailure(runtime,"AID_APPEND",error)}
   runtime.record.finalizedEvents.push(event);
   /* The screen shows the tail; the log holds all of it. Without this the in-memory record grows for
      eight hours and every one-second poll serialises the whole thing. */
@@ -63,6 +87,21 @@ function readEventLog(file){
 //
 // Deepgram's own `start` is never touched. The offset is carried alongside it.
 function normalizedEvent(source,epoch,payload,sessionOffsetSeconds){const alternative=payload.channel?.alternatives?.[0]??{},words=(alternative.words??[]).map(word=>({word:word.word,punctuatedWord:word.punctuated_word??word.word,start:word.start,end:word.end,confidence:word.confidence,speaker:word.speaker??null}));return{id:crypto.randomUUID(),type:payload.is_final?"FINAL":"INTERIM",receivedAt:now(),epoch,sessionOffsetSeconds,channelId:source.id,channelRole:source.role,channelIndex:payload.channel_index??[0],start:payload.start??null,duration:payload.duration??null,isFinal:Boolean(payload.is_final),speechFinal:Boolean(payload.speech_final),transcript:alternative.transcript??"",words}}
+// The live aid reads the source a second time, independently of the recording -- the recording is
+// authoritative and must not depend on this working. That means this needs to know about a
+// file-backed source in the same way live-capture does, or the fixture reaches dshow as a device
+// name and the feed dies before the socket ever carries audio.
+//
+// -ac 1 downmixes whatever it is given, so for a multi-channel fixture the pan has to come first:
+// without it, all four channels would be summed and every stream would receive the same mix of
+// four people talking over each other, which is the one thing four channels exist to avoid.
+export function feedArgs(source){
+  const output=["-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"];
+  if(source.backend!=="file")return ["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,...output];
+  const {filePath,channelIndex}=source.sourceFile;
+  const select=channelIndex===null?[]:["-af",`pan=mono|c0=c${channelIndex}`];
+  return ["-hide_banner","-loglevel","warning","-re","-i",filePath,...select,...output];
+}
 export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
   const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
@@ -86,7 +125,7 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
       connection.sessionOffsetSeconds=Math.max(0,(Date.parse(now())-Date.parse(channel.streamOriginAt))/1000);
       channel.sessionOffsetSeconds=connection.sessionOffsetSeconds;
       record.connectionHistory.push({type:"CONNECTED",at:now(),channelId:source.id,epoch:connection.epoch,url:url.replace(/keyterm=[^&]+/g,"keyterm=REDACTED")});
-      const process=spawnProcess("ffmpeg",["-hide_banner","-loglevel","warning","-f","dshow","-i",`audio=${source.deviceId}`,"-ac","1","-ar","16000","-c:a","pcm_s16le","-f","s16le","pipe:1"],{windowsHide:true,stdio:["ignore","pipe","pipe"]});
+      const process=spawnProcess("ffmpeg",feedArgs(source),{windowsHide:true,stdio:["ignore","pipe","pipe"]});
       connection.process=process;
       process.stdout.on("data",chunk=>{if(socket.readyState===WebSocketClass.OPEN)socket.send(chunk)});
       process.stderr.on("data",chunk=>{const message=chunk.toString();if(/error|lost|failed/i.test(message))record.errors.push({at:now(),channelId:source.id,kind:"DERIVATIVE",message:message.slice(-1000)})});
@@ -157,7 +196,14 @@ export function getDeepgramLive(root,{depositionId,sessionId,storageRoot,eventLi
    what was stored rather than what it hoped would be. */
 export function recordLiveAnnotation(root,{depositionId,sessionId,storageRoot,action,paragraphId,wordIds}={}){
   const paths=liveSessionPaths(root,depositionId,sessionId,storageRoot);
+  // A mark belongs to a live session that exists -- the record startDeepgramLive writes, which is
+  // the transcript being marked. appendLiveAnnotation creates the directory it writes
+  // into, so without this a single POST naming any session id at all conjured the folder and the
+  // log -- and with a depositionId, it did so inside that deposition's own record, for a session
+  // that never ran and against word ids from events that never arrived. Nothing downstream would
+  // have read it, which is precisely why it could sit there.
+  if(!fs.existsSync(paths.file))throw new Error("A live annotation belongs to a live session that exists.");
   appendLiveAnnotation(paths.annotations,{action,paragraphId,wordIds});
   return readLiveAnnotations(paths.annotations);
 }
-export const _testing={active,normalizedEvent};
+export const _testing={active,normalizedEvent,persist,appendEvent,recordWriteFailure};
