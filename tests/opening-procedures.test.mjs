@@ -29,7 +29,13 @@ test("verification, applicability, oath selection and completed-on-record surviv
   assert.equal(reopened.participants[0].verified,true);assert.equal(reopened.state.interpreterDisposition,"NOT_APPLICABLE");assert.equal(reopened.state.witnessOathSelection,"AFFIRMATION");
   assert.equal(reopened.scripts.find(item=>item.id==="opening").completedOnRecord,true);
   assert.equal(reopened.scripts.find(item=>item.id==="interpreterOath").applicable,false);
-  assert.equal(reopened.readiness.interpreterOath,true);assert.equal(reopened.readiness.witnessOath,true);assert.equal(reopened.readiness.examination,true);
+  assert.equal(reopened.readiness.interpreterOath,true);
+  // Superseded by ruling: an unapproved script cannot report ready. The selection survives the
+  // reopen, which is what this test is about; readiness does not follow from it while the oath text
+  // is still a source-required stub. See tests/unapproved-script-cannot-report-ready.test.mjs.
+  assert.equal(reopened.state.witnessOathSelection,"AFFIRMATION");
+  assert.equal(reopened.readiness.witnessOath,false);
+  assert.equal(reopened.readiness.examination,true);
 });
 
 test("script rendering warns on missing tokens and never mutates canonical evidence",t=>{
