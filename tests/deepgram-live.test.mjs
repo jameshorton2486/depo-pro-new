@@ -29,7 +29,7 @@ function fakes(){
   const built=[];
   class Socket{
     static OPEN=1;
-    constructor(){this.readyState=1;this.binaryType="";built.push(this);}
+    constructor(url){this.url=url;this.readyState=1;this.binaryType="";built.push(this);}
     on(event,fn){handlers[event]=fn;return this}
     send(){} close(){}
   }
@@ -237,5 +237,27 @@ test("a finalized event carries the offset of the stream it arrived on",async()=
     assert.equal(event.sessionOffsetSeconds,record.channels[0].sessionOffsetSeconds,"and it is the offset the server stamped for that channel");
     assert.equal(event.start,3,"Deepgram's own stream time is never overwritten");
     assert.ok(record.channels[0].streamOriginAt,"the channel records when its clock started");
+  }finally{await stopDeepgramLive(null,{sessionId:value.sessionId}).catch(()=>{});fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("the deposition's names are attached to the socket that is actually opened",async()=>{
+  // buildDeepgramLiveUrl can accept keyterms and still be called without them. This asserts the
+  // URL the connection really used, not the builder in isolation -- names are what streaming ASR
+  // gets wrong, and a read-back index that mishears every surname cannot be searched.
+  const value=recordingFixture(),{Socket,spawnProcess,built}=fakes();
+  try{
+    startDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot,apiKey:"k",keyterms:["Etminan","Cukjati"],WebSocketClass:Socket,spawnProcess});
+    const query=new URL(built[0].url).searchParams;
+    assert.deepEqual(query.getAll("keyterm"),["Etminan","Cukjati"]);
+  }finally{await stopDeepgramLive(null,{sessionId:value.sessionId}).catch(()=>{});fs.rmSync(value.root,{recursive:true,force:true})}
+});
+
+test("a capture with no deposition still opens its socket",async()=>{
+  // Recording is the thing that must never be blocked. A nameless index is still an index.
+  const value=recordingFixture(),{Socket,spawnProcess,built}=fakes();
+  try{
+    startDeepgramLive(null,{depositionId:value.depositionId,sessionId:value.sessionId,storageRoot:value.storageRoot,apiKey:"k",WebSocketClass:Socket,spawnProcess});
+    assert.ok(built[0]?.url?.startsWith("wss://api.deepgram.com/v1/listen?"));
+    assert.deepEqual(new URL(built[0].url).searchParams.getAll("keyterm"),[]);
   }finally{await stopDeepgramLive(null,{sessionId:value.sessionId}).catch(()=>{});fs.rmSync(value.root,{recursive:true,force:true})}
 });

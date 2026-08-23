@@ -7,8 +7,9 @@ import {depositionDirectory} from "./deposition-store.mjs";
 import {getCaptureSession} from "./live-capture.mjs";
 import {captureSessionRoot} from "./storage-config.mjs";
 import {appendLiveAnnotation,readLiveAnnotations} from "./live-annotation-log.mjs";
+import {KEYTERM_PRODUCT_CAP} from "./keyterm-limits.mjs";
 
-export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.1.0";
+export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.2.0";
 // Channels that carry more than one voice, and therefore need diarization to produce turn breaks.
 //
 // A RULING, 2026-08-19, not a defect. The earlier reasoning was that a dedicated microphone carries
@@ -44,7 +45,28 @@ function recordWriteFailure(runtime,kind,error){
 /* One owner of where a live session's files sit, so the annotation log cannot drift into a
    different directory from the events it annotates. */
 export function liveSessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{directory,file:path.join(directory,"live-session.json"),events:path.join(directory,"live-events.jsonl"),annotations:path.join(directory,"live-annotations.jsonl")}}
-export function buildDeepgramLiveUrl(source){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");return `wss://api.deepgram.com/v1/listen?${query}`}
+/**
+ * The live socket URL, with the deposition's own names attached.
+ *
+ * Names are what a deposition turns on, and they are what streaming ASR gets wrong: Etminan,
+ * Cukjati, Bardot, Herber are not in any general vocabulary. The batch pass already builds this
+ * list from the people the deposition actually has and gets them right; the live index was opening
+ * its socket without it and guessing at every one. The list already existed -- nothing passed it.
+ *
+ * Deepgram takes `keyterm` repeated per term on Nova-3 streaming. The product cap of 50 is well
+ * inside Deepgram's 500-token request ceiling, so the cap that applies is Depo-Pro's own.
+ *
+ * The cap is applied here rather than by the caller. It was enforced in one line in local-api's
+ * liveKeyterms, which is correct for the one caller there is and worth nothing against the next
+ * one -- and the test that read as covering it asserted only that the constant equals 50, which is
+ * true whether or not anything applies it. Removing that line passed the whole suite. Holding the
+ * cap in the function that builds the request means no caller can exceed it.
+ *
+ * An unassigned capture has no deposition and therefore no list. It connects without one rather
+ * than failing: recording is the thing that must not be blocked, and a nameless index is still an
+ * index.
+ */
+export function buildDeepgramLiveUrl(source,keyterms=[]){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");for(const term of keyterms.slice(0,KEYTERM_PRODUCT_CAP))query.append("keyterm",term);return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
 const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
 /*
@@ -102,7 +124,7 @@ export function feedArgs(source){
   const select=channelIndex===null?[]:["-af",`pan=mono|c0=c${channelIndex}`];
   return ["-hide_banner","-loglevel","warning","-re","-i",filePath,...select,...output];
 }
-export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,WebSocketClass=WebSocket,spawnProcess=spawn}={}){
+export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKey,keyterms=[],WebSocketClass=WebSocket,spawnProcess=spawn}={}){
   if(!apiKey)throw new Error("Deepgram is not configured. Local recording continues without live text.");
   const capture=getCaptureSession(root,{depositionId,sessionId,storageRoot});
   if(capture.state!=="RECORDING")throw new Error("Local recording must be running before Deepgram Live starts.");
@@ -114,7 +136,7 @@ export function startDeepgramLive(root,{depositionId,sessionId,storageRoot,apiKe
      socket is close to certain and used to end that channel's index for good. */
   const connect=connection=>{
     const {source}=connection,channel=record.channels.find(item=>item.id===source.id);
-    const url=buildDeepgramLiveUrl(source),socket=new WebSocketClass(url,{headers:{Authorization:`Token ${apiKey}`}});
+    const url=buildDeepgramLiveUrl(source,keyterms),socket=new WebSocketClass(url,{headers:{Authorization:`Token ${apiKey}`}});
     connection.socket=socket;socket.binaryType="arraybuffer";
     channel.connectionState="CONNECTING";channel.epoch=connection.epoch;
 
