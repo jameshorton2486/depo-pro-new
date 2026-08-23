@@ -107,9 +107,11 @@ type Unassigned = {
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
 export default function LiveCaptureScreen({
   deposition,
+  onRecoveredDeposition,
   onBack,
 }: {
   deposition: LibraryDeposition | null;
+  onRecoveredDeposition: (depositionId: string) => Promise<boolean>;
   onBack: () => void;
 }) {
   const [devices, setDevices] = useState<Device[]>([]),
@@ -217,6 +219,13 @@ export default function LiveCaptureScreen({
   const reattach = useCallback((item: Recoverable) => {
     setChoices([]);
     setRecoveredDepositionId(item.depositionId ?? "");
+    if (item.depositionId)
+      void onRecoveredDeposition(item.depositionId)
+        .then((restored) => {
+          if (!restored)
+            setError(`Recording recovered, but deposition ${item.depositionId} could not be found. Recording continues under the recovered server session.`);
+        })
+        .catch(() => setError("Recording recovered, but its deposition could not be loaded. Recording continues under the recovered server session."));
     const query = `depositionId=${encodeURIComponent(item.depositionId ?? "")}&sessionId=${encodeURIComponent(item.sessionId)}`;
     fetch(`${API}/api/live-capture/session?${query}`)
       .then((response) => response.json())
@@ -228,7 +237,7 @@ export default function LiveCaptureScreen({
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => payload && setLive(payload))
       .catch(() => undefined);
-  }, []);
+  }, [onRecoveredDeposition]);
   useEffect(() => {
     let current = true;
     fetch(`${API}/api/live-capture/recoverable`)
