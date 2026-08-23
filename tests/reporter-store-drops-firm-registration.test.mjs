@@ -43,9 +43,7 @@ const SHAPES = [
 
 test("a profile written through the store never carries a firm registration number", (t) => {
   const root = scratch(t);
-  for (const [label, extra] of SHAPES) {
-    createReporter(root, profile(extra));
-  }
+  for (const [, extra] of SHAPES) createReporter(root, profile(extra));
   const stored = listReporters(root);
   assert.equal(stored.length, SHAPES.length, "every profile was written");
   for (const [index, reporter] of stored.entries()) {
