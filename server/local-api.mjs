@@ -111,6 +111,9 @@ async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivat
 /**
  * The deposition's keyterms for the live socket, or none.
  *
+ * The cap is not applied here. buildDeepgramLiveUrl holds it, so it cannot be bypassed by a
+ * caller that forgets -- which is what this line was.
+ *
  * Read leniently on purpose. authoritativeKeyterms throws for a transcription job, correctly --
  * that set is part of job identity and a wrong one is an evidentiary problem. Here the list only
  * improves recognition in an index, so a deposition without intake, or an unassigned capture with
@@ -121,7 +124,7 @@ function liveKeyterms(depositionId) {
   try {
     const intake = readDepositionIntake(root, depositionId, { storageRoot:depositionStorageRoot });
     const source = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
-    return (Array.isArray(source) ? source : []).map(term => String(term).trim()).filter(Boolean).slice(0, KEYTERM_PRODUCT_CAP);
+    return (Array.isArray(source) ? source : []).map(term => String(term).trim()).filter(Boolean);
   } catch { return []; }
 }
 

@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import {depositionDirectory} from "./deposition-store.mjs";
 import {getCaptureSession} from "./live-capture.mjs";
 import {captureSessionRoot} from "./storage-config.mjs";
+import {KEYTERM_PRODUCT_CAP} from "./keyterm-limits.mjs";
 
 export const DEEPGRAM_LIVE_CONFIGURATION_VERSION="deepgram-live-v1.2.0";
 // Channels that carry more than one voice, and therefore need diarization to produce turn breaks.
@@ -32,11 +33,17 @@ function locations(root,depositionId,sessionId,storageRoot){const deposition=dep
  * Deepgram takes `keyterm` repeated per term on Nova-3 streaming. The product cap of 50 is well
  * inside Deepgram's 500-token request ceiling, so the cap that applies is Depo-Pro's own.
  *
+ * The cap is applied here rather than by the caller. It was enforced in one line in local-api's
+ * liveKeyterms, which is correct for the one caller there is and worth nothing against the next
+ * one -- and the test that read as covering it asserted only that the constant equals 50, which is
+ * true whether or not anything applies it. Removing that line passed the whole suite. Holding the
+ * cap in the function that builds the request means no caller can exceed it.
+ *
  * An unassigned capture has no deposition and therefore no list. It connects without one rather
  * than failing: recording is the thing that must not be blocked, and a nameless index is still an
  * index.
  */
-export function buildDeepgramLiveUrl(source,keyterms=[]){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");for(const term of keyterms)query.append("keyterm",term);return `wss://api.deepgram.com/v1/listen?${query}`}
+export function buildDeepgramLiveUrl(source,keyterms=[]){const query=new URLSearchParams({model:"nova-3",language:"en-US",encoding:"linear16",sample_rate:"16000",channels:"1",interim_results:"true",endpointing:"300",punctuate:"true",smart_format:"true",filler_words:"true",profanity_filter:"false",vad_events:"true"});if(SHARED_ROLES.has(source.role))query.set("diarize","true");for(const term of keyterms.slice(0,KEYTERM_PRODUCT_CAP))query.append("keyterm",term);return `wss://api.deepgram.com/v1/listen?${query}`}
 function publicRecord(record){return structuredClone(record)}
 const EVENTS_IN_MEMORY=400, LINE_END=String.fromCharCode(10);
 /*

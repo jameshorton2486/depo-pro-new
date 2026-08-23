@@ -55,5 +55,19 @@ test("no other ASR setting moved", () => {
 });
 
 test("the product cap is what applies, well inside Deepgram's request ceiling", () => {
-  assert.equal(KEYTERM_PRODUCT_CAP, 50);
+  // This asserted only that the constant equals 50, which is true whether or not anything applies
+  // it. The cap lived in one line in local-api's liveKeyterms, and deleting that line passed the
+  // whole suite -- 656 tests, none of which could tell. It is held in buildDeepgramLiveUrl now, so
+  // the assertion is about the request that actually gets built.
+  assert.equal(KEYTERM_PRODUCT_CAP, 50, "and the number itself, so a silent raise is visible here");
+  const offered = Array.from({ length: 120 }, (unusedValue, index) => `Name${index}`);
+  const sent = terms(buildDeepgramLiveUrl(ROOM, offered));
+  assert.equal(sent.length, KEYTERM_PRODUCT_CAP, "120 offered, 50 sent");
+  assert.deepEqual(sent, offered.slice(0, KEYTERM_PRODUCT_CAP), "and the first fifty, in order");
+});
+
+test("a list inside the cap is sent whole, so the cap is not just truncating everything", () => {
+  // The positive control. A builder that emitted nothing would pass the assertion above.
+  const offered = Array.from({ length: KEYTERM_PRODUCT_CAP }, (unusedValue, index) => `Name${index}`);
+  assert.deepEqual(terms(buildDeepgramLiveUrl(ROOM, offered)), offered);
 });
