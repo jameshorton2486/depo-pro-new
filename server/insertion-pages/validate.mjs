@@ -40,7 +40,19 @@ function validateVariant(input, findings) {
   } else if (detected && detected !== input.jurisdiction) {
     findings.push(blocking("CERT_JURISDICTION_MISMATCH", "cert.jurisdiction", `Caption court '${input.caption.court}' indicates ${detected}, but the operator selected ${input.jurisdiction}.`, { path: "jurisdiction" }));
   }
-  if (!input.template?.available) {
+  // Two different facts, and a reader has to be able to tell them apart. UNAVAILABLE means no
+  // reviewed template exists for this variant at all -- the federal stubs, where the answer is to
+  // supply the source. UNAPPROVED means a reviewed template exists, its bytes match its manifest
+  // hashes, and the content it now has is not the content anyone approved -- where the answer is
+  // to look at the edit and re-approve it. Reporting the second as the first would send whoever
+  // reads it looking for a missing file that is sitting right there.
+  const approval = input.template?.approval;
+  if (approval && approval.state !== "current") {
+    findings.push(blocking("CERT_TEMPLATE_UNAPPROVED", `template.${input.variant}`, approval.state === "stale"
+      ? `The ${input.variant} templates were edited after their last approval (approved content ${String(approval.approvedDigest).slice(0, 12)}, current content ${approval.contentDigest.slice(0, 12)}). Review the edit, then record approval with: node scripts/approve-insertion-template.mjs ${input.variant} --by "<name>".`
+      : `No approval is recorded for ${input.variant} in templates/insertion-pages/approvals.json, so its reviewed templates cannot generate certified pages.`,
+    { path: "template" }));
+  } else if (!input.template?.available) {
     findings.push(blocking("CERT_TEMPLATE_UNAVAILABLE", `template.${input.variant}`, `No reviewed template is available for ${input.variant}; expected ${input.template?.expectedPath ?? "its variant template directory"}.`, { path: "template" }));
   }
 }

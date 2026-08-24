@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "available": true,
   "reviewStatus": "reviewed",
+  "approvalRecord": "templates/insertion-pages/approvals.json is what gates generation. reviewedBy and reviewedAt below are provenance notes about the source figures and enforce nothing.",
   "reviewedBy": "project-owner-approved-UFM-source",
   "reviewedAt": "2026-08-24",
   "sourceFigures": [3, 4, 9, "9A", 11],
