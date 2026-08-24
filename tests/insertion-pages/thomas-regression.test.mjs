@@ -79,6 +79,8 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "INDEX_PAGE_MISMATCH:index.section.changesAndSignature",
     "INDEX_UNRESOLVED_ENTRY:index.page.75",
     "INDEX_UNRESOLVED_ENTRY:index.section.changesAndSignature",
+    "UNEXPECTED_BLANK:cert.chargesResponsibleParty",
+    "UNEXPECTED_BLANK:cert.furtherCertificationDate",
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",

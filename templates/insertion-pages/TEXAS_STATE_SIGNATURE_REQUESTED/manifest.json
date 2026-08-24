@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "available": true,
   "reviewStatus": "reviewed",
-  "reviewedBy": "project-owner-approved-UFM-source",
-  "reviewedAt": "2026-08-14",
+  "reviewedBy": "field-inventory-addition-pending-project-owner-approval",
+  "reviewedAt": "2026-08-24",
   "sourceFigures": [3, 4, 7, "7A", 8, "8A", "8B", 11],
   "scope": "field-inventory-only; certification prose is deferred to step 6",
   "templates": {
     "fieldInventory": {
       "file": "field-inventory.tmpl",
-      "sha256": "5b3bbc5f3ed9fa1c122e289b21a4e5baa62b37d38e4cf5106df5e51d43e3c6a2"
+      "sha256": "acad6c839131fc9a2b22518dc3698d36c8d1fd872c79b7c072b2a3624078e32d"
     },
     "title": { "file": "../common/title.tmpl", "sha256": "20f82cb6050c8fdf7babf4f5891b937117a4b5497b2701dda3d8da464efbd5de" },
     "appearances": { "file": "../common/appearances.tmpl", "sha256": "f05b1933925306924a164725b184e57d01a1747cec8fdfa4f2f4c192ee777fda" },

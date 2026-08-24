@@ -108,6 +108,10 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     index: pagination.index ?? { entries: [], actualSectionPages: {}, declaredSectionPages: {} },
     timeUsed: operator.timeUsed ?? null,
     presentation: operator.presentation ?? {},
+    // validateFields reads this map, not the values build-pages composes later -- so a name in a
+    // variant's field inventory that is absent here is blank on every render, and blocks
+    // unconditionally. cert.chargesResponsibleParty and cert.furtherCertificationDate print on the
+    // certificate but were in neither map; they are carried here so the inventory can guard them.
     fieldValues: {
       "caption.court": court,
       "caption.causeNumber": causeNumber,
@@ -126,8 +130,10 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.returnStatus": operator.certification?.returnStatus ?? null,
       "cert.custodialAttorney": operator.certification?.custodialAttorney ?? null,
       "cert.charges": operator.certification?.charges ?? null,
+      "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? null,
       "cert.serviceDate": operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? null,
+      "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? null,
       "reporter.name": reporter.name,
       "reporter.csrNumber": reporter.csrNumber,
       "reporter.csrExpirationDate": reporter.csrExpirationDate,

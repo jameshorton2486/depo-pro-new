@@ -122,8 +122,12 @@ function waivedFields(input) {
 }
 
 function validateFields(input, findings) {
-  // Validate the canonical pre-render inventory here. Page-specific composition fields
-  // are produced by build-pages and are checked after substitution for surviving carets.
+  // Validate the canonical pre-render inventory here. There is no second pass: a caret cannot
+  // survive substitution to be caught later, because renderTemplatePage omits any line whose
+  // fields are all absent before it substitutes anything. A field that reaches a page but is
+  // named in no inventory is therefore checked nowhere, and its line disappears silently --
+  // which is how the waived certificate came to print "That the original deposition was
+  // delivered to" with no object and no finding. This set is the only guard there is.
   const fields = new Set(input.template?.templates?.fieldInventory?.fields ?? []);
   const allowed = new Set(INTENTIONAL_BLANKS[input.variant] ?? []);
   const waived = waivedFields(input);

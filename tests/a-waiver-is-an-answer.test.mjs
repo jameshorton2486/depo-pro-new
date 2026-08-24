@@ -66,7 +66,10 @@ const render = (s, operatorExtra = {}) =>
     s.depositionId,
     {
       mode: "standalone",
-      operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.", ...operatorExtra },
+      // certification is supplied for the same reason pagination is: cert.chargesResponsibleParty
+      // and cert.furtherCertificationDate now reach the guard and nothing collects them yet.
+      operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
+        certification: { chargesResponsibleParty: "Plaintiff", furtherCertificationDate: "August 30, 2026" }, ...operatorExtra },
       pagination: {
         index: {
           entries: [], actualSectionPages: {}, declaredSectionPages: {},

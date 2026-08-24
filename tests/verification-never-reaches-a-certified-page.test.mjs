@@ -82,6 +82,9 @@ const render = (s) =>
         signatureDisposition: "requested",
         signatureDispositionBasis: "Requested on the record.",
         reporter: { firmName: "Bardot Reporting", firmRegistrationNumber: "7788" },
+        // Supplied for the same reason pagination is: these two certificate fields now reach the
+        // guard and nothing collects them yet. Not what this file is about.
+        certification: { chargesResponsibleParty: "Plaintiff", furtherCertificationDate: "August 30, 2026" },
       },
       pagination: {
         index: {
