@@ -46,7 +46,8 @@ type Deposition = {
 
 type CourtReporter = {
   id: string; name: string; company: string; email: string; phone: string;
-  licenseNumber: string; taxId: string; address: string;
+  licenseNumber: string; csrExpiration: string; taxId: string; address: string;
+  firmRegistrationWaiver: string;
 };
 
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
@@ -226,7 +227,9 @@ export default function Home() {
     const reporter: CourtReporter = {
       id: crypto.randomUUID(), name: String(data.get("name")), company: String(data.get("company")),
       email: String(data.get("email")), phone: formatPhoneNumber(String(data.get("phone"))),
-      licenseNumber: String(data.get("licenseNumber")), taxId: String(data.get("taxId")), address: String(data.get("address")),
+      licenseNumber: String(data.get("licenseNumber")), csrExpiration: String(data.get("csrExpiration")),
+      taxId: String(data.get("taxId")), address: String(data.get("address")),
+      firmRegistrationWaiver: String(data.get("firmRegistrationWaiver")),
     };
     try{
       const saved=await postJson<CourtReporter>("/api/reporters",reporter);
@@ -392,7 +395,15 @@ export default function Home() {
             <form onSubmit={createReporter}>
               <div className="form-row"><label>Full name<input name="name" required placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
               <div className="form-row"><label>Email address<input name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
-              <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
+              <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>CSR expiration<input name="csrExpiration" type="date" /></label></div>
+              <div className="form-row"><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
+              {/* Both of these are required by a certified page and had no input at all. Every
+                  reviewed Texas certificate prints the CSR expiration, and validateInsertionInput
+                  blocks without it. The waiver is how a reporter with no firm answers the firm
+                  registration requirement -- the validator has honoured it since this evening, but
+                  nothing could record one, so the stored value was always "" and an empty waiver is
+                  not a waiver. */}
+              <label>Firm registration waiver <small>Why no firm registration number applies. Leave empty if the firm has one.</small><textarea name="firmRegistrationWaiver" rows={2} placeholder="Certifies under an individual Texas CSR; no firm registration applies." /></label>
               <label>Mailing address<textarea name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>
               <p className="sensitive-note">Tax ID information is stored only on this computer. Protect access to this device and its browser profile.</p>
               <div className="modal-actions"><button type="button" onClick={() => setShowReporterModal(false)}>Cancel</button><button className="primary-button" type="submit">Save Court Reporter</button></div>
