@@ -25,6 +25,20 @@ function attorneyFromCanonical(attorney) {
 
 const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, reason:String(reason).trim() } : null);
 
+// `override` is operator.reporter, an unvalidated construction path into the reporter profile
+// that bypasses the store entirely. The app never populates it, so it is not a live path -- but it
+// has now defeated two separate guards, and a third will meet it too.
+//
+//   reporter-store-drops-firm-registration pins that no stored profile can carry a
+//   firmRegistrationNumber; this override supplies one anyway, and that test names the gap.
+//
+//   a-waiver-is-an-answer needs waivedFields to reject a waiver with no reason. waiverFrom below
+//   already refuses a blank reason by returning null, so through the canonical path the check is
+//   unreachable -- it is reachable only because this override can hand over
+//   { applicable:false, reason:"" } directly.
+//
+// Anything written here that assumes a reporter arrived through reporter-store.mjs is assuming
+// something this parameter can falsify. Validate what you read from it, or read it from the store.
 function reporterFromCanonical(reporter = {}, override = {}) {
   return {
     name: override.name ?? canonicalValue(reporter.fullName),
