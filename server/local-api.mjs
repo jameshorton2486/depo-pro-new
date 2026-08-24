@@ -10,7 +10,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
-import {assignCaptureSession,createCaptureSession,enumerateWindowsAudioSources,getCaptureSession,listCaptureSessions,recoverableCaptureSessions,registerCaptureAudio,renameCaptureSession,startCaptureSession,stopCaptureSession} from "./live-capture.mjs";
+import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
@@ -45,6 +45,7 @@ import { depositionStorageRoot as configuredDepositionStorageRoot } from "./stor
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
+import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -109,6 +110,26 @@ async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivat
     result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 };result.delivery={source:"compatibility-wav",sha256:fallback.derivative.sha256,sourceSha256:fallback.derivative.sourceSha256,bytes:fallback.derivative.bytes,converted:true,derivativeKey:fallback.derivative.key};result.transportAttempts=[{status:error.status,code:error.code,rawResponseBytes:error.rawResponseBytes||null,headers:error.responseHeaders||{},outcome:"media_rejected"}];return result;
   }
 }
+/**
+ * The deposition's keyterms for the live socket, or none.
+ *
+ * The cap is not applied here. buildDeepgramLiveUrl holds it, so it cannot be bypassed by a
+ * caller that forgets -- which is what this line was.
+ *
+ * Read leniently on purpose. authoritativeKeyterms throws for a transcription job, correctly --
+ * that set is part of job identity and a wrong one is an evidentiary problem. Here the list only
+ * improves recognition in an index, so a deposition without intake, or an unassigned capture with
+ * no deposition at all, connects without names rather than not connecting.
+ */
+function liveKeyterms(depositionId) {
+  if (!depositionId) return [];
+  try {
+    const intake = readDepositionIntake(root, depositionId, { storageRoot:depositionStorageRoot });
+    const source = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
+    return (Array.isArray(source) ? source : []).map(term => String(term).trim()).filter(Boolean);
+  } catch { return []; }
+}
+
 const server = http.createServer(async (req,res) => {
   // The gate is correct and stays. It is also non-obvious for media, so: ANY <audio> or <video>
   // element pointed at this server MUST carry crossOrigin="anonymous". Without it the browser
@@ -139,11 +160,12 @@ const server = http.createServer(async (req,res) => {
     if (req.url?.startsWith("/api/live-capture/preflight/audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=getPreflightArtifact(root,{depositionId:url.searchParams.get("depositionId"),preflightId:url.searchParams.get("preflightId"),sourceId:url.searchParams.get("sourceId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
     if (req.url === "/api/live-capture/session" && req.method === "POST") { const input=await body(req,256*1024); return json(res,201,createCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); if(input.preflightId){const session=getCaptureSession(root,{depositionId:input.depositionId,sessionId:input.sessionId,storageRoot:depositionStorageRoot});assertArmed(root,{depositionId:input.depositionId,preflightId:input.preflightId,sources:session.sources,storageRoot:depositionStorageRoot});}return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
-    if (req.url === "/api/live-capture/deepgram/start" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();return json(res,200,startDeepgramLive(root,{...input,apiKey:config?.deepgramApiKey,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/deepgram/start" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();return json(res,200,startDeepgramLive(root,{...input,apiKey:config?.deepgramApiKey,keyterms:liveKeyterms(input.depositionId),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/deepgram/stop" && req.method === "POST") { const input=await body(req,64*1024);return json(res,200,await stopDeepgramLive(root,input),origin); }
     if (req.url === "/api/live-capture/annotation" && req.method === "POST") { const input=await body(req,64*1024); return json(res,201,recordLiveAnnotation(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/deepgram?") && req.method === "GET") { const url=new URL(req.url,"http://localhost");return json(res,200,getDeepgramLive(root,{depositionId:url.searchParams.get("depositionId"),sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/stop" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await stopCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/live-capture/recover" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await finalizeOrphanedSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
       if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
       return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
@@ -253,6 +275,15 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
     if(req.url?.startsWith("/api/transcript/working?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getWorkingTranscript(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
+    if(req.url?.startsWith("/api/opening?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,getOpeningProjection(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/opening"&&req.method==="POST"){
+      const input=await body(req,256*1024);
+      saveOpeningState(root,{depositionId:input.depositionId,state:input.state,storageRoot:depositionStorageRoot});
+      return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
       // What the Workspace reads: the projection joined to its evidence, carrying transcript
       // labels and addressable word spans. GET only -- nothing here writes, and the render is

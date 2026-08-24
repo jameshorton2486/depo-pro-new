@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "dist/**",
     "out/**",
+    ".verify-*/**",
     "next-env.d.ts",
   ]),
   eslint.configs.recommended,

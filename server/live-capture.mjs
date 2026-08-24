@@ -13,6 +13,10 @@ const active=new Map(),SOURCE_ID=/^[a-z][a-z0-9-]{0,63}$/;
 const now=()=>new Date().toISOString();
 function atomicJson(file,value){const temp=`${file}.${crypto.randomUUID()}.tmp`,fd=fs.openSync(temp,"wx");try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}fs.renameSync(temp,file)}
 function sha256(file){const hash=crypto.createHash("sha256");return new Promise((resolve,reject)=>{const input=fs.createReadStream(file);input.on("data",chunk=>hash.update(chunk));input.on("error",reject);input.on("end",()=>resolve(hash.digest("hex")))})}
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Absent rather than zero: a file that is not there yet and a file of no length are different
+// answers, and only one of them means a channel never started.
+function fileSize(file){try{return fs.statSync(file).size}catch{return null}}
 function safeDevice(value){const name=String(value??"").trim();if(!name||/[\r\n]/.test(name))throw new Error("A valid Windows audio device is required.");return name}
 function sessionPaths(root,depositionId,sessionId,storageRoot){const deposition=depositionId?depositionDirectory(root,depositionId,{storageRoot}):captureSessionRoot();const directory=depositionId?path.join(deposition,"live-capture",sessionId):path.join(deposition,sessionId);return{deposition,directory,manifest:path.join(directory,"capture-session.json")}}
 function readManifest(paths){return JSON.parse(fs.readFileSync(paths.manifest,"utf8"))}
@@ -26,7 +30,67 @@ function publicSession(value,{now=Date.now}={}){const copy=structuredClone(value
 
 export function parseDirectShowDevices(text){const devices=[],lines=String(text??"").split(/\r?\n/);for(let index=0;index<lines.length;index++){const match=lines[index].match(/\]\s+"([^"]+)" \(audio\)/);if(!match)continue;const alternative=lines[index+1]?.match(/Alternative name "([^"]+)"/);devices.push({id:alternative?.[1]??match[1],name:match[1],backend:"windows-directshow",kind:/stereo mix|loopback|virtual|cable/i.test(match[1])?"loopback":"input"})}return devices}
 export function enumerateWindowsAudioSources({run=spawnSync}={}){if(process.platform!=="win32")return{platform:process.platform,supported:false,devices:[],error:"Live capture v1 requires Windows 11."};const result=run("ffmpeg",["-hide_banner","-list_devices","true","-f","dshow","-i","dummy"],{encoding:"utf8",windowsHide:true,timeout:15000});const devices=parseDirectShowDevices(`${result.stdout??""}\n${result.stderr??""}`);return{platform:"win32",supported:true,backend:"windows-directshow",devices,error:devices.length?null:(result.error?.message||"No Windows audio input or loopback sources were found.")}}
-function validateSources(sources){if(!Array.isArray(sources)||!sources.length)throw new Error("Configure at least one independent audio source.");const ids=new Set();return sources.map((source,index)=>{const id=String(source.id??`ch${index+1}`);if(!SOURCE_ID.test(id)||ids.has(id))throw new Error("Every source requires a unique stable channel ID.");ids.add(id);return{id,ordinal:index,role:String(source.role??"UNASSIGNED"),deviceId:safeDevice(source.deviceId),deviceName:safeDevice(source.deviceName??source.deviceId),backend:"windows-directshow",state:"CONFIGURED",format:{container:"wav",codec:"pcm_s24le",sampleRate:null,channels:null,bitsPerSample:24},timing:{configuredAt:now(),captureStartMonotonicNs:null,captureEndMonotonicNs:null},health:{rmsDb:null,peakDb:null,silence:true,clipping:false,receivedAudio:false,silentSince:null,droppedFrames:0,deviceLossEvents:0,errors:[]},artifact:null}})}
+/**
+ * A capture source that reads a file instead of a microphone.
+ *
+ * This exists to drive the live path with known audio -- four channels, an hour of dialogue, the
+ * same content every run -- none of which a room with two microphones in it can provide. It is a
+ * development instrument, and everything about it is arranged so that what it produces can never be
+ * mistaken for, or promoted into, a record of a proceeding:
+ *
+ *   - It is refused unless DEPO_PRO_ALLOW_FILE_CAPTURE=1 is set in the environment, so it is not
+ *     reachable at all on a reporter's machine.
+ *   - Any session containing one is marked synthetic, and assignCaptureSession and
+ *     registerCaptureAudio both refuse a synthetic session outright. Synthetic audio cannot become
+ *     a deposition's evidence by any path through this module.
+ *   - It is not offered on the Live Deposition screen. Driving it is a deliberate act from a
+ *     script, not a device a reporter could pick by accident.
+ *
+ * The gate is read at call time rather than at import, so a test can turn it on and off around
+ * itself rather than the whole process inheriting it.
+ */
+export const FILE_CAPTURE_FLAG="DEPO_PRO_ALLOW_FILE_CAPTURE";
+/**
+ * The capability to read audio from a file, held as a symbol.
+ *
+ * The environment flag alone was a runtime toggle, not a structure. The session route spreads the
+ * request body into createCaptureSession, so with the flag set, a POST carrying
+ * sources:[{kind:"file",...}] would have produced a synthetic session -- and a request is exactly
+ * where this must never be reachable from.
+ *
+ * A symbol closes that. JSON cannot carry one: no request body, however shaped, and no amount of
+ * spreading it into the call, can produce this value. Only a caller that imported this module holds
+ * it, which is the driver script and nothing that arrives over HTTP. The flag stays as the second
+ * condition, so the capability needs both an in-process caller and a deliberate act by the operator.
+ *
+ * This is the same shape as the catalog injection seam and the transcribable-proxy guard: not
+ * "off by default", but unreachable from the direction the danger comes from.
+ */
+export const IN_PROCESS_FILE_SOURCES=Symbol("depo-pro:in-process-file-sources");
+const fileCaptureAllowed=(environment=process.env)=>environment[FILE_CAPTURE_FLAG]==="1";
+function validateFileSource(source,environment,capability){
+  if(capability!==IN_PROCESS_FILE_SOURCES)throw new Error("A file-backed capture source cannot be requested. It is available only to a caller inside this process, and never over the API.");
+  if(!fileCaptureAllowed(environment))throw new Error(`A file-backed capture source is a development instrument and is refused unless ${FILE_CAPTURE_FLAG}=1 is set.`);
+  const filePath=String(source.filePath??"").trim();
+  if(!filePath)throw new Error("A file-backed source requires the path of the audio file to read.");
+  const resolved=path.resolve(filePath);
+  if(!fs.existsSync(resolved))throw new Error(`The audio file for this source was not found: ${resolved}`);
+  const channelIndex=source.channelIndex==null?null:Number(source.channelIndex);
+  if(channelIndex!==null&&(!Number.isInteger(channelIndex)||channelIndex<0))throw new Error("channelIndex selects one channel of the file and must be a non-negative integer.");
+  // Size and mtime now; the content hash is taken at stop, beside the artifact hashes, because it
+  // is the same question asked of the same bytes and one place should answer it.
+  const stat=fs.statSync(resolved);
+  return {filePath:resolved,channelIndex,bytes:stat.size,modifiedAt:stat.mtime.toISOString(),sha256:null};
+}
+function validateSources(sources,{environment=process.env,fileSources}={}){if(!Array.isArray(sources)||!sources.length)throw new Error("Configure at least one independent audio source.");const ids=new Set();return sources.map((source,index)=>{const id=String(source.id??`ch${index+1}`);if(!SOURCE_ID.test(id)||ids.has(id))throw new Error("Every source requires a unique stable channel ID.");ids.add(id);
+  const file=source.kind==="file"?validateFileSource(source,environment,fileSources):null;
+  // A file source is identified by the file it reads and the channel it takes from it, so that two
+  // channels of one fixture are two distinct sources rather than one repeated -- which is what the
+  // preflight device signature and the duplicate checks both rely on.
+  const deviceId=file?`file:${file.filePath}${file.channelIndex===null?"":`#${file.channelIndex}`}`:safeDevice(source.deviceId);
+  const deviceName=file?`${path.basename(file.filePath)}${file.channelIndex===null?"":` ch${file.channelIndex+1}`}`:safeDevice(source.deviceName??source.deviceId);
+  return{id,ordinal:index,role:String(source.role??"UNASSIGNED"),deviceId,deviceName,backend:file?"file":"windows-directshow",sourceFile:file,state:"CONFIGURED",format:{container:"wav",codec:"pcm_s24le",sampleRate:null,channels:null,bitsPerSample:24},timing:{configuredAt:now(),captureStartMonotonicNs:null,captureEndMonotonicNs:null},health:{rmsDb:null,peakDb:null,silence:true,clipping:false,receivedAudio:false,silentSince:null,droppedFrames:0,deviceLossEvents:0,errors:[]},artifact:null}})}
+const isSynthetic=session=>(session.sources??[]).some(source=>source.backend==="file");
 /**
  * A session that does not yet belong to a deposition is identified by its label and nothing else.
  *
@@ -36,10 +100,16 @@ function validateSources(sources){if(!Array.isArray(sources)||!sources.length)th
  * picking the right recording out of three days of them; once the session is assigned, the
  * deposition supplies the real identity and the label stops mattering.
  */
-export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot}={}){
+export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot,fileSources}={}){
   const startedAt=now();
   const sessionLabel=String(label??"").trim()||`Recording ${startedAt.slice(0,10)} ${startedAt.slice(11,16)}`;
-  const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validateSources(sources),events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
+  const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);
+  // Validate before anything is created on disk. A refused session used to leave an empty session
+  // folder behind -- and for a deposition-scoped one, inside the deposition's own record, which is
+  // the last place to leave litter. Nothing here writes until the sources are known to be good.
+  const validated=validateSources(sources,{fileSources}),synthetic=isSynthetic({sources:validated});
+  fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});
+  const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:synthetic?{channelsSampleAligned:true,interChannelOffsetMeasured:false,reason:"Every channel is read from position zero of a file, so the channels carry the same span of source audio and are aligned in content. This is a property of reading a file and says nothing about microphones: it is the reason a synthetic session cannot stand in for a captured one when the question is timing.",doNotUseFor:"Anything. This session is synthetic. It is not a recording of a proceeding and cannot be attached to a deposition."}:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validated,synthetic,events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
 function recordPath(paths,source){return path.join(paths.directory,"channels",`${String(source.ordinal+1).padStart(2,"0")}-${source.id}.wav`)}
 // astats prints "RMS level dB:" only in its end-of-stream summary, so during a recording that runs
 // for hours it prints nothing at all -- which is why the meters were dead for the whole capture
@@ -58,10 +128,88 @@ const LEVEL_FILTER="astats=metadata=1:reset=25,ametadata=mode=print:key=lavfi.as
 // Both forms are read: the streaming metadata that arrives throughout, and the summary that arrives
 // at the end. The last reading wins, which is what a meter shows.
 function observeHealth(source,text,{now=Date.now}={}){const rms=[...text.matchAll(/(?:RMS level dB:\s*|lavfi\.astats\.Overall\.RMS_level=)(-?[\d.]+)/g)].at(-1),peak=[...text.matchAll(/(?:Peak level dB:\s*|lavfi\.astats\.Overall\.Peak_level=)(-?[\d.]+)/g)].at(-1);if(rms){source.health.rmsDb=Number(rms[1]);source.health.receivedAudio=source.health.rmsDb>SIGNAL_FLOOR_DB;source.health.silence=source.health.rmsDb<-55;source.health.silentSince=source.health.receivedAudio?null:(source.health.silentSince??now())}if(peak){source.health.peakDb=Number(peak[1]);source.health.clipping=source.health.peakDb>-0.5}if(/buffer.*overrun|dropped/i.test(text))source.health.droppedFrames++;}
-export function startCaptureSession(root,{depositionId,sessionId,storageRoot,spawnProcess=spawn}={}){const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);if(session.state!=="CONFIGURED")throw new Error("Only a configured capture session can start.");const origin=process.hrtime.bigint(),wall=now(),children=[];try{for(const source of session.sources){const file=recordPath(paths,source),child=spawnProcess("ffmpeg",["-hide_banner","-loglevel","info","-thread_queue_size","4096","-f","dshow","-i",`audio=${source.deviceId}`,"-map","0:a:0","-af",LEVEL_FILTER,"-c:a","pcm_s24le","-rf64","auto","-y",file],{windowsHide:true,stdio:["pipe","ignore","pipe"]});const runtime={child,stderr:""};child.stderr?.on("data",chunk=>{const text=chunk.toString();runtime.stderr=(runtime.stderr+text).slice(-16000);observeHealth(source,runtime.stderr)});child.once("exit",code=>{if(session.state==="RECORDING"&&code!==0){source.state="DEVICE_LOST";source.health.deviceLossEvents++;source.health.errors.push({at:now(),message:`Capture process exited with code ${code}.`});session.state="DEGRADED";session.events.push({type:"DEVICE_LOST",at:now(),sourceId:source.id,exitCode:code})}});children.push({sourceId:source.id,...runtime});source.state="RECORDING";source.timing.captureStartMonotonicNs=(process.hrtime.bigint()-origin).toString();source.artifact={relativePath:path.relative(paths.deposition,file).replaceAll("\\","/"),bytes:null,sha256:null,finalized:false}}}catch(error){for(const item of children)item.child.kill();throw error}session.state="RECORDING";session.clock={kind:"process.hrtime.bigint",originMonotonicNs:origin.toString(),originWallClock:wall};session.events.push({type:"LOCAL_RECORDING_STARTED",at:wall,sourceIds:session.sources.map(source=>source.id)});session.updatedAt=now();atomicJson(paths.manifest,session);active.set(sessionId,{paths,session,origin,children});return publicSession(session)}
+// The difference between a microphone and a file is the input and its pacing, and nothing else:
+// same filter, same codec, same container, same level readings, so what the rest of the session
+// sees is identical either way.
+//
+// -re is what makes a file behave like a room. Without it ffmpeg reads as fast as the disk allows
+// and a ten-minute fixture is written in seconds, which exercises none of the things the live path
+// exists to do -- meters that move, a silence alarm that fires on a real interval, text arriving
+// while a reporter watches. With it, ten minutes of audio takes ten minutes.
+//
+// pan takes one channel out of a multi-channel fixture, so four processes reading one four-channel
+// file produce four independent single-channel recordings -- the shape a four-microphone room
+// produces, which is the thing being exercised.
+function captureArgs(source,file){
+  if(source.backend!=="file")return ["-hide_banner","-loglevel","info","-thread_queue_size","4096","-f","dshow","-i",`audio=${source.deviceId}`,"-map","0:a:0","-af",LEVEL_FILTER,"-c:a","pcm_s24le","-rf64","auto","-y",file];
+  const {filePath,channelIndex}=source.sourceFile;
+  const filter=channelIndex===null?LEVEL_FILTER:`pan=mono|c0=c${channelIndex},${LEVEL_FILTER}`;
+  return ["-hide_banner","-loglevel","info","-re","-i",filePath,"-map","0:a:0","-af",filter,"-c:a","pcm_s24le","-rf64","auto","-y",file];
+}
+export function startCaptureSession(root,{depositionId,sessionId,storageRoot,spawnProcess=spawn}={}){const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);if(session.state!=="CONFIGURED")throw new Error("Only a configured capture session can start.");const origin=process.hrtime.bigint(),wall=now(),children=[];try{for(const source of session.sources){const file=recordPath(paths,source),child=spawnProcess("ffmpeg",captureArgs(source,file),{windowsHide:true,stdio:["pipe","ignore","pipe"]});const runtime={child,stderr:""};child.stderr?.on("data",chunk=>{const text=chunk.toString();runtime.stderr=(runtime.stderr+text).slice(-16000);observeHealth(source,runtime.stderr)});child.once("exit",code=>{if(session.state==="RECORDING"&&code!==0){source.state="DEVICE_LOST";source.health.deviceLossEvents++;source.health.errors.push({at:now(),message:`Capture process exited with code ${code}.`});session.state="DEGRADED";session.events.push({type:"DEVICE_LOST",at:now(),sourceId:source.id,exitCode:code})}});children.push({sourceId:source.id,...runtime});source.state="RECORDING";source.timing.captureStartMonotonicNs=(process.hrtime.bigint()-origin).toString();source.artifact={relativePath:path.relative(paths.deposition,file).replaceAll("\\","/"),bytes:null,sha256:null,finalized:false}}}catch(error){for(const item of children)item.child.kill();throw error}session.state="RECORDING";session.clock={kind:"process.hrtime.bigint",originMonotonicNs:origin.toString(),originWallClock:wall};session.events.push({type:"LOCAL_RECORDING_STARTED",at:wall,sourceIds:session.sources.map(source=>source.id)});session.updatedAt=now();atomicJson(paths.manifest,session);active.set(sessionId,{paths,session,origin,children});return publicSession(session)}
 async function stopChild(item){return await new Promise(resolve=>{let settled=false;const done=()=>{if(settled)return;settled=true;resolve()};item.child.once("exit",done);try{item.child.stdin.write("q\n")}catch{/* process already closed */}setTimeout(()=>{try{item.child.kill()}catch{/* process already closed */}done()},5000)})}
 function probe(file){const result=spawnSync("ffprobe",["-v","error","-select_streams","a:0","-show_entries","stream=sample_rate,channels,bits_per_sample,duration_ts","-of","json",file],{encoding:"utf8",windowsHide:true,timeout:15000});if(result.status!==0)return null;return JSON.parse(result.stdout).streams?.[0]??null}
-export async function stopCaptureSession(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("The local capture process is not active in this application instance.");await Promise.all(runtime.children.map(stopChild));const end=process.hrtime.bigint();for(const source of runtime.session.sources){const file=recordPath(runtime.paths,source),child=runtime.children.find(item=>item.sourceId===source.id),media=fs.existsSync(file)?probe(file):null;source.state=fs.existsSync(file)?"FINALIZED":"FAILED";source.timing.captureEndMonotonicNs=(end-runtime.origin).toString();if(child?.stderr&&/device|buffer|overrun|lost|error/i.test(child.stderr))source.health.errors.push({at:now(),message:child.stderr.slice(-2000)});if(fs.existsSync(file)){source.format.sampleRate=Number(media?.sample_rate)||null;source.format.channels=Number(media?.channels)||null;source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true}}}runtime.session.state=runtime.session.sources.every(source=>source.state==="FINALIZED")?"FINALIZED":"DEGRADED";runtime.session.events.push({type:"LOCAL_RECORDING_STOPPED",at:now()});runtime.session.updatedAt=now();atomicJson(runtime.paths.manifest,runtime.session);active.delete(sessionId);return publicSession(runtime.session)}
+export async function stopCaptureSession(_root,{sessionId}={}){const runtime=active.get(sessionId);if(!runtime)throw new Error("The local capture process is not active in this application instance.");await Promise.all(runtime.children.map(stopChild));const end=process.hrtime.bigint();for(const source of runtime.session.sources){const file=recordPath(runtime.paths,source),child=runtime.children.find(item=>item.sourceId===source.id),media=fs.existsSync(file)?probe(file):null;source.state=fs.existsSync(file)?"FINALIZED":"FAILED";source.timing.captureEndMonotonicNs=(end-runtime.origin).toString();if(child?.stderr&&/device|buffer|overrun|lost|error/i.test(child.stderr))source.health.errors.push({at:now(),message:child.stderr.slice(-2000)});if(fs.existsSync(file)){source.format.sampleRate=Number(media?.sample_rate)||null;source.format.channels=Number(media?.channels)||null;source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true}}}
+  // What produced this audio, hashed at the same moment as the audio itself. Hashed once per
+  // distinct file rather than once per channel: four channels of one fixture are one set of bytes,
+  // and hashing 230 MB four times to learn the same answer is four times the wait for nothing.
+  const fileHashes=new Map();
+  for(const source of runtime.session.sources){
+    if(!source.sourceFile)continue;
+    const {filePath}=source.sourceFile;
+    if(!fileHashes.has(filePath))fileHashes.set(filePath,await sha256(filePath));
+    source.sourceFile.sha256=fileHashes.get(filePath);
+  }
+  runtime.session.state=runtime.session.sources.every(source=>source.state==="FINALIZED")?"FINALIZED":"DEGRADED";runtime.session.events.push({type:"LOCAL_RECORDING_STOPPED",at:now()});runtime.session.updatedAt=now();atomicJson(runtime.paths.manifest,runtime.session);active.delete(sessionId);return publicSession(runtime.session)}
+/**
+ * Finalizes a capture whose application instance ended before it was stopped.
+ *
+ * ffmpeg outlives the process that spawned it. When the local API dies mid-recording the audio
+ * keeps arriving, but the handle that stops it is gone with the Map above, so stopCaptureSession
+ * can only report that it is not holding the session. The manifest then stays at RECORDING for
+ * good: unhashed, not finalized, and refused by registerCaptureAudio and assignCaptureSession
+ * alike. The recording exists on disk and cannot be attached to anything.
+ *
+ * This finalizes it from the file instead of from the process. What it will not do is pretend the
+ * stop was seen:
+ *
+ *   - captureEndMonotonicNs stays null. The moment capture ended is not recoverable after the
+ *     fact, and a plausible number here would be a guess written into an evidentiary record.
+ *   - The session lands in DEGRADED, never FINALIZED, so a recovered capture is never mistaken
+ *     for one that was stopped cleanly. DEGRADED already means usable-but-something-went-wrong,
+ *     and both attachment paths already accept it.
+ *   - health is left as it was. The meters live in the dead process's memory and were never
+ *     written, so the stored levels are unobserved rather than measured, and inventing them from
+ *     the file would put a measurement in the record that nothing measured.
+ *
+ * A channel whose file is missing or will not decode is marked FAILED rather than finalized, so a
+ * truncated capture is skipped at attachment instead of carrying a hash of something unplayable.
+ */
+export async function finalizeOrphanedSession(root,{depositionId,sessionId,storageRoot,settleMs=1200,wait=delay}={}){
+  if(active.has(sessionId))throw new Error("This capture is running in this application instance. Stop it from the Live Deposition screen instead.");
+  const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
+  if(session.state!=="RECORDING")throw new Error(`Only an interrupted capture can be recovered. This session is ${session.state}.`);
+  const channels=session.sources.map(source=>({source,file:recordPath(paths,source)}));
+  // Hashing a file something is still writing hashes a moving target, and the hash is the whole
+  // point. Capture is constant-bitrate PCM, so a file that is still being recorded grows every
+  // moment; a size that changes across the settle window means a writer is still attached.
+  const before=channels.map(item=>fileSize(item.file));
+  await wait(settleMs);
+  const growing=channels.filter((item,index)=>fileSize(item.file)!==before[index]);
+  if(growing.length)throw new Error(`Still being recorded: ${growing.map(item=>item.source.id).join(", ")}. End the capture process before recovering this session.`);
+  for(const {source,file} of channels){
+    const media=fs.existsSync(file)?probe(file):null;
+    if(!media){source.state="FAILED";source.health.errors.push({at:now(),message:fs.existsSync(file)?"The recorded file could not be decoded, so it was not finalized.":"The recorded file is missing."});continue}
+    source.format.sampleRate=Number(media.sample_rate)||null;source.format.channels=Number(media.channels)||null;
+    source.artifact={...source.artifact,bytes:fs.statSync(file).size,sha256:await sha256(file),finalized:true};
+    source.state="FINALIZED";
+  }
+  session.state="DEGRADED";
+  session.events.push({type:"LOCAL_RECORDING_RECOVERED",at:now(),reason:"The application instance that started this capture ended before it was stopped. The channels were finalized and hashed from the files on disk. The moment capture ended was not observed."});
+  session.updatedAt=now();
+  atomicJson(paths.manifest,session);
+  return publicSession(session);
+}
 /**
  * Registers a finished capture session's channels as this deposition's audio.
  *
@@ -78,9 +226,15 @@ export async function stopCaptureSession(_root,{sessionId}={}){const runtime=act
  * into the loss of the record, which is the outcome the per-channel design exists to prevent. What
  * was skipped is returned rather than passed over.
  */
+/* runningCaptureSession lived here. It answered "what is this instance recording for this
+   deposition", which recoverableCaptureSessions answers more completely -- across every deposition
+   folder rather than one, and with the orphaned sessions named alongside. Two endpoints answering
+   overlapping questions disagree exactly when it matters, so discovery is one question with one
+   answer: /api/live-capture/recoverable. */
 export function registerCaptureAudio(root,{depositionId,sessionId,storageRoot}={}){
   const paths=sessionPaths(root,depositionId,sessionId,storageRoot),session=readManifest(paths);
   if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before adding it to the deposition.");
+  if(session.synthetic||isSynthetic(session))throw new Error("This session was recorded from a file, not from a microphone. Synthetic audio cannot be attached to a deposition.");
   const finalized=session.sources.filter(source=>source.state==="FINALIZED"&&source.artifact?.finalized&&source.artifact.sha256);
   const skipped=session.sources.filter(source=>!finalized.includes(source)).map(source=>({id:source.id,role:source.role,state:source.state}));
   if(!finalized.length)throw new Error("This capture session has no finalized channels to add.");
@@ -118,6 +272,7 @@ export async function assignCaptureSession(root,{sessionId,depositionId,storageR
   const paths=sessionPaths(root,null,sessionId,storageRoot),session=readManifest(paths);
   if(session.assignedDepositionId)throw new Error(`This recording is already part of deposition ${session.assignedDepositionId}.`);
   if(session.state==="RECORDING")throw new Error("Stop and finalize the recording before attaching it to a deposition.");
+  if(session.synthetic||isSynthetic(session))throw new Error("This session was recorded from a file, not from a microphone. Synthetic audio cannot be attached to a deposition.");
   const finalized=session.sources.filter(source=>source.state==="FINALIZED"&&source.artifact?.finalized&&source.artifact.sha256);
   const skipped=session.sources.filter(source=>!finalized.includes(source)).map(source=>({id:source.id,role:source.role,state:source.state}));
   if(!finalized.length)throw new Error("This recording has no finalized channels to attach.");
@@ -227,7 +382,13 @@ export function listCaptureSessions(){
   return fs.readdirSync(directory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{
     try{
       const session=JSON.parse(fs.readFileSync(path.join(directory,item.name,"capture-session.json"),"utf8"));
-      return {sessionId:session.sessionId,label:session.label,state:session.state,createdAt:session.createdAt,
+      // State comes off the disk and says what the session was doing; running says whether this
+      // instance is the one doing it. A session that reads RECORDING with nothing running is a
+      // capture whose application instance died -- the only way to tell the two apart from
+      // outside, and the difference between "leave it alone" and "this needs finalizing".
+      // synthetic says the audio never came from a microphone, which no amount of state or
+      // running can tell you and which decides whether it may ever be attached to a deposition.
+      return {sessionId:session.sessionId,label:session.label,state:session.state,running:active.has(session.sessionId),synthetic:Boolean(session.synthetic),createdAt:session.createdAt,
         assignedDepositionId:session.assignedDepositionId??null,assignedAt:session.assignedAt??null,
         channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,bytes:source.artifact?.bytes??null}))};
     }catch{return null}
