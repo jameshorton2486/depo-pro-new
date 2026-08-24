@@ -35,6 +35,20 @@ function writeJsonAtomic(destination, value) {
   fs.renameSync(temporary, destination);
 }
 
+// transcript/canonical-rendering-spec.json has no writer anywhere in this tree. Nothing produces
+// it -- not this module, not the local API, not scripts/, not the transcript print model. The only
+// reference to that path is the read below.
+//
+// So the throw two lines down reads as a missing file and is actually a missing producer, and the
+// difference matters: no amount of running the app in the right order will create it. Full Word
+// export cannot run until something writes it. `mode: "standalone"` is the only path that reaches
+// a rendered document today, and it returns an empty body rather than a transcript.
+//
+// The next author here would be assuming a spec exists because a reader for it does. It does not.
+// buildTranscriptPrintModel paginates the body and is already served at an API route, so the pages
+// exist -- what is absent is anything that writes them to this path in this shape.
+//
+// Named the same way operator.reporter is named in assemble.mjs: recorded, not fixed.
 function readCanonicalTranscriptPages(directory, request) {
   if (Array.isArray(request.transcriptPages)) return request.transcriptPages;
   if (request.mode === "standalone") return [];
