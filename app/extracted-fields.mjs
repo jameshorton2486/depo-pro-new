@@ -14,6 +14,8 @@
 // method-and-schedule block is absent because nothing reads `logistics` into the form yet, which is
 // its own fix. A key missing from this list is attributed to the reporter, which is the truthful
 // answer while nothing carries the extraction's value to the field.
+import { logisticsFields } from "./intake-logistics.mjs";
+
 const text = value => (typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim());
 const same = (a, b) => text(a) !== "" && text(a).toLowerCase() === text(b).toLowerCase();
 
@@ -34,6 +36,20 @@ export function extractedFieldKeys(ufmData, read) {
     ["county", caption.county, "canonicalCounty"],
   ];
   for (const [canonicalKey, extractedValue, formKey] of scalars) {
+    if (same(extractedValue, get(formKey))) keys.push(canonicalKey);
+  }
+
+  // The method-and-schedule block, mapped from the extractor's own key names. Only the four the
+  // extraction actually supplies appear; remote, videotaped and time_zone have no counterpart and
+  // are never declared, so they stay MISSING however this form is filled in.
+  const mapped = logisticsFields(data);
+  const mappedPairs = [
+    ["depositionDate", mapped.depositionDate, "depositionDate"],
+    ["scheduledStart", mapped.scheduledStart, "canonicalScheduledStart"],
+    ["location", mapped.location, "canonicalLocation"],
+    ["remotePlatform", mapped.remotePlatform, "canonicalRemotePlatform"],
+  ];
+  for (const [canonicalKey, extractedValue, formKey] of mappedPairs) {
     if (same(extractedValue, get(formKey))) keys.push(canonicalKey);
   }
 

@@ -17,6 +17,7 @@ import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
 import { RECOVERED_WORKSPACE_RESTORED, resolveRecoveredWorkspace } from "./workspace-recovery.mjs";
 import { extractedFieldKeys } from "./extracted-fields.mjs";
+import { logisticsFields, parseNoticeDate } from "./intake-logistics.mjs";
 
 type Deposition = {
   id: string;
@@ -373,7 +374,7 @@ export default function Home() {
               <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={intakeDraft?.deponentType || "Fact witness"}><option>Fact witness</option><option>Expert witness</option><option>Corporate representative</option><option>Party</option><option>Other</option></select></label></div>
               <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
-              <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || ""} /></label><label>Court Reporter <small>Required for local filing</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
+              <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={parseNoticeDate(intakeDraft?.depositionDate) ?? logisticsFields(intakeDraft?.ufmData).depositionDate ?? ""} /></label><label>Court Reporter <small>Required for local filing</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
               <CanonicalDataSheet seed={intakeDraft?.ufmData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
