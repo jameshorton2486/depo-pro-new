@@ -98,6 +98,14 @@ export function readOpeningState(root,{depositionId,storageRoot}={}){
   return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,"utf8")):blankState(depositionId);
 }
 
+// A verification is a checklist tick, not an attestation: `path -> true`, with no `who` and no
+// per-field `at`. That is deliberate and ADR-0021 records why -- it holds only because the value
+// never leaves workflow/opening-procedures.json. The correction log and layout-profile.mjs both
+// require provenance because they do reach a certified output; this does not.
+//
+// Before carrying a verification anywhere else -- into the canonical record, a render request, or
+// an insertion page -- read ADR-0021's reopening condition. Widening its reach is what obliges it
+// to grow `by` and `at`.
 function cleanMap(value){
   if(!value||typeof value!=="object"||Array.isArray(value))return{};
   return Object.fromEntries(Object.entries(value).filter(([key,item])=>/^[a-zA-Z0-9_.-]+$/.test(key)&&item===true));
