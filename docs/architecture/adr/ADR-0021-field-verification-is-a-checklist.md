@@ -95,8 +95,16 @@ Anything that widens reach triggers this: passing opening state into a render re
 
 ## Consequences
 
-- The evidence above is a snapshot of behaviour on 2026-08-24, not a guard. Nothing in the test
-  suite fails if a future change carries a verification into a rendered page.
+- The reopening condition is enforced by `tests/verification-never-reaches-a-certified-page.test.mjs`.
+  It is behavioural rather than a source grep, which would be built from the rule it grades: a real
+  verification is saved, a real certification page is rendered, and the output is searched for it.
+  Four mutations were run against it -- making the render read the workflow file (kills the reach
+  guard), attaching the verification to the page set (kills the reach and output guards), writing it
+  into the canonical record (kills the storage and output guards), and returning an empty page set
+  (kills only the control, which is what the control is for). Widening a verification's reach now
+  turns the suite red with a message naming this ADR.
+- That guard covers the certification-page path. It does not cover a future output that does not
+  exist yet; a new rendered artifact needs its own assertion here.
 - `deposition.remote`-style completeness aside, no certified output states that a field was
   verified, so there is currently nothing for a court to rely on here in either direction.
 - `LiveCaptureScreen` renders `readiness` as the word "Verified". That is screen wording for a
