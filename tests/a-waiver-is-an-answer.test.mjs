@@ -69,7 +69,8 @@ const render = (s, operatorExtra = {}) =>
       // certification is supplied for the same reason pagination is: cert.chargesResponsibleParty
       // and cert.furtherCertificationDate now reach the guard and nothing collects them yet.
       operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
-        certification: { chargesResponsibleParty: "Plaintiff", furtherCertificationDate: "August 30, 2026" }, ...operatorExtra },
+        certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" }, ...operatorExtra },
       pagination: {
         index: {
           entries: [], actualSectionPages: {}, declaredSectionPages: {},

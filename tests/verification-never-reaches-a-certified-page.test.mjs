@@ -84,7 +84,8 @@ const render = (s) =>
         reporter: { firmName: "Bardot Reporting", firmRegistrationNumber: "7788" },
         // Supplied for the same reason pagination is: these two certificate fields now reach the
         // guard and nothing collects them yet. Not what this file is about.
-        certification: { chargesResponsibleParty: "Plaintiff", furtherCertificationDate: "August 30, 2026" },
+        certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
       },
       pagination: {
         index: {

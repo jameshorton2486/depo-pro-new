@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
 import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
-import { counselEntry, createCanonicalDepositionRecord, partyEntry } from "./canonical-deposition-record.mjs";
+import { counselEntry, createCanonicalDepositionRecord, field, partyEntry } from "./canonical-deposition-record.mjs";
 import { applyCorrection, parseCorrectionLog, serializeCorrectionLog, validateCorrection } from "./canonical-corrections.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
@@ -179,6 +179,50 @@ export function writeDepositionCounsel(root, { depositionId, counsel, storageRoo
   const record = JSON.parse(fs.readFileSync(file, "utf8"));
   atomicJson(file, { ...record, counsel:entries });
   return { depositionId, counsel:entries };
+}
+
+/**
+ * Records the certificate facts only a reporter can supply, on an existing deposition.
+ *
+ * Narrow in the same way writeDepositionCounsel is: it reads the canonical record, merges six
+ * named keys across two blocks, and writes it back. It cannot touch the transcript, the audio
+ * audit, or any certification field it does not name.
+ *
+ * Six, not the nine the certificate prints. submittedToWitnessDate, dueDate and serviceDate are
+ * declared WORKFLOW_DERIVED -- they are facts about what the system did, and no workflow produces
+ * them yet. A reporter typing one and the record answering NOD-style that a workflow derived it is
+ * the provenance defect this application already fixed once. They stay MISSING and keep blocking.
+ *
+ * An untouched control is MISSING, not "". A blank string would be an answer nobody gave, and
+ * validateFields cannot tell it from an omission -- isBlank collapses them, so the certificate
+ * would render a dropped clause with a clean bill of health, which is what UNEXPECTED_BLANK exists
+ * to prevent. null with state MISSING is the honest record of a field left alone.
+ */
+const CERTIFICATION_FIELDS = Object.freeze(["custodialAttorney", "officerCharges", "chargesResponsibleParty", "certificationDate", "furtherCertificationDate"]);
+
+export function writeDepositionCertification(root, { depositionId, certification = {}, storageRoot } = {}) {
+  if (!certification || typeof certification !== "object" || Array.isArray(certification)) throw new Error("Certification must be an object.");
+  const unknown = Object.keys(certification).filter((key) => key !== "returnedDate" && !CERTIFICATION_FIELDS.includes(key));
+  if (unknown.length) throw new Error(`Unsupported certification field: ${unknown.join(", ")}`);
+  const entry = (value) => {
+    const text = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+    return text ? field(text, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }) : field(null, { source: "REPORTER_ENTERED", state: "MISSING" });
+  };
+
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+
+  const certified = { ...record.certification };
+  for (const key of CERTIFICATION_FIELDS) certified[key] = entry(certification[key]);
+  // cert.returnStatus renders after "returned to the deposition officer on", so it is a date, and
+  // the record already calls that signature.returnedDate. The template field keeps its name; the
+  // record keeps its meaning.
+  const signature = { ...record.signature, returnedDate: entry(certification.returnedDate) };
+
+  atomicJson(file, { ...record, certification: certified, signature });
+  return { depositionId, certification: certified, signature: { returnedDate: signature.returnedDate } };
 }
 
 export function readDepositionRecord(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"deposition.json");if(!fs.existsSync(file))throw new Error("Deposition record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}

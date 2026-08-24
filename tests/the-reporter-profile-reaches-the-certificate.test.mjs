@@ -53,7 +53,8 @@ function render(reporterProfile) {
     // certification is supplied for the same reason pagination is: cert.chargesResponsibleParty and
     // cert.furtherCertificationDate now reach the guard and nothing collects them yet.
     operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
-      certification: { chargesResponsibleParty: "Plaintiff", furtherCertificationDate: "August 30, 2026" } },
+      certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" } },
     pagination: { index: { entries: [], actualSectionPages: {}, declaredSectionPages: {},
       examinations: [{ examiner: "Ms. Moreno", startPage: 4, endPage: 58 }],
       changesAndSignature: { startPage: 61 }, reportersCertification: { startPage: 63 } } },

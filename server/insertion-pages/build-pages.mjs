@@ -56,18 +56,13 @@ function indexLines(input) {
   return lines;
 }
 
+// Only the two composed lines. The nine scalar cert.* values used to be re-read from
+// operator.certification here and spread over input.fieldValues, which meant the map the guard
+// validated and the map the page rendered from could disagree -- and once assemble began reading
+// them from the canonical record, they did: validateFields saw the reporter's answer and the page
+// printed undefined, dropping the clause anyway. One source, read once, in assemble.
 function certificationValues(input) {
-  const certification = input.operator.certification ?? {};
   return {
-    "cert.submissionDate": certification.submissionDate,
-    "cert.returnDeadline": certification.returnDeadline,
-    "cert.returnStatus": certification.returnStatus,
-    "cert.custodialAttorney": certification.custodialAttorney,
-    "cert.charges": certification.charges,
-    "cert.chargesResponsibleParty": certification.chargesResponsibleParty,
-    "cert.serviceDate": certification.serviceDate,
-    "cert.certificationDate": certification.certificationDate,
-    "cert.furtherCertificationDate": certification.furtherCertificationDate,
     "cert.timeUsedLines": (input.timeUsed?.parties ?? []).map((party) => `${party.name} - ${String(Math.floor((party.minutes ?? 0) / 60)).padStart(2, "0")} HOURS:${String((party.minutes ?? 0) % 60).padStart(2, "0")} MINUTES`).join("; "),
     "cert.counselLines": input.appearances.map((attorney) => `${attorney.name}, Attorney for ${(attorney.representing ?? []).join(", ")}`),
   };

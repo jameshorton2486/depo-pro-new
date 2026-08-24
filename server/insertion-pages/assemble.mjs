@@ -27,7 +27,7 @@ const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, 
 
 // `override` is operator.reporter, an unvalidated construction path into the reporter profile
 // that bypasses the store entirely. The app never populates it, so it is not a live path -- but it
-// has now defeated two separate guards, and a third will meet it too.
+// has now defeated three separate guards, and a fourth will meet it too.
 //
 //   reporter-store-drops-firm-registration pins that no stored profile can carry a
 //   firmRegistrationNumber; this override supplies one anyway, and that test names the gap.
@@ -36,6 +36,11 @@ const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, 
 //   already refuses a blank reason by returning null, so through the canonical path the check is
 //   unreachable -- it is reachable only because this override can hand over
 //   { applicable:false, reason:"" } directly.
+//
+//   the-reporter-profile-reaches-the-certificate and verification-never-reaches-a-certified-page
+//   both render through it, because a waived reporter could not otherwise clear UNEXPECTED_BLANK
+//   on reporter.firmName. That is the third: two guards on a certified page are satisfied there by
+//   a value no stored profile could hold.
 //
 // Anything written here that assumes a reporter arrived through reporter-store.mjs is assuming
 // something this parameter can falsify. Validate what you read from it, or read it from the store.
@@ -110,8 +115,12 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     presentation: operator.presentation ?? {},
     // validateFields reads this map, not the values build-pages composes later -- so a name in a
     // variant's field inventory that is absent here is blank on every render, and blocks
-    // unconditionally. cert.chargesResponsibleParty and cert.furtherCertificationDate print on the
-    // certificate but were in neither map; they are carried here so the inventory can guard them.
+    // unconditionally.
+    //
+    // The cert.* values are read from the canonical record, which is where the certificate form
+    // writes them with REPORTER_ENTERED provenance. operator.certification stays ahead of it as a
+    // construction path for fixtures, on the same terms as operator.reporter above: a value handed
+    // over here carries no source, so nothing may treat it as one the reporter answered.
     fieldValues: {
       "caption.court": court,
       "caption.causeNumber": causeNumber,
@@ -127,13 +136,13 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.signatureDispositionBasis": operator.signatureDispositionBasis ?? null,
       "cert.submissionDate": operator.certification?.submissionDate ?? null,
       "cert.returnDeadline": operator.certification?.returnDeadline ?? null,
-      "cert.returnStatus": operator.certification?.returnStatus ?? null,
-      "cert.custodialAttorney": operator.certification?.custodialAttorney ?? null,
-      "cert.charges": operator.certification?.charges ?? null,
-      "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? null,
+      "cert.returnStatus": operator.certification?.returnStatus ?? canonicalValue(record.signature?.returnedDate) ?? null,
+      "cert.custodialAttorney": operator.certification?.custodialAttorney ?? canonicalValue(record.certification?.custodialAttorney) ?? null,
+      "cert.charges": operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null,
+      "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? canonicalValue(record.certification?.chargesResponsibleParty) ?? null,
       "cert.serviceDate": operator.certification?.serviceDate ?? null,
-      "cert.certificationDate": operator.certification?.certificationDate ?? null,
-      "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? null,
+      "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,
+      "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? canonicalValue(record.certification?.furtherCertificationDate) ?? null,
       "reporter.name": reporter.name,
       "reporter.csrNumber": reporter.csrNumber,
       "reporter.csrExpirationDate": reporter.csrExpirationDate,

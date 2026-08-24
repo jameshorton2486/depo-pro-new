@@ -2,12 +2,20 @@ import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
 import { captionJurisdiction } from "./variants.mjs";
 
+// What is left is exactly the set with no producer: submittedToWitnessDate, dueDate and serviceDate
+// are declared WORKFLOW_DERIVED in the canonical record, and no workflow writes them. They are
+// blank because nothing can answer them yet, which is a different fact from blank because nobody
+// has been asked.
+//
+// The six a reporter can answer came off this list when the certificate form began collecting
+// them. Leaving them here would have meant a reporter who skips the form still gets a certificate
+// with a dropped clause and a clean bill of health -- the defect this list is next to, not a use
+// for it. An entry added merely to make validation pass is how the guard stops meaning anything.
 export const INTENTIONAL_BLANKS = Object.freeze({
   TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([
-    "cert.submissionDate", "cert.returnDeadline", "cert.returnStatus", "cert.custodialAttorney",
-    "cert.charges", "cert.serviceDate", "cert.certificationDate",
+    "cert.submissionDate", "cert.returnDeadline", "cert.serviceDate",
   ]),
-  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze(["cert.serviceDate", "cert.certificationDate"]),
+  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze(["cert.serviceDate"]),
   FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
   FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
 });

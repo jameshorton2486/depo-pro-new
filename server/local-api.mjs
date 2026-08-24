@@ -38,7 +38,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -319,6 +319,13 @@ const server = http.createServer(async (req,res) => {
     // Counsel only. The one write the canonical record has outside intake, and it stays narrow
     // on purpose: without it the Label panel offers no attorneys on any deposition whose Notice
     // extraction missed them, and the alternative is editing the record by hand.
+    // The certificate facts only a reporter can supply. They go to the canonical record rather
+    // than into the render request, so they arrive carrying REPORTER_ENTERED provenance instead of
+    // as bare values on an operator payload nothing validates.
+    if(req.url==="/api/deposition/certification"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionCertification(root,{depositionId:input.depositionId,certification:input.certification,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url==="/api/deposition/counsel"&&req.method==="POST"){
       const input=await body(req,64*1024);
       const written=writeDepositionCounsel(root,{depositionId:input.depositionId,counsel:input.counsel,storageRoot:depositionStorageRoot});
