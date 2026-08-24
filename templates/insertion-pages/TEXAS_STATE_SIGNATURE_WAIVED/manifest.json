@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "available": true,
   "reviewStatus": "reviewed",
-  "reviewedBy": "field-inventory-addition-pending-project-owner-approval",
+  "reviewedBy": "project-owner-approved-UFM-source",
   "reviewedAt": "2026-08-24",
   "sourceFigures": [3, 4, 9, "9A", 11],
   "scope": "field-inventory-only; certification prose is deferred to step 6",
