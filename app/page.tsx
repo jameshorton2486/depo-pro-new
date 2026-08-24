@@ -16,6 +16,8 @@ import { formatDisplayDate } from "./date-format.mjs";
 import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
 import { RECOVERED_WORKSPACE_RESTORED, resolveRecoveredWorkspace } from "./workspace-recovery.mjs";
+import { extractedFieldKeys } from "./extracted-fields.mjs";
+import { DEPONENT_TYPES, deponentTypeOption, logisticsFields, parseNoticeDate } from "./intake-logistics.mjs";
 
 type Deposition = {
   id: string;
@@ -44,7 +46,8 @@ type Deposition = {
 
 type CourtReporter = {
   id: string; name: string; company: string; email: string; phone: string;
-  licenseNumber: string; taxId: string; address: string;
+  licenseNumber: string; csrExpiration: string; taxId: string; address: string;
+  firmRegistrationWaiver: string;
 };
 
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
@@ -185,9 +188,18 @@ export default function Home() {
       reporterProfile: reporter ?? undefined,
       canonicalSeed: {
         ...(intakeDraft?.ufmData||{}),
+        // The keys the extraction genuinely produced. Everything else on this form was typed,
+        // defaulted, or hardcoded, and must not be attributed to the Notice.
+        extractedFields: extractedFieldKeys(intakeDraft?.ufmData, data),
         court:String(data.get("canonicalCourt")||""),district:String(data.get("canonicalDistrict")||""),division:String(data.get("canonicalDivision")||""),county:String(data.get("canonicalCounty")||""),
         scheduledStart:String(data.get("canonicalScheduledStart")||""),timeZone:String(data.get("canonicalTimeZone")||""),location:String(data.get("canonicalLocation")||""),remotePlatform:String(data.get("canonicalRemotePlatform")||""),
-        remote:data.get("canonicalRemote")==="on",videotaped:data.get("canonicalVideotaped")==="on",interpreted:data.get("canonicalInterpreted")==="on",corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on",
+        // An unchecked box is absent from FormData, so `=== "on"` turned "nobody answered" into
+        // "no" before the server could tell them apart, and the record then stated the deposition
+        // was not remote with the Notice named as the source. `|| undefined` keeps absence absent;
+        // the envelope records it as MISSING. A reporter who means "not remote" cannot say so with
+        // a plain checkbox -- that needs a tri-state, and until it exists the honest answer is that
+        // the question is unanswered.
+        remote:data.get("canonicalRemote")==="on"||undefined,videotaped:data.get("canonicalVideotaped")==="on"||undefined,interpreted:data.get("canonicalInterpreted")==="on"||undefined,corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on"||undefined,
       },
       intakeNotes: String(data.get("reporterNotes") || intakeDraft?.notes || ""),
       noticeName: intakeDraft?.notice?.name ?? "",
@@ -215,7 +227,9 @@ export default function Home() {
     const reporter: CourtReporter = {
       id: crypto.randomUUID(), name: String(data.get("name")), company: String(data.get("company")),
       email: String(data.get("email")), phone: formatPhoneNumber(String(data.get("phone"))),
-      licenseNumber: String(data.get("licenseNumber")), taxId: String(data.get("taxId")), address: String(data.get("address")),
+      licenseNumber: String(data.get("licenseNumber")), csrExpiration: String(data.get("csrExpiration")),
+      taxId: String(data.get("taxId")), address: String(data.get("address")),
+      firmRegistrationWaiver: String(data.get("firmRegistrationWaiver")),
     };
     try{
       const saved=await postJson<CourtReporter>("/api/reporters",reporter);
@@ -361,9 +375,9 @@ export default function Home() {
             <span className="eyebrow">NEW DEPOSITION</span><h2 id="modal-title">Set up the deposition</h2><p>Review the intake details, select the Court Reporter, and create the deposition workspace.</p>
             <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Claude extraction ready for review</strong><small>{intakeDraft.keyterms.length} Deepgram keyterms and UFM data will be saved with this deposition.</small></div></div>}
               <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
-              <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={intakeDraft?.deponentType || "Fact witness"}><option>Fact witness</option><option>Expert witness</option><option>Corporate representative</option><option>Party</option><option>Other</option></select></label></div>
+              <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={deponentTypeOption(intakeDraft?.deponentType) ?? ""}><option value="">Not stated</option>{DEPONENT_TYPES.map(option => <option key={option} value={option}>{option}</option>)}</select></label></div>
               <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
-              <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={intakeDraft?.depositionDate || ""} /></label><label>Court Reporter <small>Required for local filing</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
+              <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={parseNoticeDate(intakeDraft?.depositionDate) ?? logisticsFields(intakeDraft?.ufmData).depositionDate ?? ""} /></label><label>Court Reporter <small>{reporters.length ? "Required for local filing" : "Required — no court reporter is saved on this computer yet. Add one below before creating the deposition."}</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
               <CanonicalDataSheet seed={intakeDraft?.ufmData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
@@ -381,7 +395,15 @@ export default function Home() {
             <form onSubmit={createReporter}>
               <div className="form-row"><label>Full name<input name="name" required placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
               <div className="form-row"><label>Email address<input name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
-              <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
+              <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>CSR expiration<input name="csrExpiration" type="date" /></label></div>
+              <div className="form-row"><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
+              {/* Both of these are required by a certified page and had no input at all. Every
+                  reviewed Texas certificate prints the CSR expiration, and validateInsertionInput
+                  blocks without it. The waiver is how a reporter with no firm answers the firm
+                  registration requirement -- the validator has honoured it since this evening, but
+                  nothing could record one, so the stored value was always "" and an empty waiver is
+                  not a waiver. */}
+              <label>Firm registration waiver <small>Why no firm registration number applies. Leave empty if the firm has one.</small><textarea name="firmRegistrationWaiver" rows={2} placeholder="Certifies under an individual Texas CSR; no firm registration applies." /></label>
               <label>Mailing address<textarea name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>
               <p className="sensitive-note">Tax ID information is stored only on this computer. Protect access to this device and its browser profile.</p>
               <div className="modal-actions"><button type="button" onClick={() => setShowReporterModal(false)}>Cancel</button><button className="primary-button" type="submit">Save Court Reporter</button></div>

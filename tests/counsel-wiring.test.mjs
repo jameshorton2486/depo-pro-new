@@ -134,7 +134,7 @@ test("counsel that did come off the Notice still says so",()=>{
   // noticeSupplied is now explicit. It used to be assumed, which is how a deposition created with
   // no Notice still produced a record claiming one -- so saying "this came off the Notice" is now
   // something the caller states rather than something the builder presumes.
-  const record=createCanonicalDepositionRecord({ attorneys:[{ name:"Dennis J. Bentley", firm:"F", represents:"Plaintiff" }] },{ noticeSupplied:true });
+  const record=createCanonicalDepositionRecord({ attorneys:[{ name:"Dennis J. Bentley", firm:"F", represents:"Plaintiff" }], extractedFields:["attorneys"] },{ noticeSupplied:true });
   assert.equal(record.counsel[0].fullName.source,"NOD_EXTRACTED");
   assert.equal(record.counsel[0].fullName.state,"EXTRACTED");
   assert.equal(counselEntry({ name:"X" },0).fullName.source,"NOD_EXTRACTED");

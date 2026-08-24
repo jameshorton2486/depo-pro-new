@@ -13,7 +13,12 @@ import path from "node:path";
 // No firmRegistrationNumber field here on purpose. No certified document in the library carries
 // one. The validator's number branch stays intact for a firm-employed reporter; it needs no store
 // field until such a reporter exists.
-const REPORTER_FIELDS = ["name", "company", "email", "phone", "licenseNumber", "taxId", "address", "firmRegistrationWaiver"];
+// csrExpiration is here because six byte-identical signature blocks across three certified
+// transcripts all carry "EXPIRES 6-30-2026", the reviewed template prints
+// ^reporter.csrExpirationDate^, and validateInsertionInput blocks without it -- so a store that
+// could not hold one made a certification page unrenderable for the reporter this application is
+// for. firmRegistrationNumber is still deliberately absent: no specimen justifies it.
+const REPORTER_FIELDS = ["name", "company", "email", "phone", "licenseNumber", "csrExpiration", "taxId", "address", "firmRegistrationWaiver"];
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 function storeFile(storageRoot) {
