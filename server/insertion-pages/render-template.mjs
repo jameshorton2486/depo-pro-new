@@ -8,6 +8,16 @@ export function renderTemplatePage(template, values, { pageNumber, role, linesPe
       for (const text of values[fields[0]]) output.push({ text: String(text), fields });
       continue;
     }
+    // Omitted, not blanked -- the same rule the appearance page already follows, applied where the
+    // line comes from a template rather than from code. A certification page was printing
+    // "Firm Registration No." with nothing after it for a reporter who has no firm registration,
+    // which states a requirement on a certified page and then fails to answer it. The specimens
+    // carry no labels holding nothing.
+    //
+    // Only when every field on the line is absent. A line with no caret fields is page furniture
+    // and always prints, and a line with some fields filled still prints, because what is there is
+    // still true.
+    if (fields.length && fields.every((field) => values[field] == null)) continue;
     const text = sourceLine.replace(FIELD, (_match, field) => values[field] == null ? "" : String(values[field]));
     output.push({ text, fields });
   }

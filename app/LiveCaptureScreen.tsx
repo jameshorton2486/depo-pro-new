@@ -100,23 +100,48 @@ type Unassigned = {
   sessionId: string;
   label: string | null;
   state: string;
+  // Whether this application instance is the one recording it. See listCaptureSessions: state
+  // alone cannot tell a live capture from one whose instance died mid-recording.
+  running: boolean;
   createdAt: string;
   assignedDepositionId: string | null;
   channels: { id: string; role: string; state: string; bytes: number | null }[];
 };
 type LibraryDeposition = { id: string; caseStyle: string; witness: string };
+type OpeningSummary={completeCount:number;totalCount:number;readiness:Record<string,boolean>;state:{interpreterDisposition:string};scripts:Array<{id:string;title:string;text:string;applicable:boolean;completedOnRecord:boolean}>};
+// Four channels because a deposition room can have four microphones -- not because four is a limit
+// anything below this screen imposes. validateSources, startCaptureSession and the live aid are all
+// N-channel already; this array was the only thing holding capture to two.
+//
+// CH1 and CH2 each cover several voices -- a room, and whoever is on the remote platform -- so they
+// are diarized (SHARED_ROLES in deepgram-live.mjs). CH3 and CH4 are dedicated participant
+// microphones carrying one voice each, and are deliberately outside that set: diarizing a single
+// speaker invents turns the room never had.
+const CHANNEL_SLOTS: {
+  id: string;
+  role: string;
+  required: boolean;
+}[] = [
+  { id: "local-microphone", role: "LOCAL_MICROPHONE", required: true },
+  { id: "meeting-audio", role: "VIRTUAL_MEETING_AUDIO", required: false },
+  { id: "participant-3", role: "PARTICIPANT_MICROPHONE", required: false },
+  { id: "participant-4", role: "PARTICIPANT_MICROPHONE", required: false },
+];
 export default function LiveCaptureScreen({
   deposition,
+  onDepositionUpdated,
   onRecoveredDeposition,
+  onRecordingChange,
   onBack,
 }: {
   deposition: LibraryDeposition | null;
   onRecoveredDeposition: (depositionId: string) => Promise<boolean>;
+  onDepositionUpdated?: (deposition: LibraryDeposition) => void;
+  onRecordingChange?: (recording:boolean) => void;
   onBack: () => void;
 }) {
   const [devices, setDevices] = useState<Device[]>([]),
-    [mic, setMic] = useState(""),
-    [meeting, setMeeting] = useState(""),
+    [channelDevices, setChannelDevices] = useState<Record<string, string>>({}),
     [preflight, setPreflight] = useState<Preflight | null>(null),
     [session, setSession] = useState<Session | null>(null),
     [monitor, setMonitor] = useState("ALL"),
@@ -125,12 +150,15 @@ export default function LiveCaptureScreen({
     [query, setQuery] = useState(""),
     [hits, setHits] = useState<Hit[] | null>(null),
     [handoff, setHandoff] = useState<string>(""),
+    [registeredUploads, setRegisteredUploads] = useState<string[]>([]),
+    [transcriptProgress, setTranscriptProgress] = useState(""),
     [label, setLabel] = useState(""),
     [unassigned, setUnassigned] = useState<Unassigned[]>([]),
     [library, setLibrary] = useState<LibraryDeposition[]>([]),
     [assignTo, setAssignTo] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [opening,setOpening]=useState<OpeningSummary|null>(null);
   const running = isRunning(session),
     sessionId = session?.sessionId ?? null;
   const openDepositionId = deposition?.id ?? "";
@@ -143,11 +171,18 @@ export default function LiveCaptureScreen({
   const [orphaned, setOrphaned] = useState<string>("");
   const scroller = useRef<HTMLDivElement | null>(null),
     [following, setFollowing] = useState(true);
+  useEffect(()=>{onRecordingChange?.(running);return()=>onRecordingChange?.(false)},[onRecordingChange,running]);
   // Newest card, whenever one arrives -- but only while the reporter has not scrolled away.
   useEffect(() => {
     if (following && scroller.current)
       scroller.current.scrollTop = scroller.current.scrollHeight;
   });
+  useEffect(() => {
+    if(!deposition)return;
+    let current=true;
+    fetch(`${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);if(current)setOpening(body)}).catch(()=>{if(current)setOpening(null)});
+    return()=>{current=false};
+  },[deposition]);
   useEffect(() => {
     let current = true;
     fetch(`${API}/api/live-capture/devices`)
@@ -159,8 +194,10 @@ export default function LiveCaptureScreen({
       .then((available: Device[]) => {
         if (current) {
           setDevices(available);
-          setMic(available.find((item) => item.kind === "input")?.id || "");
-          setMeeting("");
+          setChannelDevices({
+            "local-microphone":
+              available.find((item) => item.kind === "input")?.id || "",
+          });
         }
       })
       .catch((reason) => {
@@ -229,7 +266,7 @@ export default function LiveCaptureScreen({
     const query = `depositionId=${encodeURIComponent(item.depositionId ?? "")}&sessionId=${encodeURIComponent(item.sessionId)}`;
     fetch(`${API}/api/live-capture/session?${query}`)
       .then((response) => response.json())
-      .then((payload) => setSession(payload))
+      .then((payload) => { setSession(payload); setLabel(payload?.label ?? ""); })
       .catch(() => setError("A recording is running but could not be picked back up."));
     // The live text is a separate concern and fails separately: Deepgram may never have been
     // started for this session. Not finding it must not cost the reporter the stop control.
@@ -254,22 +291,26 @@ export default function LiveCaptureScreen({
       current = false;
     };
   }, [reattach]);
-  const slots = [
-    {
-      id: "local-microphone",
-      role: "LOCAL_MICROPHONE",
-      value: mic,
-      set: setMic,
-      required: true,
-    },
-    {
-      id: "meeting-audio",
-      role: "VIRTUAL_MEETING_AUDIO",
-      value: meeting,
-      set: setMeeting,
-      required: false,
-    },
-  ];
+  const slots = CHANNEL_SLOTS.map((slot) => ({
+    ...slot,
+    // While a session is running, the devices it is actually recording are the truth -- whoever
+    // selected them and whenever. A reattached client selected nothing, and what it shows has to be
+    // what is being written, not an empty picker beside a live meter.
+    value:
+      session?.sources.find((source) => source.id === slot.id)?.deviceId ??
+      channelDevices[slot.id] ??
+      "",
+    set: (deviceId: string) =>
+      setChannelDevices((current) => ({ ...current, [slot.id]: deviceId })),
+  }));
+  const chosen = slots.filter((slot) => slot.value);
+  // Two channels pointed at one device is not a configuration, it is a channel that will not
+  // record: DirectShow hands the device to the first ffmpeg and refuses the second. The screen used
+  // to compare the first two channels to each other, which stopped covering the case the moment a
+  // third existed. Offering a device only where it is not already taken removes the mistake instead
+  // of reporting it.
+  const duplicateDevice = new Set(chosen.map((slot) => slot.value)).size !== chosen.length;
+  const requiredMissing = slots.some((slot) => slot.required && !slot.value);
   const refreshSessions = () => {
     fetch(`${API}/api/live-capture/sessions`)
       .then((response) => response.json())
@@ -318,6 +359,13 @@ export default function LiveCaptureScreen({
     } finally {
       setBusy(false);
     }
+  }
+  async function refreshOpenDeposition() {
+    if (!deposition || !onDepositionUpdated) return;
+    const response = await fetch(`${API}/api/depositions`), payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not refresh the deposition after recording.");
+    const updated = (payload.depositions ?? []).find((item: LibraryDeposition) => item.id === deposition.id);
+    if (updated) onDepositionUpdated(updated);
   }
   const beginTest = () =>
       act(async () => {
@@ -386,6 +434,19 @@ export default function LiveCaptureScreen({
         setHandoff(
           `${result.added.length} channel${result.added.length === 1 ? "" : "s"} added to this deposition${result.skipped.length ? `; ${result.skipped.length} skipped (${result.skipped.map((s: { id: string }) => s.id).join(", ")})` : ""}.`,
         );
+        setRegisteredUploads(result.added.map((item: { uploadId: string }) => item.uploadId));
+        await refreshOpenDeposition();
+      }),
+    createWorkingTranscript = () =>
+      act(async () => {
+        for (const [index, uploadId] of registeredUploads.entries()) {
+          setTranscriptProgress(`Transcribing channel ${index + 1} of ${registeredUploads.length}…`);
+          await post("/api/audio/transcribe", {
+            depositionId: deposition?.id ?? null,
+            uploadId,
+          });
+        }
+        setTranscriptProgress("Working transcript created. Open the Workspace to review speakers and corrections.");
       }),
     assign = (sessionId: string) =>
       act(async () => {
@@ -394,6 +455,20 @@ export default function LiveCaptureScreen({
           depositionId: assignTo,
         });
         setHandoff("Recording attached. It is now this deposition's audio.");
+        refreshSessions();
+      }),
+    stopSession = (sessionId: string) =>
+      act(async () => {
+        await post("/api/live-capture/stop", { depositionId: null, sessionId });
+        setHandoff("Recording stopped and hashed.");
+        refreshSessions();
+      }),
+    recover = (sessionId: string) =>
+      act(async () => {
+        await post("/api/live-capture/recover", { sessionId });
+        setHandoff(
+          "Recording finalized and hashed. It is marked degraded because the capture was interrupted and the moment it ended was not observed.",
+        );
         refreshSessions();
       }),
     startRecording = () =>
@@ -464,12 +539,20 @@ export default function LiveCaptureScreen({
             );
           }
         }
-        setSession(
-          await post("/api/live-capture/stop", {
+        const finalized = await post("/api/live-capture/stop", {
             depositionId: captureDepositionId || null,
             sessionId: session?.sessionId,
-          }),
-        );
+          });
+        setSession(finalized);
+        if (deposition) {
+          const result = await post("/api/live-capture/add-to-deposition", {
+            depositionId: deposition.id,
+            sessionId: finalized.sessionId,
+          });
+          setRegisteredUploads(result.added.map((item: { uploadId: string }) => item.uploadId));
+          setHandoff(`${result.added.length} verified channel${result.added.length === 1 ? " was" : "s were"} automatically attached to this deposition.`);
+          await refreshOpenDeposition();
+        }
       });
   // Red marks are the server's, not the screen's. Every poll brings the current set, so a reload
   // in the middle of the day comes back with the morning's marks still on the words they were made
@@ -600,6 +683,12 @@ export default function LiveCaptureScreen({
           {orphaned}
         </p>
       )}
+      {deposition && <section className="live-readiness-summary" aria-labelledby="live-readiness-title">
+        <div><span className="eyebrow">SCHEDULED DEPOSITION</span><h2 id="live-readiness-title">Confirm the case, then test both audio channels</h2></div>
+        <dl><div><dt>Case</dt><dd>{deposition.caseStyle}</dd></div><div><dt>Witness</dt><dd>{deposition.witness}</dd></div><div><dt>Deposition ID</dt><dd>{deposition.id}</dd></div></dl>
+        <p>Live text is preserved as a provisional transcript. The working transcript is created only after the verified local recordings are finalized.</p>
+        {opening&&<><dl className="live-opening-summary"><div><dt>Caption</dt><dd>{opening.readiness.caption?"Verified":"Needs review"}</dd></div><div><dt>Appearances</dt><dd>{opening.readiness.appearances?"Verified":"Needs review"}</dd></div><div><dt>Interpreter</dt><dd>{opening.state.interpreterDisposition==="NOT_APPLICABLE"?"Not required":opening.state.interpreterDisposition==="REQUIRED"?"Required":"Unresolved"}</dd></div><div><dt>Opening Procedures</dt><dd>{opening.completeCount}/{opening.totalCount} ready</dd></div></dl><details className="live-opening-scripts"><summary>Opening scripts and oaths</summary>{opening.scripts.filter(item=>item.applicable).map(item=><article key={item.id}><h3>{item.title}{item.completedOnRecord?" · Completed on record":""}</h3><p>{item.text}</p></article>)}</details></>}
+      </section>}
       <section className="live-capture-card">
         <h2>Local recording preflight</h2>
         <p>
@@ -630,7 +719,7 @@ export default function LiveCaptureScreen({
             <button
               className="record-button"
               type="button"
-              disabled={busy || !mic}
+              disabled={busy || requiredMissing || duplicateDevice}
               onClick={() => void startRecording()}
             >
               {busy ? "Starting…" : "Start recording"}
@@ -681,11 +770,17 @@ export default function LiveCaptureScreen({
                   <option value="">
                     {slot.required ? "Select device" : "Not used"}
                   </option>
-                  {devices.map((device) => (
-                    <option value={device.id} key={`${slot.id}-${device.id}`}>
-                      {device.name}
-                    </option>
-                  ))}
+                  {devices
+                    .filter(
+                      (device) =>
+                        device.id === slot.value ||
+                        !chosen.some((other) => other.value === device.id),
+                    )
+                    .map((device) => (
+                      <option value={device.id} key={`${slot.id}-${device.id}`}>
+                        {device.name}
+                      </option>
+                    ))}
                 </select>
                 {health ? (
                   <div
@@ -746,7 +841,7 @@ export default function LiveCaptureScreen({
             <button
               className="secondary-button"
               type="button"
-              disabled={busy || !mic || (Boolean(meeting) && mic === meeting)}
+              disabled={busy || requiredMissing || duplicateDevice}
               onClick={() => void beginTest()}
             >
               {busy
@@ -823,15 +918,19 @@ export default function LiveCaptureScreen({
               </p>
             ))}
             <div className="live-handoff">
-              <button
+              {deposition && registeredUploads.length === 0 && <button
                 className="primary-button"
                 type="button"
                 disabled={busy}
                 onClick={() => void addToDeposition()}
               >
-                Add these recordings to the deposition
-              </button>
+                Retry attaching these recordings
+              </button>}
               {handoff && <p className="live-handoff-result">{handoff}</p>}
+              {deposition && registeredUploads.length > 0 && <button className="primary-button" type="button" disabled={busy} onClick={()=>void createWorkingTranscript()}>
+                {busy && transcriptProgress ? transcriptProgress : "Create Working Transcript"}
+              </button>}
+              {transcriptProgress && !busy && <p className="live-handoff-result" role="status">{transcriptProgress}</p>}
             </div>
             {/* Read-back: find a moment and play the audio. The text is an index into the recording, not
           a transcript of it, so a misheard word the reporter can still place has done its job.
@@ -911,9 +1010,7 @@ export default function LiveCaptureScreen({
           </div>
         )}
         {!recording &&
-          unassigned.filter(
-            (item) => !item.assignedDepositionId && item.state !== "RECORDING",
-          ).length > 0 && (
+          unassigned.filter((item) => !item.assignedDepositionId).length > 0 && (
             <div className="unassigned-sessions">
               <h3>Recordings not yet attached to a case</h3>
               <p className="unassigned-note">
@@ -934,32 +1031,64 @@ export default function LiveCaptureScreen({
               </select>
               <ul>
                 {unassigned
-                  .filter(
-                    (item) =>
-                      !item.assignedDepositionId && item.state !== "RECORDING",
-                  )
-                  .map((item) => (
-                    <li key={item.sessionId}>
-                      <strong>{item.label ?? item.sessionId}</strong>
-                      <span>
-                        {new Date(item.createdAt).toLocaleString()} ·{" "}
-                        {
-                          item.channels.filter(
-                            (channel) => channel.state === "FINALIZED",
-                          ).length
-                        }{" "}
-                        channel(s)
-                      </span>
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={busy || !assignTo}
-                        onClick={() => void assign(item.sessionId)}
-                      >
-                        Attach to this deposition
-                      </button>
-                    </li>
-                  ))}
+                  // Nothing reading RECORDING is filtered out any more. Hiding them was how a live
+                  // recording became unreachable: the screen that started it had lost it on a
+                  // reload, and the one list that would have shown it excluded it by state. A
+                  // reporter on another machine, or after a crash, had no path back to their own
+                  // audio. This block is that path -- and the whole block is already hidden while
+                  // this client is the one recording, so a reattached session is never listed twice.
+                  .filter((item) => !item.assignedDepositionId)
+                  .map((item) => {
+                    const stillRecording =
+                      item.state === "RECORDING" && item.running;
+                    const interrupted =
+                      item.state === "RECORDING" && !item.running;
+                    return (
+                      <li key={item.sessionId}>
+                        <strong>{item.label ?? item.sessionId}</strong>
+                        <span>
+                          {new Date(item.createdAt).toLocaleString()} ·{" "}
+                          {stillRecording
+                            ? "recording now on this computer"
+                            : interrupted
+                            ? "interrupted before it was finalized"
+                            : `${
+                                item.channels.filter(
+                                  (channel) => channel.state === "FINALIZED",
+                                ).length
+                              } channel(s)`}
+                        </span>
+                        {stillRecording ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void stopSession(item.sessionId)}
+                          >
+                            Stop this recording
+                          </button>
+                        ) : interrupted ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void recover(item.sessionId)}
+                          >
+                            Finalize this recording
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            disabled={busy || !assignTo}
+                            onClick={() => void assign(item.sessionId)}
+                          >
+                            Attach to this deposition
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           )}
