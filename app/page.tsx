@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import IntakeScreen, { type IntakeAttorney, type IntakeDraft } from "./IntakeScreen";
 import AdminSettings from "./AdminSettings";
 import InsertionPagesScreen from "./InsertionPagesScreen";
@@ -15,6 +15,7 @@ import CanonicalDataSheet from "./CanonicalDataSheet";
 import { formatDisplayDate } from "./date-format.mjs";
 import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
+import { RECOVERED_WORKSPACE_RESTORED, resolveRecoveredWorkspace } from "./workspace-recovery.mjs";
 
 type Deposition = {
   id: string;
@@ -151,6 +152,15 @@ export default function Home() {
 
   useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showOpening&&active?"opening":showLiveCapture?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showLiveCapture,showModal,showOpening,showPreview]);
 
+  const restoreRecoveredDeposition = useCallback(async (depositionId:string) => {
+    const response=await fetch(`${API}/api/depositions`),result=await response.json();
+    if(!response.ok)throw new Error(result.error||"The deposition library could not be loaded during recording recovery.");
+    const resolution=resolveRecoveredWorkspace(result.depositions||[],depositionId);
+    if(resolution.kind!==RECOVERED_WORKSPACE_RESTORED)return false;
+    setActive(resolution.deposition as Deposition);
+    return true;
+  },[]);
+
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) return depositions;
@@ -254,6 +264,7 @@ export default function Home() {
     } else setAudioToolFiles([]);
     setShowAudioTools(true);
   }
+
   if (showAudioTools) {
     return frame(<AudioToolsScreen initialFiles={audioToolFiles} onFilesChange={setAudioToolFiles} onBack={() => setShowAudioTools(false)} />);
   }
@@ -262,7 +273,7 @@ export default function Home() {
   // where it belongs afterwards, so this sits beside Audio tools rather than inside the
   // open-deposition block. An open deposition is still passed when there is one.
   if (showLiveCapture) {
-    return frame(<LiveCaptureScreen deposition={active} onRecordingChange={setLiveRecording} onDepositionUpdated={(value)=>{const updated=value as Deposition;setActive(updated);setDepositions(current=>current.map(item=>item.id===updated.id?updated:item))}} onBack={() => setShowLiveCapture(false)} />);
+    return frame(<LiveCaptureScreen deposition={active} onRecoveredDeposition={restoreRecoveredDeposition} onRecordingChange={setLiveRecording} onDepositionUpdated={(value)=>{const updated=value as Deposition;setActive(updated);setDepositions(current=>current.map(item=>item.id===updated.id?updated:item))}} onBack={() => setShowLiveCapture(false)} />);
   }
 
   if (showIntake) {
