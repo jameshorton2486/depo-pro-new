@@ -25,6 +25,22 @@ function attorneyFromCanonical(attorney) {
 
 const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, reason:String(reason).trim() } : null);
 
+// The caption's party lines, derived once. build-pages imports this to compose the printed line so
+// that the value the guard checks and the value the page prints come from the same read of the
+// record -- the two had drifted apart, and the drift was the defect: the caption printed party
+// names that no inventory named, so nothing checked them.
+//
+// Absent is null rather than "". `[].join(", ")` answers "this case has no plaintiffs", which the
+// record does not say; what it says is that no party carries the role. Only the caller composing a
+// line turns that into text.
+export function captionParties(record) {
+  const parties = record?.parties ?? [];
+  const inRole = pattern => parties
+    .filter(party => pattern.test(String(canonicalValue(party.role) ?? "")))
+    .map(party => canonicalValue(party.captionDisplayName) || canonicalValue(party.name));
+  return { plaintiffs: inRole(/plaintiff/i), defendants: inRole(/defendant/i) };
+}
+
 // `override` is operator.reporter, an unvalidated construction path into the reporter profile
 // that bypasses the store entirely. The app never populates it, so it is not a live path -- but it
 // has now defeated three separate guards, and a fourth will meet it too.
@@ -84,6 +100,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const depositionDate = canonicalValue(record.deposition?.depositionDate);
   const witness = canonicalValue(record.deposition?.witness);
   const reporter = reporterFromCanonical(record.reporter, operator.reporter ?? {});
+  const { plaintiffs, defendants } = captionParties(record);
   const proceedingLocation = operator.proceedingLocation ?? { platform: canonicalValue(record.deposition?.remotePlatform), physicalAddress: canonicalValue(record.deposition?.location) };
 
   return {
@@ -124,16 +141,15 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     fieldValues: {
       "caption.court": court,
       "caption.causeNumber": causeNumber,
-      "caption.caseStyle": caseStyle,
+      "caption.plaintiffs": plaintiffs.length ? plaintiffs : null,
+      "caption.defendants": defendants.length ? defendants : null,
       "deposition.witness": witness,
       "deposition.date": depositionDate,
       "deposition.volumeLabel": volumeCount === 1 ? "VOLUME 1 OF 1" : null,
-      "deposition.proceedingLocation": proceedingLocation?.platform ?? proceedingLocation?.physicalAddress,
       "appearances.counsel": counsel.length ? counsel : null,
       "index.examinations": pagination.index?.examinations ?? null,
       "index.changesAndSignature": pagination.index?.changesAndSignature?.startPage ?? null,
       "index.reportersCertification": pagination.index?.reportersCertification?.startPage ?? null,
-      "cert.signatureDispositionBasis": operator.signatureDispositionBasis ?? null,
       "cert.submissionDate": operator.certification?.submissionDate ?? null,
       "cert.returnDeadline": operator.certification?.returnDeadline ?? null,
       "cert.returnStatus": operator.certification?.returnStatus ?? canonicalValue(record.signature?.returnedDate) ?? null,
@@ -146,7 +162,6 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "reporter.name": reporter.name,
       "reporter.csrNumber": reporter.csrNumber,
       "reporter.csrExpirationDate": reporter.csrExpirationDate,
-      "reporter.firmName": reporter.firmName,
       "reporter.firmRegistrationNumber": reporter.firmRegistrationNumber,
       "reporter.address": reporter.address,
       "reporter.phone": reporter.phone,

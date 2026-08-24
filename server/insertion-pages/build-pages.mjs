@@ -1,13 +1,14 @@
+import { captionParties } from "./assemble.mjs";
 import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
 
 const value = (field) => field && typeof field === "object" && "value" in field ? field.value : field;
 const methodLabel = (method, detail) => method === "in-person" ? "" : ` (Via ${detail || method})`;
 
+// The joined strings are the printed form of the same two lists assemble put in fieldValues, so a
+// caption line and the guard that clears it cannot disagree about who the parties are.
 function captionValues(input) {
-  const parties = input.record.parties ?? [];
-  const plaintiffs = parties.filter((party) => /plaintiff/i.test(value(party.role))).map((party) => value(party.captionDisplayName) || value(party.name));
-  const defendants = parties.filter((party) => /defendant/i.test(value(party.role))).map((party) => value(party.captionDisplayName) || value(party.name));
+  const { plaintiffs, defendants } = captionParties(input.record);
   return {
     "caption.causeNumber": input.caption.causeNumber,
     "caption.court": input.operator.courtHeadingLine ?? input.caption.court,

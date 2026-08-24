@@ -116,15 +116,21 @@ function validateIndex(input, findings) {
 // merely exchanged CERT_FIRM_REGISTRATION_UNRESOLVED for UNEXPECTED_BLANK. Answering the
 // requirement left the reporter exactly as blocked as ignoring it.
 //
-// A Texas CSR certifying under an individual licence has no firm, so the waiver answers the firm
-// name for the same reason it answers the registration number: there is no firm for either to
-// describe. It answers nothing else -- an unwaived blank is still a blank.
+// A Texas CSR certifying under an individual licence has no firm, and the waiver answers the
+// registration number the certificate asks for: certification-2 and certification-3 print
+// "Firm Registration No. ^reporter.firmRegistrationNumber^". It answers nothing else -- an
+// unwaived blank is still a blank.
+//
+// It used to waive reporter.firmName as well. No reviewed template prints a firm name, so that
+// entry cleared a guard on a field that reached no page; the inventory no longer names it and the
+// waiver no longer needs to. If a reviewed template ever prints the firm name, the inventory entry
+// and this waiver come back together -- the reason a solo CSR has no registration number is the
+// same reason they have no firm to name.
 function waivedFields(input) {
   const waived = new Set();
   const firmRegistration = input.reporter?.firmRegistration;
   if (firmRegistration?.applicable === false && String(firmRegistration.reason ?? "").trim()) {
     waived.add("reporter.firmRegistrationNumber");
-    waived.add("reporter.firmName");
   }
   return waived;
 }

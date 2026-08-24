@@ -41,6 +41,9 @@ function scratch(t) {
       court: "In the 285th Judicial District Court", causeNumber: "2024-CI-11223",
       caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
       depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
+      // caption.plaintiffs and caption.defendants are guarded now, so a record with no parties
+      // in either role cannot render a caption at all.
+      parties: [{ name: "Maria Elena Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
       attorneys: [{ name: "Pat Counsel", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
       reporterProfile: {
         name: "Miah Bardot", licenseNumber: "12129", csrState: "Texas", csrExpiration: "2027-06-30",

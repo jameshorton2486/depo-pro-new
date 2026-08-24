@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "available": true,
   "reviewStatus": "reviewed",
-  "reviewedBy": "project-owner-approved-UFM-source",
+  "reviewedBy": "inverted-guard-reconciliation-pending-project-owner-approval",
   "reviewedAt": "2026-08-24",
   "sourceFigures": [3, 4, 9, "9A", 11],
   "scope": "field-inventory-only; certification prose is deferred to step 6",
   "templates": {
     "fieldInventory": {
       "file": "field-inventory.tmpl",
-      "sha256": "c00c7d82e211bce884ad53935b9b546c6c7d1c165133a9a18a2a7d52ccf0cc63"
+      "sha256": "efb750f96d59efe4225e2144851dd959b89157c87ebe7d65a3e9eaffe3d9eaf3"
     },
     "title": { "file": "../common/title.tmpl", "sha256": "20f82cb6050c8fdf7babf4f5891b937117a4b5497b2701dda3d8da464efbd5de" },
     "appearances": { "file": "../common/appearances.tmpl", "sha256": "f05b1933925306924a164725b184e57d01a1747cec8fdfa4f2f4c192ee777fda" },

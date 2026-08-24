@@ -11,6 +11,7 @@ async function thomasFixture() {
     court: "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF TEXAS",
     causeNumber: "25-CV-00598-OLG",
     caseStyle: "Garza v. Home Depot U.S.A., Inc., et al.",
+    parties: [{ name: "Ricardo Garza", role: "Plaintiff" }, { name: "Home Depot U.S.A., Inc.", role: "Defendant" }],
     witness: "Heath Thomas",
     depositionDate: "2026-06-23",
     remote: true,
