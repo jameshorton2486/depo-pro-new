@@ -2,11 +2,32 @@ export const CANONICAL_RECORD_VERSION="1.0.0";
 export const FIELD_SOURCES=Object.freeze(["NOD_EXTRACTED","REPORTER_PROFILE","REPORTER_ENTERED","TRANSCRIPT_DERIVED","WORKFLOW_DERIVED","SYSTEM_GENERATED"]);
 export const FIELD_STATES=Object.freeze(["EXTRACTED","CONFIRMED","CONFLICTING","MISSING","REPORTER_ADDED","DERIVED"]);
 
-export function field(value=null,{source="REPORTER_ENTERED",state=value===null||value===""?"MISSING":"EXTRACTED",confidence=null,citations=[]}={}){
+// Presence is declared by the caller, never inferred from the value.
+//
+// This read `state = value===null||value==="" ? "MISSING" : "EXTRACTED"`, which asked the value
+// whether it had been supplied. A boolean false, an empty array and a zero all answered yes, so a
+// checkbox nobody ticked was recorded as a finding of the source document: `remote: false,
+// state: EXTRACTED, source: NOD_EXTRACTED` on a record whose Notice said the deposition WAS remote.
+// Measured on one real record, 25 of 51 Notice-attributed fields named the Notice for something it
+// never supplied.
+//
+// There is no default. Every default here is a guess about provenance, and the previous guess was
+// wrong about half the time, so a caller that has not decided must say so rather than be answered
+// for. `supplied:false` also drops the value: nothing was supplied, so there is nothing to carry,
+// whatever shape the caller happened to pass.
+export function field(value=null,{source="REPORTER_ENTERED",state,supplied,confidence=null,citations=[]}={}){
   if(!FIELD_SOURCES.includes(source))throw new Error(`Unsupported canonical field source: ${source}`);
-  if(!FIELD_STATES.includes(state))throw new Error(`Unsupported canonical field state: ${state}`);
-  return {value:value??null,source,state,confidence,citations};
+  if(state===undefined&&supplied===undefined)throw new Error("A canonical field must declare state or supplied; presence cannot be inferred from the value.");
+  const resolved=state??(supplied?"EXTRACTED":"MISSING");
+  if(!FIELD_STATES.includes(resolved))throw new Error(`Unsupported canonical field state: ${resolved}`);
+  return {value:supplied===false?null:(value??null),source,state:resolved,confidence,citations};
 }
+
+// A form cannot tell "left empty" from "answered as empty", so an absent key, null and an empty
+// string all count as unsupplied. That is the conservative direction: an unanswered field reads as
+// MISSING and can raise a finding, rather than as an answer nobody gave. A boolean that genuinely
+// arrives is supplied, including false -- what must not happen is a false manufactured from absence.
+export const isSupplied=value=>value!==undefined&&value!==null&&value!=="";
 const missing=(source="REPORTER_ENTERED")=>field(null,{source,state:"MISSING"});
 
 /**
@@ -24,7 +45,7 @@ const missing=(source="REPORTER_ENTERED")=>field(null,{source,state:"MISSING"});
 export function counselEntry(attorney = {}, index = 0, { source = "NOD_EXTRACTED" } = {}) {
   const supplied = value => {
     const present = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
-    if (source === "NOD_EXTRACTED") return field(value ?? null, { source });
+    if (source === "NOD_EXTRACTED") return field(value ?? null, { source, supplied: isSupplied(value) });
     return field(value ?? null, { source, state:present ? "REPORTER_ADDED" : "MISSING" });
   };
   const represents = Array.isArray(attorney.represents) ? attorney.represents : [attorney.represents].filter(Boolean);
@@ -61,7 +82,7 @@ export const PARTY_ENTITY_TYPES = Object.freeze(["PERSON", "ORGANIZATION"]);
 export function partyEntry(party = {}, index = 0, { source = "NOD_EXTRACTED" } = {}) {
   const supplied = (value, citations = []) => {
     const present = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
-    if (source === "NOD_EXTRACTED") return field(value ?? null, { source, citations });
+    if (source === "NOD_EXTRACTED") return field(value ?? null, { source, citations, supplied: isSupplied(value) });
     return field(value ?? null, { source, state: present ? "REPORTER_ADDED" : "MISSING", citations });
   };
   const name = String(party.name ?? "").trim();
@@ -75,8 +96,8 @@ export function partyEntry(party = {}, index = 0, { source = "NOD_EXTRACTED" } =
     name: supplied(name || null, party.citations ?? []),
     // Derived from the name by a rule, so it is SYSTEM_GENERATED whatever supplied the name.
     normalizedName: name
-      ? field(name.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim(), { source: "SYSTEM_GENERATED", state: "DERIVED" })
-      : field(null, { source: "SYSTEM_GENERATED", state: "MISSING" }),
+      ? field(name.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim(), { supplied: true, source: "SYSTEM_GENERATED", state: "DERIVED" })
+      : field(null, { supplied: true, source: "SYSTEM_GENERATED", state: "MISSING" }),
     role: supplied(role || null),
     entityType: supplied(entityType || null),
     aliases: (party.aliases ?? []).map(alias => ({ qualifier: supplied(alias.qualifier ?? null), name: supplied(alias.name ?? null) })),
@@ -102,18 +123,24 @@ export function createCanonicalDepositionRecord(input={},{noticeSupplied=false}=
   const partyValues=Array.isArray(input.parties)?input.parties:[];
   const attorneyValues=Array.isArray(input.attorneys)?input.attorneys:[];
   const reporter=input.reporterProfile||{};
-  const reporterField=value=>field(value,{source:"REPORTER_PROFILE"});
-  // Shadows the module-level helper for the length of this record, so every field below is
-  // attributed by the same rule without each call site having to remember.
-  const documentSource=noticeSupplied?"NOD_EXTRACTED":"REPORTER_ENTERED";
-  const extracted=value=>field(value,{source:documentSource});
+  const reporterField=value=>field(value,{source:"REPORTER_PROFILE",supplied:isSupplied(value)});
+  // Provenance is per field, not per record.
+  //
+  // This was one flag stamped on every field: a Notice was filed, therefore all 51 of these claimed
+  // the Notice as their source -- including a date the reporter typed, a time zone hardcoded in the
+  // UI, and a deponent type that was nothing but the first option in a select. `extractedFields`
+  // names the keys the extraction actually produced; everything else is attributed to whoever did
+  // supply it, which for a setup form is the reporter.
+  const fromExtraction=new Set(Array.isArray(input.extractedFields)?input.extractedFields:[]);
+  const sourceFor=key=>noticeSupplied&&fromExtraction.has(key)?"NOD_EXTRACTED":"REPORTER_ENTERED";
+  const extracted=(key,value)=>field(value,{source:sourceFor(key),supplied:isSupplied(value)});
   return {
     schemaVersion:CANONICAL_RECORD_VERSION,
     recordType:"CANONICAL_DEPOSITION_DATA_RECORD",
-    case:{jurisdictionType:extracted(input.jurisdictionType||input.jurisdiction),court:extracted(input.court),district:extracted(input.district),division:extracted(input.division),county:extracted(input.county),judicialDistrict:extracted(input.judicialDistrict),causeNumber:extracted(input.causeNumber),caseStyle:extracted(input.caseStyle),governingRules:extracted(input.governingRules||[])},
-    parties:partyValues.map((party,index)=>typeof party==="string"?{id:`party-${index+1}`,name:extracted(party),normalizedName:missing("SYSTEM_GENERATED"),role:missing(),entityType:missing(),aliases:[],captionDisplayName:extracted(party)}:{id:party.id||`party-${index+1}`,name:extracted(party.name),normalizedName:extracted(party.normalizedName),role:extracted(party.role),entityType:extracted(party.entityType),aliases:(party.aliases||[]).map(alias=>({qualifier:extracted(alias.qualifier),name:extracted(alias.name)})),captionDisplayName:extracted(party.captionDisplayName||party.name)}),
-    deposition:{witness:extracted(input.witness),representativeCapacity:extracted(input.representativeCapacity||input.deponentType),representedOrganization:extracted(input.representedOrganization),corporateTopics:extracted(input.corporateTopics||[]),proceedingType:extracted(input.proceedingType||"Oral deposition"),volumeNumber:missing("WORKFLOW_DERIVED"),depositionDate:extracted(input.depositionDate),scheduledStart:extracted(input.scheduledStart),actualStart:missing("TRANSCRIPT_DERIVED"),actualEnd:missing("TRANSCRIPT_DERIVED"),timeZone:extracted(input.timeZone),location:extracted(input.location),remote:extracted(input.remote??null),remotePlatform:extracted(input.remotePlatform),telephone:extracted(input.telephone??null),videotaped:extracted(input.videotaped??null),interpreted:extracted(input.interpreted??null),corporateRepresentative:extracted(input.corporateRepresentative??null),witnessSworn:missing("REPORTER_ENTERED"),reportingMethod:missing("REPORTER_PROFILE")},
-    counsel:attorneyValues.map((attorney,index)=>counselEntry(attorney,index,{source:documentSource})),
+    case:{jurisdictionType:extracted("jurisdictionType",input.jurisdictionType??input.jurisdiction),court:extracted("court",input.court),district:extracted("district",input.district),division:extracted("division",input.division),county:extracted("county",input.county),judicialDistrict:extracted("judicialDistrict",input.judicialDistrict),causeNumber:extracted("causeNumber",input.causeNumber),caseStyle:extracted("caseStyle",input.caseStyle),governingRules:extracted("governingRules",input.governingRules)},
+    parties:partyValues.map((party,index)=>typeof party==="string"?{id:`party-${index+1}`,name:extracted("parties",party),normalizedName:missing("SYSTEM_GENERATED"),role:missing(),entityType:missing(),aliases:[],captionDisplayName:extracted("parties",party)}:{id:party.id||`party-${index+1}`,name:extracted("parties",party.name),normalizedName:extracted("parties",party.normalizedName),role:extracted("parties",party.role),entityType:extracted("parties",party.entityType),aliases:(party.aliases||[]).map(alias=>({qualifier:extracted("parties",alias.qualifier),name:extracted("parties",alias.name)})),captionDisplayName:extracted("parties",party.captionDisplayName??party.name)}),
+    deposition:{witness:extracted("witness",input.witness),representativeCapacity:extracted("representativeCapacity",input.representativeCapacity??input.deponentType),representedOrganization:extracted("representedOrganization",input.representedOrganization),corporateTopics:extracted("corporateTopics",input.corporateTopics),proceedingType:extracted("proceedingType",input.proceedingType),volumeNumber:missing("WORKFLOW_DERIVED"),depositionDate:extracted("depositionDate",input.depositionDate),scheduledStart:extracted("scheduledStart",input.scheduledStart),actualStart:missing("TRANSCRIPT_DERIVED"),actualEnd:missing("TRANSCRIPT_DERIVED"),timeZone:extracted("timeZone",input.timeZone),location:extracted("location",input.location),remote:extracted("remote",input.remote),remotePlatform:extracted("remotePlatform",input.remotePlatform),telephone:extracted("telephone",input.telephone),videotaped:extracted("videotaped",input.videotaped),interpreted:extracted("interpreted",input.interpreted),corporateRepresentative:extracted("corporateRepresentative",input.corporateRepresentative),witnessSworn:missing("REPORTER_ENTERED"),reportingMethod:missing("REPORTER_PROFILE")},
+    counsel:attorneyValues.map((attorney,index)=>counselEntry(attorney,index,{source:sourceFor("attorneys")})),
     reporter:{profileId:reporterField(reporter.id),fullName:reporterField(reporter.name||input.courtReporterName),designations:reporterField(reporter.designations),csrNumber:reporterField(reporter.licenseNumber),csrState:reporterField(reporter.csrState),csrExpiration:reporterField(reporter.csrExpiration),notaryStatus:reporterField(reporter.notaryStatus),notaryState:reporterField(reporter.notaryState),firm:reporterField(reporter.company),firmRegistrationNumber:reporterField(reporter.firmRegistrationNumber),firmRegistrationWaiver:reporterField(reporter.firmRegistrationWaiver),address:reporterField(reporter.address),phone:reporterField(reporter.phone),email:reporterField(reporter.email),officialStatus:reporterField(reporter.officialStatus)},
     participants:{otherAttendees:[],interpreters:[],videographers:[]},
     transcript:{volumes:[],pageCount:missing("TRANSCRIPT_DERIVED"),examinations:[],chronologicalEvents:[],requestedDocuments:[],certifiedQuestions:[]},

@@ -60,7 +60,8 @@ test("a correction that changes nothing is refused", () => {
 test("a corrected field becomes REPORTER_ENTERED whatever it held before", () => {
   // Etminan's remote comes from the certified transcript's preamble -- a document, but not the
   // Notice, and intake.notice is null. Inheriting NOD_EXTRACTED would assert a notice said it.
-  const record = createCanonicalDepositionRecord({ witness:"Mohammad Etminan, M.D." }, { noticeSupplied:true });
+  const record = createCanonicalDepositionRecord(
+    { witness:"Mohammad Etminan, M.D.", extractedFields:["remote"] }, { noticeSupplied:true });
   assert.equal(record.deposition.remote.source, "NOD_EXTRACTED");
   const { entry } = validateCorrection(record, correction({ path:"deposition.remote", from:null, to:true, why:"Certified transcript page 1 preamble: via Zoom" }));
   const corrected = applyCorrection(record, entry);

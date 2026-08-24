@@ -8,7 +8,7 @@ import { getOpeningProjection, readOpeningState, saveOpeningState } from "../ser
 
 function fixture(){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"depo-opening-")),storageRoot=path.join(root,"depos");
-  const deposition=createDeposition(root,{deposition:{id:"DEP-20260821-OPEN1",caseStyle:"Smith v. Jones",causeNumber:"2026-CV-1",witness:"Alex Smith",depositionDate:"2026-08-21",courtReporterName:"Miah Bardot",canonicalSeed:{court:"District Court",county:"Travis",scheduledStart:"09:00",location:"Austin",attorneys:[{name:"Dennis Bentley",firm:"Bentley Law",represents:["Plaintiff"],appearanceRole:"QUESTIONING_ATTORNEY",actualAppearance:true}]}},artifacts:{notice:{name:"notice.pdf",base64:Buffer.from("notice").toString("base64")}}},{storageRoot});
+  const deposition=createDeposition(root,{deposition:{id:"DEP-20260821-OPEN1",caseStyle:"Smith v. Jones",causeNumber:"2026-CV-1",witness:"Alex Smith",depositionDate:"2026-08-21",courtReporterName:"Miah Bardot",canonicalSeed:{extractedFields:["caseStyle","causeNumber","witness","court","county","attorneys"],court:"District Court",county:"Travis",scheduledStart:"09:00",location:"Austin",attorneys:[{name:"Dennis Bentley",firm:"Bentley Law",represents:["Plaintiff"],appearanceRole:"QUESTIONING_ATTORNEY",actualAppearance:true}]}},artifacts:{notice:{name:"notice.pdf",base64:Buffer.from("notice").toString("base64")}}},{storageRoot});
   return{root,storageRoot,deposition};
 }
 

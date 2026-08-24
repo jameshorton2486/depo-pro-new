@@ -30,20 +30,38 @@ test("with no notice, document-sourced fields are attributed to the reporter", (
   assert.equal(record.case.causeNumber.source, "REPORTER_ENTERED");
 });
 
-test("with a notice, extraction keeps its attribution", () => {
-  const record = createCanonicalDepositionRecord(input, { noticeSupplied:true });
+test("with a notice, the fields the extraction supplied keep its attribution", () => {
+  const record = createCanonicalDepositionRecord(
+    { ...input, extractedFields:["depositionDate","causeNumber"] }, { noticeSupplied:true });
   assert.equal(record.deposition.depositionDate.source, "NOD_EXTRACTED");
   assert.equal(record.case.causeNumber.source, "NOD_EXTRACTED");
   assert.ok(populated(record).some(([, item]) => item.source === "NOD_EXTRACTED"));
+});
+
+test("a filed notice does not attribute a field the extraction never supplied", () => {
+  // What this file half-fixed. It stopped a record with no notice from claiming one, and left
+  // "a notice was filed, so the field may claim it" standing -- which made the claim about the
+  // document rather than about the value. In a real record that put 25 of 51 Notice-attributed
+  // fields on things the Notice never said, including a date the reporter typed by hand.
+  const record = createCanonicalDepositionRecord(
+    { ...input, extractedFields:["causeNumber"] }, { noticeSupplied:true });
+  assert.equal(record.case.causeNumber.source, "NOD_EXTRACTED", "the one it did supply");
+  assert.equal(record.deposition.depositionDate.source, "REPORTER_ENTERED",
+    "a filed notice is not evidence that this field came off it");
+  assert.equal(record.case.court.source, "REPORTER_ENTERED");
 });
 
 test("counsel is attributed on the same terms as the rest of the record", () => {
   // Counsel used to default to NOD_EXTRACTED independently, so a record could disagree with
   // itself about whether a document existed.
   const without = createCanonicalDepositionRecord(input);
-  const with_ = createCanonicalDepositionRecord(input, { noticeSupplied:true });
+  const with_ = createCanonicalDepositionRecord(
+    { ...input, extractedFields:["attorneys"] }, { noticeSupplied:true });
   assert.equal(without.counsel[0].fullName.source, "REPORTER_ENTERED");
   assert.equal(with_.counsel[0].fullName.source, "NOD_EXTRACTED");
+  // And counsel the extraction did not supply is not attributed to the notice either.
+  const typed = createCanonicalDepositionRecord(input, { noticeSupplied:true });
+  assert.equal(typed.counsel[0].fullName.source, "REPORTER_ENTERED");
 });
 
 test("the reporter profile is never attributed to the notice either way", () => {
@@ -63,7 +81,8 @@ test("createDeposition attributes by whether a notice was actually filed", async
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "depo-provenance-"));
   t.after(() => fs.rmSync(root, { recursive:true, force:true }));
   const options = { storageRoot: path.join(root, "depos") };
-  const common = { caseStyle:"Smith v. Jones", courtReporterName:"Brenda Miah", causeNumber:"2026-CV-00123", audioIntakeIds:[], keyterms:[] };
+  const common = { caseStyle:"Smith v. Jones", courtReporterName:"Brenda Miah", causeNumber:"2026-CV-00123", audioIntakeIds:[], keyterms:[],
+    canonicalSeed:{ extractedFields:["depositionDate","causeNumber"] } };
 
   const withNotice = createDeposition(root, {
     deposition:{ ...common, id:"DEP-20260813-ABCDE", witness:"Alex Smith", depositionDate:"2026-08-13" },
@@ -74,7 +93,7 @@ test("createDeposition attributes by whether a notice was actually filed", async
   }, options);
 
   assert.equal(withNotice.canonicalData.deposition.depositionDate.source, "NOD_EXTRACTED",
-    "a notice was filed, so the date may claim it");
+    "a notice was filed and the extraction supplied this field, so it may claim it");
   assert.equal(withoutNotice.canonicalData.deposition.depositionDate.source, "REPORTER_ENTERED",
     "no notice was filed, so nothing may claim one");
   assert.equal(withoutNotice.canonicalData.case.causeNumber.source, "REPORTER_ENTERED");

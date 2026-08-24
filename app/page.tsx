@@ -16,6 +16,7 @@ import { formatDisplayDate } from "./date-format.mjs";
 import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
 import { RECOVERED_WORKSPACE_RESTORED, resolveRecoveredWorkspace } from "./workspace-recovery.mjs";
+import { extractedFieldKeys } from "./extracted-fields.mjs";
 
 type Deposition = {
   id: string;
@@ -185,9 +186,18 @@ export default function Home() {
       reporterProfile: reporter ?? undefined,
       canonicalSeed: {
         ...(intakeDraft?.ufmData||{}),
+        // The keys the extraction genuinely produced. Everything else on this form was typed,
+        // defaulted, or hardcoded, and must not be attributed to the Notice.
+        extractedFields: extractedFieldKeys(intakeDraft?.ufmData, data),
         court:String(data.get("canonicalCourt")||""),district:String(data.get("canonicalDistrict")||""),division:String(data.get("canonicalDivision")||""),county:String(data.get("canonicalCounty")||""),
         scheduledStart:String(data.get("canonicalScheduledStart")||""),timeZone:String(data.get("canonicalTimeZone")||""),location:String(data.get("canonicalLocation")||""),remotePlatform:String(data.get("canonicalRemotePlatform")||""),
-        remote:data.get("canonicalRemote")==="on",videotaped:data.get("canonicalVideotaped")==="on",interpreted:data.get("canonicalInterpreted")==="on",corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on",
+        // An unchecked box is absent from FormData, so `=== "on"` turned "nobody answered" into
+        // "no" before the server could tell them apart, and the record then stated the deposition
+        // was not remote with the Notice named as the source. `|| undefined` keeps absence absent;
+        // the envelope records it as MISSING. A reporter who means "not remote" cannot say so with
+        // a plain checkbox -- that needs a tri-state, and until it exists the honest answer is that
+        // the question is unanswered.
+        remote:data.get("canonicalRemote")==="on"||undefined,videotaped:data.get("canonicalVideotaped")==="on"||undefined,interpreted:data.get("canonicalInterpreted")==="on"||undefined,corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on"||undefined,
       },
       intakeNotes: String(data.get("reporterNotes") || intakeDraft?.notes || ""),
       noticeName: intakeDraft?.notice?.name ?? "",
