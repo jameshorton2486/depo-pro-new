@@ -1,4 +1,6 @@
 "use client";
+
+import { deponentTypeOption } from "./intake-logistics.mjs";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import AudioReviewCard from "./AudioReviewCard";
 import AudioToolsScreen from "./AudioToolsScreen";
@@ -270,7 +272,8 @@ export default function IntakeScreen({ creationMode, onCancel, onContinue }: Pro
       witness: analysis.witness || "",
       causeNumber: analysis.causeNumber || analysis.ufmData?.cause_number || "",
       depositionDate: analysis.depositionDate || "",
-      deponentType: analysis.deponentType || "Fact witness",
+      // No default. A deponent type nobody stated is unanswered, not a fact witness.
+      deponentType: deponentTypeOption(analysis.deponentType) ?? "",
       notes: "",
       notice,
       courtOrder,

@@ -14,7 +14,7 @@
 // method-and-schedule block is absent because nothing reads `logistics` into the form yet, which is
 // its own fix. A key missing from this list is attributed to the reporter, which is the truthful
 // answer while nothing carries the extraction's value to the field.
-import { logisticsFields } from "./intake-logistics.mjs";
+import { deponentTypeOption, logisticsFields } from "./intake-logistics.mjs";
 
 const text = value => (typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim());
 const same = (a, b) => text(a) !== "" && text(a).toLowerCase() === text(b).toLowerCase();
@@ -48,6 +48,7 @@ export function extractedFieldKeys(ufmData, read) {
     ["scheduledStart", mapped.scheduledStart, "canonicalScheduledStart"],
     ["location", mapped.location, "canonicalLocation"],
     ["remotePlatform", mapped.remotePlatform, "canonicalRemotePlatform"],
+    ["deponentType", deponentTypeOption(data.deponentType), "deponentType"],
   ];
   for (const [canonicalKey, extractedValue, formKey] of mappedPairs) {
     if (same(extractedValue, get(formKey))) keys.push(canonicalKey);

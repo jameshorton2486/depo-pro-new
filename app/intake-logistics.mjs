@@ -112,3 +112,25 @@ export function logisticsFields(ufmData) {
     remotePlatform: clean(logistics.remote_platform) || undefined,
   };
 }
+
+// The five deponent types the setup screen offers.
+//
+// The extraction schema asks for `setup.deponentType` as a free-form string with no enum, so what
+// comes back may be anything -- and for the Notice this was measured on it came back empty, with
+// the only mention of "expert" sitting in a speaker_map note as prose. Reading a deponent type out
+// of that note is the same inference line as reading `remote` out of "via Zoom".
+//
+// So: prefill only on an exact match to an option. Anything else leaves the control unselected,
+// which the setup form submits as "" and the envelope records as MISSING. The screen previously
+// showed "Fact witness" for this Notice -- not because anything said so, but because
+// IntakeScreen defaulted `analysis.deponentType || "Fact witness"` and the select defaulted again
+// on top of it. A default is not an answer.
+export const DEPONENT_TYPES = Object.freeze([
+  "Fact witness", "Expert witness", "Corporate representative", "Party", "Other",
+]);
+
+export function deponentTypeOption(value) {
+  const text = clean(value);
+  if (!text) return undefined;
+  return DEPONENT_TYPES.find(option => option.toLowerCase() === text.toLowerCase());
+}
