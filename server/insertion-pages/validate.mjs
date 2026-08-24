@@ -99,14 +99,40 @@ function validateIndex(input, findings) {
   }
 }
 
+// A field has three states here, not two: it has a value, it is unanswered, or it is waived --
+// absent on purpose, with a recorded reason saying why. Only the middle one is a defect.
+//
+// The distinction already existed at the credentials layer, where validateCredentials reads
+// reporter.firmRegistration and accepts a waiver as satisfying the certificate requirement. It
+// did not exist here, where isBlank collapsed waived back into unanswered, so recording a waiver
+// merely exchanged CERT_FIRM_REGISTRATION_UNRESOLVED for UNEXPECTED_BLANK. Answering the
+// requirement left the reporter exactly as blocked as ignoring it.
+//
+// A Texas CSR certifying under an individual licence has no firm, so the waiver answers the firm
+// name for the same reason it answers the registration number: there is no firm for either to
+// describe. It answers nothing else -- an unwaived blank is still a blank.
+function waivedFields(input) {
+  const waived = new Set();
+  const firmRegistration = input.reporter?.firmRegistration;
+  if (firmRegistration?.applicable === false && String(firmRegistration.reason ?? "").trim()) {
+    waived.add("reporter.firmRegistrationNumber");
+    waived.add("reporter.firmName");
+  }
+  return waived;
+}
+
 function validateFields(input, findings) {
   // Validate the canonical pre-render inventory here. Page-specific composition fields
   // are produced by build-pages and are checked after substitution for surviving carets.
   const fields = new Set(input.template?.templates?.fieldInventory?.fields ?? []);
   const allowed = new Set(INTENTIONAL_BLANKS[input.variant] ?? []);
+  const waived = waivedFields(input);
+  // Distinct from a waiver: this suppresses a second finding about a field the specific gate has
+  // already reported, and applies only when that gate fired -- which is precisely when no waiver
+  // was recorded.
   const coveredBySpecificGate = new Set();
   if (findings.some(({ code }) => code === "CERT_FIRM_REGISTRATION_UNRESOLVED")) coveredBySpecificGate.add("reporter.firmRegistrationNumber");
-  for (const field of fields) if (isBlank(input.fieldValues?.[field]) && !allowed.has(field)) {
+  for (const field of fields) if (isBlank(input.fieldValues?.[field]) && !allowed.has(field) && !waived.has(field)) {
     if (coveredBySpecificGate.has(field)) continue;
     findings.push(blocking("UNEXPECTED_BLANK", field, `Template field ${field} is blank and is not intentional for ${input.variant}.`, { path: `fieldValues.${field}` }));
   }
