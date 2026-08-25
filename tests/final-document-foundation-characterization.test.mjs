@@ -79,7 +79,7 @@ test("characterization: current undo removes one low-level operation from a spli
   assert.equal(render(undone).counts.paragraphs, render().counts.paragraphs + 1);
 });
 
-test("characterization: paragraph ids are render-order identities and an early split renumbers later paragraphs", () => {
+test("foundation: paragraph ids remain stable when an earlier paragraph is split", () => {
   const before = render();
   const segment = firstSplittable();
   const anchor = segment.asrWordIds[2];
@@ -88,9 +88,8 @@ test("characterization: paragraph ids are render-order identities and an early s
   const beforeParagraph = before.paragraphs.find((paragraph) => paragraph.words.some((word) => word.id === laterEvidenceWord));
   const afterParagraph = after.paragraphs.find((paragraph) => paragraph.words.some((word) => word.id === laterEvidenceWord));
 
-  assert.notEqual(beforeParagraph.id, afterParagraph.id);
-  assert.match(beforeParagraph.id, /^paragraph:\d+$/);
-  assert.match(afterParagraph.id, /^paragraph:\d+$/);
+  assert.equal(beforeParagraph.id, afterParagraph.id);
+  assert.equal(beforeParagraph.id, `paragraph:${beforeParagraph.asrWordIds[0]}`);
 });
 
 test("characterization: paragraph timing ignores adjacent authored words and uses measured evidence bounds", () => {

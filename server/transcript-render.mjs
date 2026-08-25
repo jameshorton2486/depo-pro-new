@@ -94,7 +94,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       const original = word.punctuatedWord ?? word.word ?? "";
       const override = applied.replaced.get(id);
       resolved.push({
-        id:word.id, text:override ?? original, start:word.start, end:word.end,
+        id:word.id, tokenId:word.id, tokenKind:"evidence", sourceWordId:word.id,
+        text:override ?? original, start:word.start, end:word.end,
         confidence:word.confidence, deepgramSpeaker:word.deepgramSpeaker,
         // A deleted word keeps its id and its original text. It is struck from the reading, not
         // removed from the record -- I1 -- so the evidence chain survives the edit.
@@ -106,7 +107,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       });
       // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
       // human-added words distinguishable at a glance.
-      for (const extra of applied.inserted.get(id) ?? []) resolved.push({ id:extra.id, text:extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true });
+      for (const extra of applied.inserted.get(id) ?? []) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true });
     }
     // `start` is what a click seeks to. It prefers the first resolved word's own timestamp over
     // the segment's, because the segment boundary is derived and the word time is measured --
@@ -116,7 +117,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     const start = resolved.find(word => Number.isFinite(word.start))?.start ?? paragraph.start ?? null;
     const end = [...resolved].reverse().find(word => Number.isFinite(word.end))?.end ?? paragraph.end ?? null;
     return {
-      id:`paragraph:${index + 1}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
+      // The first evidence anchor is stable across unrelated edits and reloads. Render order is
+      // presentation, not identity: inserting or splitting an earlier paragraph must not rename
+      // everything after it.
+      id:`paragraph:${paragraph.asrWordIds?.[0] ?? paragraph.segmentIds?.[0] ?? `empty:${index + 1}`}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
       // Carried, not parsed. speakerBuckets keys the speaker map by (job, speaker) and had to

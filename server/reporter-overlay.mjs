@@ -12,9 +12,10 @@
 //
 // Pure: no filesystem, no fetch. The caller reads and writes the file.
 
-export const OVERLAY_SCHEMA_VERSION = "1.0.0";
+export const OVERLAY_SCHEMA_VERSION = "2.0.0";
+export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
 export const OPERATIONS = Object.freeze(["split", "label", "replace", "delete", "insert", "flag", "unflag"]);
-export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[] });
+export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[], transactionSizes:[], redoTransactions:[] });
 
 const text = value => String(value ?? "");
 const trimmed = value => text(value).trim();
@@ -82,8 +83,17 @@ export function validateOperation(input) {
 
 export function validateOverlay(value, depositionId) {
   if (!value) return emptyOverlay(depositionId);
-  if (value.schemaVersion !== OVERLAY_SCHEMA_VERSION || !Array.isArray(value.operations)) throw new Error("The reporter overlay record is invalid or unsupported.");
-  return { ...emptyOverlay(depositionId), ...value, operations:value.operations.map(item => { const result = validateOperation(item); if (!result.ok) throw new Error(result.message); return result.operation; }) };
+  if (![OVERLAY_SCHEMA_VERSION, LEGACY_OVERLAY_SCHEMA_VERSION].includes(value.schemaVersion) || !Array.isArray(value.operations)) throw new Error("The reporter overlay record is invalid or unsupported.");
+  const operations=value.operations.map(item => { const result = validateOperation(item); if (!result.ok) throw new Error(result.message); return result.operation; });
+  const transactionSizes=value.schemaVersion===LEGACY_OVERLAY_SCHEMA_VERSION
+    ? operations.map(()=>1)
+    : Array.isArray(value.transactionSizes) ? value.transactionSizes.map(Number) : [];
+  if(transactionSizes.some(size=>!Number.isInteger(size)||size<1)||transactionSizes.reduce((sum,size)=>sum+size,0)!==operations.length)throw new Error("The reporter overlay transaction boundaries are invalid.");
+  const redoTransactions=Array.isArray(value.redoTransactions)?value.redoTransactions.map(transaction=>{
+    if(!Array.isArray(transaction)||!transaction.length)throw new Error("The reporter overlay redo history is invalid.");
+    return transaction.map(item=>{const result=validateOperation(item);if(!result.ok)throw new Error(result.message);return result.operation});
+  }):[];
+  return { ...emptyOverlay(depositionId), ...value, schemaVersion:OVERLAY_SCHEMA_VERSION, operations, transactionSizes, redoTransactions };
 }
 
 const segmentHolding = (segments, wordId) => segments.findIndex(segment => (segment.asrWordIds || []).includes(wordId));
@@ -207,4 +217,33 @@ export function appendOperations(overlay, inputs) {
     operations.push(result.operation);
   }
   return { ...emptyOverlay(overlay?.depositionId), ...overlay, operations };
+}
+
+/** Appends one user action, which may contain several low-level operations. */
+export function appendTransaction(overlay, inputs) {
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const batch=[];
+  for(const input of Array.isArray(inputs)?inputs:[inputs]){
+    const result=validateOperation(input);
+    if(!result.ok)throw new Error(result.message);
+    batch.push(result.operation);
+  }
+  if(!batch.length)throw new Error("A reporter transaction requires at least one operation.");
+  return {...current,operations:[...current.operations,...batch],transactionSizes:[...current.transactionSizes,batch.length],redoTransactions:[]};
+}
+
+/** Removes the last complete user action, not merely its final implementation operation. */
+export function undoLastTransaction(overlay){
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const size=current.transactionSizes.at(-1)??0;
+  if(!size)return{overlay:current,removed:null};
+  const removed=current.operations.slice(-size);
+  return{overlay:{...current,operations:current.operations.slice(0,-size),transactionSizes:current.transactionSizes.slice(0,-1),redoTransactions:[...current.redoTransactions,removed]},removed};
+}
+
+export function redoLastTransaction(overlay){
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const restored=current.redoTransactions.at(-1)??null;
+  if(!restored)return{overlay:current,restored:null};
+  return{overlay:{...current,operations:[...current.operations,...restored],transactionSizes:[...current.transactionSizes,restored.length],redoTransactions:current.redoTransactions.slice(0,-1)},restored};
 }

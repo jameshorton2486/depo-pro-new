@@ -7,7 +7,7 @@ import {allowedApiOrigins} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
-import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
+import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
@@ -308,13 +308,18 @@ const server = http.createServer(async (req,res) => {
     // record of what a reporter did to stop matching what they did.
     if(req.url==="/api/transcript/overlay"&&req.method==="POST"){
       const input=await body(req,1024*1024);
-      const overlay=appendReporterOperations(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,operations:input.operations??input.operation});
+      const overlay=appendReporterOperations(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,operations:input.operations??input.operation,expectedReviewStateHash:input.expectedReviewStateHash??null});
       return json(res,200,{overlay},origin);
     }
     if(req.url==="/api/transcript/overlay/undo"&&req.method==="POST"){
       const input=await body(req,64*1024);
       const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
       return json(res,200,{overlay,removed},origin);
+    }
+    if(req.url==="/api/transcript/overlay/redo"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const {overlay,restored}=redoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      return json(res,200,{overlay,restored},origin);
     }
     // Counsel only. The one write the canonical record has outside intake, and it stays narrow
     // on purpose: without it the Label panel offers no attorneys on any deposition whose Notice
