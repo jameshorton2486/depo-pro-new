@@ -10,6 +10,7 @@ import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { UFM_FREELANCE_LAYOUT_PROFILE, isLayoutProfileVerified } from "./insertion-pages/layout-profile.mjs";
 import { computeReviewStateHash } from "./review-state-hash.mjs";
+import { buildSharedDocumentModel } from "./shared-document-model.mjs";
 import { LINE_WIDTH } from "./transcript-labels.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getSpeakerCandidates, getWorkingTranscript, readAsrEvidence, readReporterOverlay } from "./transcription-jobs.mjs";
@@ -38,77 +39,6 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function hardWrapToken(token, width, findings, paragraphId) {
-  findings.push({ code:"PRINT_UNBREAKABLE_TOKEN", severity:"warning", target:paragraphId,
-    message:`A ${token.length}-character token exceeds the ${width}-character line area and was hard-wrapped.` });
-  const lines=[];
-  for (let offset=0; offset<token.length; offset+=width) lines.push(token.slice(offset, offset+width));
-  return lines;
-}
-
-// Preserves whitespace inside a line, including the canonical two spaces after a sentence.
-// Whitespace at a physical line boundary is layout, not transcript text, and is discarded.
-function wrapVariable(text, firstWidth, continuationWidth, findings, paragraphId) {
-  let remaining=String(text ?? "").trim(), width=firstWidth;
-  const output=[];
-  while (remaining) {
-    if (remaining.length <= width) { output.push(remaining); break; }
-    let at=-1;
-    for (let index=Math.min(width,remaining.length-1); index>=0; index--) if (/\s/.test(remaining[index])) { at=index; break; }
-    if (at<0) {
-      const tokenEnd=remaining.search(/\s/), token=tokenEnd<0?remaining:remaining.slice(0,tokenEnd);
-      const chunks=hardWrapToken(token,width,findings,paragraphId);
-      output.push(chunks.shift());
-      remaining=`${chunks.join("")} ${tokenEnd<0?"":remaining.slice(tokenEnd).trimStart()}`.trim();
-    } else {
-      output.push(remaining.slice(0,at).trimEnd());
-      remaining=remaining.slice(at).trimStart();
-    }
-    width=continuationWidth;
-  }
-  return output.length?output:[""];
-}
-
-function spaces(count) { return " ".repeat(Math.max(0,count)); }
-function centered(text) { return `${spaces(Math.floor((LINE_WIDTH-text.length)/2))}${text}`; }
-
-function paragraphLines(paragraph, findings) {
-  const layout=paragraph.layout ?? { tokenCol:0, textCol:0, wrapCol:0, centered:false };
-  const trace={ paragraphId:paragraph.id, sourceSegmentIds:[...(paragraph.segmentIds??[])], sourceWordIds:[...(paragraph.asrWordIds??[])], start:paragraph.start??null, end:paragraph.end??null };
-  const lines=[];
-  if (paragraph.byLine) lines.push({ content:String(paragraph.byLine), paragraphId:paragraph.id, trace, kind:"by-line" });
-  const text=String(paragraph.text??"");
-  if (layout.centered) {
-    for (const piece of wrapVariable(text,LINE_WIDTH,LINE_WIDTH,findings,paragraph.id)) lines.push({ content:centered(piece), paragraphId:paragraph.id, trace, kind:"paragraph" });
-    return lines;
-  }
-  const tokenCol=Number.isInteger(layout.tokenCol)?layout.tokenCol:null, textCol=Number.isInteger(layout.textCol)?layout.textCol:null, wrapCol=Number.isInteger(layout.wrapCol)?layout.wrapCol:0;
-  let prefix="", firstTextCol=textCol??0;
-  if (paragraph.label && tokenCol!==null) {
-    prefix=`${spaces(tokenCol)}${paragraph.label}`;
-    if (textCol!==null) prefix+=spaces(textCol-prefix.length);
-    else prefix+=String(layout.inlineAfterLabel??"  ");
-    firstTextCol=prefix.length;
-  } else if (textCol!==null) prefix=spaces(textCol);
-  const pieces=wrapVariable(text,Math.max(1,LINE_WIDTH-firstTextCol),Math.max(1,LINE_WIDTH-wrapCol),findings,paragraph.id);
-  pieces.forEach((piece,index)=>lines.push({ content:`${index===0?prefix:spaces(wrapCol)}${piece}`, paragraphId:paragraph.id, trace, kind:"paragraph" }));
-  return lines;
-}
-
-function paginate(paragraphs, findings, profile) {
-  const content=paragraphs.flatMap(paragraph=>paragraphLines(paragraph,findings));
-  for (const line of content) if (line.content.length>profile.charactersPerLine) findings.push({ code:"PRINT_LINE_OVERFLOW", severity:"blocking", target:line.paragraphId, message:`A rendered line occupies ${line.content.length} characters; the profile permits ${profile.charactersPerLine}.` });
-  const pages=[];
-  for(let offset=0; offset<content.length||(!content.length&&offset===0); offset+=profile.linesPerPage){
-    const occupied=content.slice(offset,offset+profile.linesPerPage);
-    pages.push({ id:`transcript-body-${pages.length+1}`, role:"transcript-body", pageNumber:pages.length+1,
-      lines:Array.from({length:profile.linesPerPage},(_,index)=>occupied[index]
-        ? { position:index+1, occupied:true, ...occupied[index] }
-        : { position:index+1, occupied:false, content:"", paragraphId:null, trace:null, kind:"blank" }) });
-  }
-  return pages;
-}
-
 function renderedProjection(rendered) {
   return {
     schemaVersion:rendered?.schemaVersion??null,
@@ -122,9 +52,9 @@ function renderedProjection(rendered) {
   };
 }
 
-function previewParagraphs(rendered) {
+function withPreviewLabels(paragraphs) {
   const fallbackLabels=new Map();
-  return renderedProjection(rendered).paragraphs.map(paragraph=>{
+  return paragraphs.map(paragraph=>{
     if(paragraph.label)return paragraph;
     const speaker=paragraph.deepgramSpeaker;
     const key=speaker===null||speaker===undefined?null:`${paragraph.sourceJobIdentity??"unknown-job"}:${speaker}`;
@@ -132,13 +62,17 @@ function previewParagraphs(rendered) {
     return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:"};
   });
 }
+function previewParagraphs(rendered){return renderedProjection({...rendered,paragraphs:withPreviewLabels(rendered?.paragraphs??[])}).paragraphs}
 
 export function buildTranscriptPrintModel({ rendered, reviewStateHash, deposition, profile=TRANSCRIPT_BODY_LAYOUT_PROFILE }={}) {
   if (!rendered?.paragraphs) throw new Error("PRINT_RENDERED_TRANSCRIPT_REQUIRED: Print Model consumes the canonical rendered transcript.");
   if (!reviewStateHash) throw new Error("PRINT_REVIEW_STATE_REQUIRED: Preview requires the canonical review-state hash.");
   const printFindings=[];
   if(!isLayoutProfileVerified(profile)) printFindings.push({ code:"PRINT_LAYOUT_PROFILE_UNVERIFIED", severity:"warning", target:"layoutProfile", message:"This is a simple readable preview. Its 25-line reading pages are not verified court-transcript geometry and are not intended for certified production output." });
-  const projection=renderedProjection(rendered),paragraphs=previewParagraphs(rendered),renderedProjectionHash=hash(projection),pages=paginate(paragraphs,printFindings,profile);
+  const projection=renderedProjection(rendered),paragraphs=previewParagraphs(rendered),renderedProjectionHash=hash(projection);
+  const sharedDocument=buildSharedDocumentModel({rendered,paragraphs:withPreviewLabels(rendered.paragraphs),profile});
+  printFindings.push(...sharedDocument.findings);
+  const pages=sharedDocument.pages;
   const unsigned={
     schemaVersion:TRANSCRIPT_PRINT_MODEL_VERSION, recordType:"TRANSCRIPT_PRINT_MODEL",
     deposition:{ id:deposition?.id??null, caseStyle:deposition?.caseStyle??"", witness:deposition?.witness??"", depositionDate:deposition?.depositionDate??"", causeNumber:deposition?.causeNumber??"" },
@@ -165,4 +99,4 @@ export function getTranscriptPrintModel(root,{depositionId,storageRoot,examinerI
   return model;
 }
 
-export const _testing={CACHE,hash,paragraphLines,paginate,previewParagraphs,renderedProjection,wrapVariable};
+export const _testing={CACHE,hash,previewParagraphs,renderedProjection,withPreviewLabels};
