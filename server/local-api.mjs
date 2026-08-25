@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
-import {allowedApiOrigins} from "./api-origins.mjs";
+import {allowedApiOrigins,localApiPort} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
@@ -53,7 +53,7 @@ if (fs.existsSync(localEnvironment)) process.loadEnvFile(localEnvironment);
 const depositionStorageRoot = configuredDepositionStorageRoot();
 const terminologyPrompt = fs.readFileSync(path.join(root, "prompts", "extraction", "case_terms", "v2.md"), "utf8");
 const secretFile = path.join(root, "data", "secrets.dat");
-const port = 4317;
+const port = localApiPort();
 const allowedOrigins = allowedApiOrigins();
 
 function dpapi(mode, value) {

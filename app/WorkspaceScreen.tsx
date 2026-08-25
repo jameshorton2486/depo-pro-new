@@ -3,12 +3,14 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
+import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string };
 type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number; flags:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
+type PrintModel = { pages:DocumentPage[]; layoutProfile:{linesPerPage:number;charactersPerLine:number}; findings:{print:Finding[]} };
 
 // One paragraph, memoized, because without this a single word click reconciles every word in the
 // deposition -- measured at 150-200ms of blocked main thread per click on ETM01's 12,174 words.
@@ -83,6 +85,7 @@ function clock(seconds:number|null){ if(seconds===null||!Number.isFinite(seconds
 export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{ deposition:WorkspaceDeposition; audioIndex?:number; onBack:()=>void }) {
   const depositionId = deposition.id;
   const [rendered,setRendered] = useState<Rendered|null>(null);
+  const [printModel,setPrintModel] = useState<PrintModel|null>(null);
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
   const [examiner,setExaminer] = useState<string>("");
@@ -111,6 +114,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const [notice,setNotice] = useState("");
   const [assignments,setAssignments] = useState<Record<string,{ speakerIdentity:string; transcriptRole:string }>>({});
   const player = useRef<HTMLAudioElement|null>(null);
+  const playbackEnd = useRef<number|null>(null);
 
   // A token rather than a callback, so the effect owns the fetch and every setState happens
   // inside the promise rather than in the effect body -- which also gives the cancellation the
@@ -138,8 +142,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,candidateRes,mediaRes] = await Promise.all([
+        const [renderRes,printRes,candidateRes,mediaRes] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
+          fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}),
           fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
           fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
@@ -148,6 +153,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         if(cancelled) return;
         if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
         setRendered(body);
+        if(printRes.ok)setPrintModel(await printRes.json());else setPrintModel(null);
         if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
         if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
@@ -244,6 +250,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // against the right text -- the failure a reporter is least able to catch by reading.
   const multiVolume = useMemo(()=>(rendered?.findings ?? []).some(finding=>finding.code==="MULTI_VOLUME_UNSUPPORTED"),[rendered]);
   const seek = useCallback((seconds:number|null)=>{ if(seconds===null||multiVolume||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[multiVolume]);
+  const playParagraph = useCallback((paragraph:Paragraph|null)=>{if(!paragraph||paragraph.start===null||paragraph.end===null||multiVolume||!player.current)return;playbackEnd.current=paragraph.end;player.current.currentTime=paragraph.start;void player.current.play().catch(()=>{})},[multiVolume]);
   // The functional form of setSelected is what keeps this stable: reading `selected` directly would
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.
@@ -251,6 +258,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     setSelected(previous=>shiftKey&&previous?{...previous,extentWordId:wordId}:{paragraphId,wordId,extentWordId:null});
     setEditing(null);
   },[]);
+  const selectPageFragment = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>selectWord(paragraphId,wordId,shiftKey),[selectWord]);
   const editWord = useCallback((wordId:string,text:string)=>setEditing({wordId,text}),[]);
 
   // The reporter's core move: pick the word a new paragraph should start at, then choose what
@@ -362,7 +370,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             without one -- the element then reports MEDIA_ERR_SRC_NOT_SUPPORTED, which reads as
             "this audio is the wrong format" and sent an entire investigation down a codec path.
             With it the request is CORS and carries the Origin the gate expects. */}
-        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined}>
+        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined} onTimeUpdate={()=>{if(player.current&&playbackEnd.current!==null&&player.current.currentTime>=playbackEnd.current){player.current.pause();playbackEnd.current=null}}}>
           <track kind="captions" label="No captions" src="data:text/vtt,WEBVTT" default />
         </audio>
         {!playbackSource && media?.needsProxy && (
@@ -451,28 +459,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className="workspace-body">
-        <section className="workspace-transcript" aria-label="Transcript">
-          {rendered?.paragraphs.map(paragraph=>{
-            // Only the paragraphs the range actually touches are told about it. Comparing the
-            // range against this paragraph's own span is what keeps a range selection from
-            // re-rendering the paragraphs it does not cover.
-            const first=wordOrder.get(paragraph.words[0]?.id ?? ""), last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? "");
-            const touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last);
-            const mine=selected?.paragraphId===paragraph.id;
-            return <TranscriptParagraph
-              key={paragraph.id}
-              paragraph={paragraph}
-              wordOrder={wordOrder}
-              isSelected={mine}
-              selectedWordId={mine?selected!.wordId:null}
-              rangeFirst={touches?range!.first:-1}
-              rangeLast={touches?range!.last:-1}
-              onSeek={seek}
-              onSelect={selectWord}
-              onEdit={editWord}
-            />;
-          })}
-        </section>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} onSelect={selectPageFragment}/>
+          :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
+            const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
+            return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
         <aside className="workspace-menu" aria-label="Paragraph labels">
           <h2>Label</h2>
@@ -481,6 +471,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`
               : "Click a word, then choose what its paragraph should be."}
           </p>
+          {active&&<section className="workspace-selection-context" aria-label="Selected paragraph evidence">
+            <h3>Selected paragraph</h3>
+            <dl><div><dt>Speaker</dt><dd>{active.label??`Speaker ${active.deepgramSpeaker??"?"}`}</dd></div><div><dt>Role</dt><dd>{active.transcriptRole?ROLE_FOR(active.transcriptRole):"Unassigned"}</dd></div><div><dt>Evidence</dt><dd>{active.start!==null&&active.end!==null?`${clock(active.start)}–${clock(active.end)}`:"No measured audio range"}</dd></div><div><dt>Confidence</dt><dd>{(()=>{const measured=active.words.filter(word=>word.confidence!==null);return measured.length?`${(measured.reduce((sum,word)=>sum+(word.confidence??0),0)/measured.length*100).toFixed(1)}% average`:"Not available"})()}</dd></div><div><dt>Status</dt><dd>{active.words.some(word=>word.flagged)?"Marked for re-listen":active.words.every(word=>word.authored)?"Reporter-authored":"Evidence-linked"}</dd></div></dl>
+            <button type="button" disabled={multiVolume||active.start===null||active.end===null||!playbackSource} onClick={()=>playParagraph(active)}>Play paragraph</button>
+            {multiVolume&&<p className="workspace-hint">Playback is disabled because the source recording cannot be resolved safely.</p>}
+          </section>}
           {/* One mark, one meaning. A mark whose meaning is chosen per mark asks the scopist to
               make a decision at the moment this exists to make fast, and everything else a
               passage might need is already an operation: replace corrects, delete strikes, label
