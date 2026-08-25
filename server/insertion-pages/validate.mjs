@@ -2,12 +2,20 @@ import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
 import { captionJurisdiction } from "./variants.mjs";
 
+// What is left is exactly the set with no producer: submittedToWitnessDate, dueDate and serviceDate
+// are declared WORKFLOW_DERIVED in the canonical record, and no workflow writes them. They are
+// blank because nothing can answer them yet, which is a different fact from blank because nobody
+// has been asked.
+//
+// The six a reporter can answer came off this list when the certificate form began collecting
+// them. Leaving them here would have meant a reporter who skips the form still gets a certificate
+// with a dropped clause and a clean bill of health -- the defect this list is next to, not a use
+// for it. An entry added merely to make validation pass is how the guard stops meaning anything.
 export const INTENTIONAL_BLANKS = Object.freeze({
   TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([
-    "cert.submissionDate", "cert.returnDeadline", "cert.returnStatus", "cert.custodialAttorney",
-    "cert.charges", "cert.serviceDate", "cert.certificationDate",
+    "cert.submissionDate", "cert.returnDeadline", "cert.serviceDate",
   ]),
-  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze(["cert.serviceDate", "cert.certificationDate"]),
+  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze(["cert.serviceDate"]),
   FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
   FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
 });
@@ -32,7 +40,19 @@ function validateVariant(input, findings) {
   } else if (detected && detected !== input.jurisdiction) {
     findings.push(blocking("CERT_JURISDICTION_MISMATCH", "cert.jurisdiction", `Caption court '${input.caption.court}' indicates ${detected}, but the operator selected ${input.jurisdiction}.`, { path: "jurisdiction" }));
   }
-  if (!input.template?.available) {
+  // Two different facts, and a reader has to be able to tell them apart. UNAVAILABLE means no
+  // reviewed template exists for this variant at all -- the federal stubs, where the answer is to
+  // supply the source. UNAPPROVED means a reviewed template exists, its bytes match its manifest
+  // hashes, and the content it now has is not the content anyone approved -- where the answer is
+  // to look at the edit and re-approve it. Reporting the second as the first would send whoever
+  // reads it looking for a missing file that is sitting right there.
+  const approval = input.template?.approval;
+  if (approval && approval.state !== "current") {
+    findings.push(blocking("CERT_TEMPLATE_UNAPPROVED", `template.${input.variant}`, approval.state === "stale"
+      ? `The ${input.variant} templates were edited after their last approval (approved content ${String(approval.approvedDigest).slice(0, 12)}, current content ${approval.contentDigest.slice(0, 12)}). Review the edit, then record approval with: node scripts/approve-insertion-template.mjs ${input.variant} --by "<name>".`
+      : `No approval is recorded for ${input.variant} in templates/insertion-pages/approvals.json, so its reviewed templates cannot generate certified pages.`,
+    { path: "template" }));
+  } else if (!input.template?.available) {
     findings.push(blocking("CERT_TEMPLATE_UNAVAILABLE", `template.${input.variant}`, `No reviewed template is available for ${input.variant}; expected ${input.template?.expectedPath ?? "its variant template directory"}.`, { path: "template" }));
   }
 }
@@ -108,22 +128,32 @@ function validateIndex(input, findings) {
 // merely exchanged CERT_FIRM_REGISTRATION_UNRESOLVED for UNEXPECTED_BLANK. Answering the
 // requirement left the reporter exactly as blocked as ignoring it.
 //
-// A Texas CSR certifying under an individual licence has no firm, so the waiver answers the firm
-// name for the same reason it answers the registration number: there is no firm for either to
-// describe. It answers nothing else -- an unwaived blank is still a blank.
+// A Texas CSR certifying under an individual licence has no firm, and the waiver answers the
+// registration number the certificate asks for: certification-2 and certification-3 print
+// "Firm Registration No. ^reporter.firmRegistrationNumber^". It answers nothing else -- an
+// unwaived blank is still a blank.
+//
+// It used to waive reporter.firmName as well. No reviewed template prints a firm name, so that
+// entry cleared a guard on a field that reached no page; the inventory no longer names it and the
+// waiver no longer needs to. If a reviewed template ever prints the firm name, the inventory entry
+// and this waiver come back together -- the reason a solo CSR has no registration number is the
+// same reason they have no firm to name.
 function waivedFields(input) {
   const waived = new Set();
   const firmRegistration = input.reporter?.firmRegistration;
   if (firmRegistration?.applicable === false && String(firmRegistration.reason ?? "").trim()) {
     waived.add("reporter.firmRegistrationNumber");
-    waived.add("reporter.firmName");
   }
   return waived;
 }
 
 function validateFields(input, findings) {
-  // Validate the canonical pre-render inventory here. Page-specific composition fields
-  // are produced by build-pages and are checked after substitution for surviving carets.
+  // Validate the canonical pre-render inventory here. There is no second pass: a caret cannot
+  // survive substitution to be caught later, because renderTemplatePage omits any line whose
+  // fields are all absent before it substitutes anything. A field that reaches a page but is
+  // named in no inventory is therefore checked nowhere, and its line disappears silently --
+  // which is how the waived certificate came to print "That the original deposition was
+  // delivered to" with no object and no finding. This set is the only guard there is.
   const fields = new Set(input.template?.templates?.fieldInventory?.fields ?? []);
   const allowed = new Set(INTENTIONAL_BLANKS[input.variant] ?? []);
   const waived = waivedFields(input);

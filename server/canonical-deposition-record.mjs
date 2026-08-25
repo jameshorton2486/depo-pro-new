@@ -146,7 +146,15 @@ export function createCanonicalDepositionRecord(input={},{noticeSupplied=false}=
     transcript:{volumes:[],pageCount:missing("TRANSCRIPT_DERIVED"),examinations:[],chronologicalEvents:[],requestedDocuments:[],certifiedQuestions:[]},
     exhibits:[],
     signature:{status:missing("REPORTER_ENTERED"),requestedDate:missing("REPORTER_ENTERED"),submittedToWitnessDate:missing("WORKFLOW_DERIVED"),returnDeadlineDays:missing("REPORTER_ENTERED"),dueDate:missing("WORKFLOW_DERIVED"),returnedDate:missing("REPORTER_ENTERED"),witnessSigned:missing("REPORTER_ENTERED"),errataReceived:missing("REPORTER_ENTERED"),errata:[]},
-    certification:{variant:missing("WORKFLOW_DERIVED"),custodialAttorney:missing("REPORTER_ENTERED"),deliveryRecipient:missing("REPORTER_ENTERED"),attorneyTime:[],officerCharges:missing("REPORTER_ENTERED"),chargesResponsibleParty:missing("REPORTER_ENTERED"),serviceDate:missing("WORKFLOW_DERIVED"),serviceRecipients:[],clerkFiled:missing("REPORTER_ENTERED"),certificationDate:missing("REPORTER_ENTERED"),rule203Certified:missing("REPORTER_ENTERED"),disinterestedDeclaration:missing("REPORTER_ENTERED")},
+    // certificationDate and furtherCertificationDate are two dates, not one printed twice. The
+    // certificate says so itself: certification-2 closes "Further certification requirements
+    // pursuant to Rule 203 of TRCP will be certified to after they have occurred", then opens a
+    // FURTHER CERTIFICATION UNDER RULE 203 TRCP section that certification-3 finishes with its own
+    // signature block. The first signs transcript accuracy, disinterest and the appearance recital;
+    // the second signs the Rule 203.3 facts -- return, delivery to the custodial attorney, charges,
+    // service and filing -- which by that sentence postdate it. Collapsing them would print the
+    // preparation date against acts that had not happened yet.
+    certification:{variant:missing("WORKFLOW_DERIVED"),custodialAttorney:missing("REPORTER_ENTERED"),deliveryRecipient:missing("REPORTER_ENTERED"),attorneyTime:[],officerCharges:missing("REPORTER_ENTERED"),chargesResponsibleParty:missing("REPORTER_ENTERED"),serviceDate:missing("WORKFLOW_DERIVED"),serviceRecipients:[],clerkFiled:missing("REPORTER_ENTERED"),certificationDate:missing("REPORTER_ENTERED"),furtherCertificationDate:missing("REPORTER_ENTERED"),rule203Certified:missing("REPORTER_ENTERED"),disinterestedDeclaration:missing("REPORTER_ENTERED")},
     nonappearance:{applicable:field(false,{source:"WORKFLOW_DERIVED",state:"DERIVED"}),scheduledTime:missing("NOD_EXTRACTED"),waitedUntil:missing("REPORTER_ENTERED"),absentWitness:missing("REPORTER_ENTERED"),requestingParty:missing("REPORTER_ENTERED")},
     provenance:{createdAt:new Date().toISOString(),sources:Array.isArray(input.generated_from)?input.generated_from:[],manualReference:"Texas Court Reporters Certification Board Uniform Format Manual Examples (47 pages; figures 1-35A)"}
   };

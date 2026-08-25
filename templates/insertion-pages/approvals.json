@@ -1,0 +1,20 @@
+{
+  "$comment": [
+    "Approval for insertion-page templates. An entry approves a variant's template set as it stood at contentDigest -- the sha256 of the variant name plus every template file it renders from and that file's hash. Edit any of those files and re-hash the manifest and the digest changes, so the approval no longer applies and the variant refuses to generate with CERT_TEMPLATE_UNAPPROVED until it is re-approved.",
+    "Write entries with: node scripts/approve-insertion-template.mjs <VARIANT> --by \"<name>\". Do not hand-edit contentDigest; a digest typed by the author who made the edit is the failure this file exists to prevent.",
+    "approvedBy is a recorded claim, not a verified one -- nothing checks who typed it. The digest is what enforces; the name is what a reader asks about.",
+    "The two Texas entries were seeded on 2026-08-24 when this gate was added, carrying forward verbatim the reviewedBy and reviewedAt each manifest already stated. They record what the manifests claimed at that point, now bound to the content that was in the tree at that point."
+  ],
+  "approvals": {
+    "TEXAS_STATE_SIGNATURE_REQUESTED": {
+      "contentDigest": "56c9b5f9e135f04089515438c3d0046fbb4626ca95a74c8be1f262b8bb33c72f",
+      "approvedBy": "project-owner-approved-UFM-source",
+      "approvedAt": "2026-08-24"
+    },
+    "TEXAS_STATE_SIGNATURE_WAIVED": {
+      "contentDigest": "5d1bac56242d782f8f3aa55b494a0c81fd4f1fd89ca49b2cb1911b87a18fbd0f",
+      "approvedBy": "project-owner-approved-UFM-source",
+      "approvedAt": "2026-08-24"
+    }
+  }
+}

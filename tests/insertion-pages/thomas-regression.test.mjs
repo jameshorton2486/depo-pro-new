@@ -11,6 +11,7 @@ async function thomasFixture() {
     court: "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF TEXAS",
     causeNumber: "25-CV-00598-OLG",
     caseStyle: "Garza v. Home Depot U.S.A., Inc., et al.",
+    parties: [{ name: "Ricardo Garza", role: "Plaintiff" }, { name: "Home Depot U.S.A., Inc.", role: "Defendant" }],
     witness: "Heath Thomas",
     depositionDate: "2026-06-23",
     remote: true,
@@ -79,6 +80,12 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "INDEX_PAGE_MISMATCH:index.section.changesAndSignature",
     "INDEX_UNRESOLVED_ENTRY:index.page.75",
     "INDEX_UNRESOLVED_ENTRY:index.section.changesAndSignature",
+    "UNEXPECTED_BLANK:cert.certificationDate",
+    "UNEXPECTED_BLANK:cert.charges",
+    "UNEXPECTED_BLANK:cert.chargesResponsibleParty",
+    "UNEXPECTED_BLANK:cert.custodialAttorney",
+    "UNEXPECTED_BLANK:cert.furtherCertificationDate",
+    "UNEXPECTED_BLANK:cert.returnStatus",
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",

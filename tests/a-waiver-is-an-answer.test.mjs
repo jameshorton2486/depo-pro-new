@@ -39,6 +39,12 @@ function scratch(t, { reporter = {}, court = "In the 285th Judicial District Cou
         court,
         causeNumber: "2024-CI-11223",
         caseStyle: "Mohammad Etminan, M.D. v. Baptist Health System",
+        // The caption block on the title page and on certification-1 prints these by name, so a
+        // fixture that renders a certificate has to have them.
+        parties: [
+          { name: "Mohammad Etminan, M.D.", role: "Plaintiff" },
+          { name: "Baptist Health System", role: "Defendant" },
+        ],
         witness: "Mohammad Etminan, M.D.",
         depositionDate: "2026-04-24",
         location: "7234 Hovingham, San Antonio, Texas 78257",
@@ -66,7 +72,11 @@ const render = (s, operatorExtra = {}) =>
     s.depositionId,
     {
       mode: "standalone",
-      operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.", ...operatorExtra },
+      // certification is supplied for the same reason pagination is: cert.chargesResponsibleParty
+      // and cert.furtherCertificationDate now reach the guard and nothing collects them yet.
+      operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
+        certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" }, ...operatorExtra },
       pagination: {
         index: {
           entries: [], actualSectionPages: {}, declaredSectionPages: {},
@@ -107,8 +117,12 @@ test("without a waiver the requirement is still unanswered and still blocks", as
   const blockers = await blockedBy(s);
   assert.ok(blockers.some((code) => code.startsWith("CERT_FIRM_REGISTRATION_UNRESOLVED")),
     `an unanswered firm requirement must still block; got ${JSON.stringify(blockers)}`);
-  assert.ok(blockers.some((code) => code === "UNEXPECTED_BLANK:reporter.firmName"),
-    "and the firm name is still unanswered too");
+  // reporter.firmName is deliberately not asserted here any more. It used to block alongside the
+  // registration number, but no reviewed template prints a firm name, so that finding refused a
+  // render over a value with nowhere to go. The registration number is the one the certificate
+  // asks for and the one that still has to be answered.
+  assert.ok(!blockers.some((code) => code === "UNEXPECTED_BLANK:reporter.firmName"),
+    "a field no template renders must not be what refuses the render");
 });
 
 test("an empty or blank waiver is not a waiver", async (t) => {

@@ -20,6 +20,25 @@ const DISPOSITIONS = [
   { value: "waived", label: "Signature waived", hint: "Reading and signing was waived on the record." },
 ] as const;
 
+// The certificate facts only a reporter can supply. Labelled with the sentence each one completes,
+// because a reporter answering "charges billed to" needs to know it prints inside "charges to the
+// ___ for preparing the original deposition transcript".
+//
+// Six, not the nine the certificate prints. cert.submissionDate, cert.returnDeadline and
+// cert.serviceDate are WORKFLOW_DERIVED -- facts about what the system did, and no workflow
+// produces them yet. Asking a reporter to type one would record a guess as a derivation.
+const CERTIFICATE_FIELDS = [
+  { key: "custodialAttorney", label: "Custodial attorney", clause: "The original deposition was delivered to ___", requestedOnly: false },
+  { key: "officerCharges", label: "Deposition officer's charges", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
+  { key: "chargesResponsibleParty", label: "Charges billed to", clause: "charges to the ___ for preparing the original transcript", requestedOnly: false },
+  { key: "certificationDate", label: "Certification date", clause: "Certified to by me this ___ (certificate page)", requestedOnly: false },
+  { key: "returnedDate", label: "Transcript returned on", clause: "returned to the deposition officer on ___", requestedOnly: true },
+  { key: "furtherCertificationDate", label: "Further certification date", clause: "Certified to by me this ___ (Rule 203 page, after return and service)", requestedOnly: true },
+] as const;
+
+type CertificateKey = (typeof CERTIFICATE_FIELDS)[number]["key"];
+const EMPTY_CERTIFICATE = Object.fromEntries(CERTIFICATE_FIELDS.map((item) => [item.key, ""])) as Record<CertificateKey, string>;
+
 export default function InsertionPagesScreen({ deposition, onBack }: { deposition: Deposition; onBack: () => void }) {
   const [jurisdiction, setJurisdiction] = useState<string>("texas-state");
   const [signatureDisposition, setSignatureDisposition] = useState<string>("");
@@ -28,6 +47,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   const [preview, setPreview] = useState<Preview | null>(null);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [busy, setBusy] = useState(false);
+  const [certificate, setCertificate] = useState<Record<CertificateKey, string>>(EMPTY_CERTIFICATE);
   const [message, setMessage] = useState("Choose the jurisdiction and signature disposition to preview the certification pages.");
 
   const findings = artifact?.findings ?? preview?.findings ?? [];
@@ -39,8 +59,8 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
     return { depositionId: deposition.id, mode, operator: { jurisdiction, signatureDisposition, signatureDispositionBasis: basis.trim() || null } };
   }
 
-  async function post(path: string) {
-    const response = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request()) });
+  async function post(path: string, payload: unknown = request()) {
+    const response = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || `Request failed with status ${response.status}.`);
     return body;
@@ -49,6 +69,10 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   async function runPreview() {
     setBusy(true); setArtifact(null); setMessage("Assembling the certification pages…");
     try {
+      // Saved first, and to the record rather than into the render request: the certificate values
+      // have to arrive carrying REPORTER_ENTERED provenance, and a field left alone is recorded
+      // MISSING rather than as an empty string somebody could mistake for an answer.
+      await post("/api/deposition/certification", { depositionId: deposition.id, certification: certificate });
       const body = (await post("/api/insertion-pages/rendering-spec")) as Preview;
       setPreview(body);
       const stops = (body.findings ?? []).filter((finding) => finding.severity === "blocking");
@@ -108,6 +132,19 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
           <input type="text" value={basis} onChange={(event) => setBasis(event.target.value)} placeholder="Stated on the record" />
           <small>Recorded on the certificate as the basis for the disposition above.</small>
         </label>
+
+        <fieldset className="insertion-field">
+          <legend>Reporter&apos;s certificate</legend>
+          {CERTIFICATE_FIELDS.filter((item) => !item.requestedOnly || signatureDisposition === "requested").map((item) => (
+            <label key={item.key} className="insertion-field">
+              <span>{item.label}</span>
+              <input type="text" value={certificate[item.key]}
+                onChange={(event) => { setCertificate((current) => ({ ...current, [item.key]: event.target.value })); setPreview(null); setArtifact(null); }} />
+              <small>{item.clause}</small>
+            </label>
+          ))}
+          <p className="insertion-message">Left blank, each of these blocks the certificate rather than printing a sentence with nothing after it.</p>
+        </fieldset>
 
         <fieldset className="insertion-field">
           <legend>Document</legend>

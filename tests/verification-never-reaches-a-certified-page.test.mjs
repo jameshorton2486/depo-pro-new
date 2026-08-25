@@ -40,6 +40,10 @@ function scratch(t, { witness = "Mohammad Etminan, M.D." } = {}) {
         court: "In the 285th Judicial District Court",
         causeNumber: "2024-CI-11223",
         caseStyle: "Mohammad Etminan, M.D. v. Baptist Health System",
+        parties: [
+          { name: "Mohammad Etminan, M.D.", role: "Plaintiff" },
+          { name: "Baptist Health System", role: "Defendant" },
+        ],
         witness,
         depositionDate: "2026-04-24",
         location: "7234 Hovingham, San Antonio, Texas 78257",
@@ -82,6 +86,10 @@ const render = (s) =>
         signatureDisposition: "requested",
         signatureDispositionBasis: "Requested on the record.",
         reporter: { firmName: "Bardot Reporting", firmRegistrationNumber: "7788" },
+        // Supplied for the same reason pagination is: these two certificate fields now reach the
+        // guard and nothing collects them yet. Not what this file is about.
+        certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
       },
       pagination: {
         index: {

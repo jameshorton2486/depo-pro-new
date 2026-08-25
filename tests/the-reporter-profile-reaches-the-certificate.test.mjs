@@ -44,13 +44,18 @@ function render(reporterProfile) {
   const record = createCanonicalDepositionRecord({
     court: "In the 285th Judicial District Court", causeNumber: "2024-CI-11223",
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
+    parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
     depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
     attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
     reporterProfile,
   });
   const assembled = assembleInsertionInput({
     record, intake: {},
-    operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record." },
+    // certification is supplied for the same reason pagination is: cert.chargesResponsibleParty and
+    // cert.furtherCertificationDate now reach the guard and nothing collects them yet.
+    operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
+      certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" } },
     pagination: { index: { entries: [], actualSectionPages: {}, declaredSectionPages: {},
       examinations: [{ examiner: "Ms. Moreno", startPage: 4, endPage: 58 }],
       changesAndSignature: { startPage: 61 }, reportersCertification: { startPage: 63 } } },
