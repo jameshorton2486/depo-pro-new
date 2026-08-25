@@ -76,9 +76,10 @@ export function validateOperation(input) {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
   }
-  if (!trimmed(input.afterWordId)) return { ok:false, message:"insert requires afterWordId." };
+  if (!trimmed(input.afterWordId) && !trimmed(input.beforeWordId)) return { ok:false, message:"insert requires afterWordId or beforeWordId." };
+  if (trimmed(input.afterWordId) && trimmed(input.beforeWordId)) return { ok:false, message:"insert accepts one anchor, not both." };
   if (!trimmed(input.text)) return { ok:false, message:"insert requires text." };
-  return { ok:true, operation:{ op, afterWordId:trimmed(input.afterWordId), text:text(input.text) } };
+  return { ok:true, operation:{ op, afterWordId:trimmed(input.afterWordId) || null, beforeWordId:trimmed(input.beforeWordId) || null, text:text(input.text) } };
 }
 
 export function validateOverlay(value, depositionId) {
@@ -130,7 +131,7 @@ function splitSegments(segments, segmentId, beforeWordId) {
 export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWordIds = null } = {}) {
   let current = segments.map(segment => ({ ...segment, asrWordIds:[...(segment.asrWordIds || [])] }));
   const orphaned = [];
-  const replaced = new Map(), deleted = new Set(), inserted = new Map();
+  const replaced = new Map(), deleted = new Set(), inserted = new Map(), insertedBefore = new Map(), authoredIds = new Set();
   // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
   // rather than stacking two, and an unflag has one thing to address.
   const flags = new Map();
@@ -153,12 +154,12 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       return;
     }
     if (operation.op === "replace") {
-      if (!anchorExists(operation.wordId)) return orphan("WORD_NOT_FOUND");
+      if (!anchorExists(operation.wordId) && !authoredIds.has(operation.wordId)) return orphan("WORD_NOT_FOUND");
       replaced.set(operation.wordId, operation.text);
       return;
     }
     if (operation.op === "delete") {
-      if (!anchorExists(operation.wordId)) return orphan("WORD_NOT_FOUND");
+      if (!anchorExists(operation.wordId) && !authoredIds.has(operation.wordId)) return orphan("WORD_NOT_FOUND");
       deleted.add(operation.wordId);
       return;
     }
@@ -178,13 +179,18 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       if (!flags.delete(operation.fromWordId)) return orphan("FLAG_NOT_FOUND");
       return;
     }
-    if (!anchorExists(operation.afterWordId)) return orphan("WORD_NOT_FOUND");
-    const list = inserted.get(operation.afterWordId) ?? [];
+    const anchor=operation.afterWordId??operation.beforeWordId;
+    if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
+    const target=operation.beforeWordId?insertedBefore:inserted;
+    const list = target.get(anchor) ?? [];
     // The id is positional, so the same overlay against the same projection produces the same
     // ids every time -- I4. It carries no evidence anchor, which is the point: reporter-authored
     // text must stay distinguishable from anything the microphone produced.
-    list.push({ id:`overlay:${operation.afterWordId}:${list.length + 1}`, text:operation.text, authored:true });
-    inserted.set(operation.afterWordId, list);
+    // Preserve the established after-anchor identity exactly; Phase 5 adds a namespaced form
+    // only for the newly supported before-anchor case, so existing overlays do not drift.
+    const authored={ id:operation.beforeWordId?`overlay:${anchor}:before:${list.length + 1}`:`overlay:${anchor}:${list.length + 1}`, text:operation.text, authored:true };
+    list.push(authored);authoredIds.add(authored.id);
+    target.set(anchor, list);
   });
 
   // Expanded to every word the passage covers, each carrying the flag it belongs to so a click
@@ -199,7 +205,7 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   }
   // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
   // reader reads, and a caller that only asks for the text gets the text.
-  return { segments:current, replaced, deleted, inserted, flagged, orphaned };
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */

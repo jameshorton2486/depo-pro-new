@@ -71,10 +71,11 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   const withText = segments.map(segment => {
     const parts = [];
     for (const id of segment.asrWordIds) {
-      if (applied.deleted.has(id)) { for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text); continue; }
+      for (const extra of applied.insertedBefore.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
+      if (applied.deleted.has(id)) { for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text); continue; }
       const word = words.get(id);
       parts.push(applied.replaced.get(id) ?? word?.punctuatedWord ?? word?.word ?? "");
-      for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text);
+      for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
     }
     const rebuilt = parts.filter(Boolean).join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
     return { ...segment, text:rebuilt || segment.text };
@@ -91,6 +92,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       if (!word) { findings.push({ code:"WORD_NOT_IN_EVIDENCE", wordId:id, paragraphIndex:index, message:`Segment word ${id} has no matching ASR evidence.` }); continue; }
       if (seen.has(id)) { findings.push({ code:"WORD_RENDERED_TWICE", wordId:id, paragraphIndex:index, message:`Word ${id} is claimed by more than one segment.` }); continue; }
       seen.add(id);
+      for (const extra of applied.insertedBefore.get(id) ?? []) if(!applied.deleted.has(extra.id)) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:applied.replaced.get(extra.id) ?? extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true, ...(applied.replaced.has(extra.id)?{edited:true,originalText:extra.text}:{}) });
       const original = word.punctuatedWord ?? word.word ?? "";
       const override = applied.replaced.get(id);
       resolved.push({
@@ -107,7 +109,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       });
       // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
       // human-added words distinguishable at a glance.
-      for (const extra of applied.inserted.get(id) ?? []) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true });
+      for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:applied.replaced.get(extra.id) ?? extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true, ...(applied.replaced.has(extra.id)?{edited:true,originalText:extra.text}:{}) });
     }
     // `start` is what a click seeks to. It prefers the first resolved word's own timestamp over
     // the segment's, because the segment boundary is derived and the word time is measured --
@@ -198,7 +200,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     derivedFrom:working?.derivedFrom ?? [],
     speakerMap:working?.speakerMap ?? null, labels, examinerIdentity,
     counts:{ segments:segments.length, projectedSegments:projected.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size,
-      operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length,
+      operations:overlay?.operations?.length ?? 0, redoTransactions:overlay?.redoTransactions?.length ?? 0, orphaned:applied.orphaned.length,
       // Passages, not words. "31 flagged" would mean nothing to a scopist working through them;
       // the number they care about is how many places still need another listen.
       flags:new Set(applied.flagged.values()).size },

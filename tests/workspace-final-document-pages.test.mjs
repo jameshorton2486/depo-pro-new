@@ -19,6 +19,16 @@ test("Workspace renders the shared modeled pages instead of paginating in React"
   assert.doesNotMatch(pages,/wrapText|paginateSharedDocument|charactersPerLine|slice\([^)]*25/);
 });
 
+test("Phase 5 uses a controlled one-paragraph editor and the stale-state transaction boundary",()=>{
+  const workspace=fs.readFileSync(new URL("../app/WorkspaceScreen.tsx",import.meta.url),"utf8"),pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(pages,/workspace-direct-editor/);
+  assert.match(pages,/onSaveParagraph/);
+  assert.doesNotMatch(pages,/contentEditable/);
+  assert.match(workspace,/paragraphEditTransaction/);
+  assert.match(workspace,/expectedReviewStateHash:printModel\.source\.reviewStateHash/);
+  assert.match(workspace,/api\/transcript\/overlay\/redo/);
+});
+
 test("every Workspace page receives exactly 25 numbered physical positions including blanks",()=>{
   const pages=model(emptyOverlay("DEP-PHASE4")).pages;
   assert.ok(pages.length);

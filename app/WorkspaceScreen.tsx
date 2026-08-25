@@ -4,13 +4,14 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
+import { paragraphEditTransaction } from "./paragraph-edit-transaction.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string };
-type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; orphaned:number; flags:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string };
-type PrintModel = { pages:DocumentPage[]; layoutProfile:{linesPerPage:number;charactersPerLine:number}; findings:{print:Finding[]} };
+type PrintModel = { pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:{linesPerPage:number;charactersPerLine:number}; findings:{print:Finding[]} };
 
 // One paragraph, memoized, because without this a single word click reconciles every word in the
 // deposition -- measured at 150-200ms of blocked main thread per click on ETM01's 12,174 words.
@@ -240,6 +241,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     finally { setBusy(false); }
   }
   const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
+  const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
+    const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
+    if(!paragraph||!printModel){setError("The paragraph is no longer current. Reload it before saving.");return false}
+    if(paragraph.text!==before){setError("The transcript changed while this paragraph was open. Its draft was not saved.");return false}
+    let operations:Operation[];
+    try{operations=paragraphEditTransaction(paragraph,after) as Operation[]}catch(reason){setError(reason instanceof Error?reason.message:"This paragraph edit is outside the Phase 5 boundary.");return false}
+    if(!operations.length)return true;
+    setBusy(true);setError("");
+    try{
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
+      const body=await response.json();
+      if(!response.ok)throw new Error(body.error||"The paragraph edit could not be saved.");
+      setSelected(previous=>previous?.paragraphId===paragraphId?previous:{paragraphId,wordId:paragraph.words[0]?.id??previous?.wordId??"",extentWordId:null});
+      reload();
+      requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-token-id="${paragraph.words[0]?.id}"]`)?.scrollIntoView({block:"center"}));
+      void caret;
+      return true;
+    }catch(reason){setError(reason instanceof Error?reason.message:"The paragraph edit could not be saved.");return false}
+    finally{setBusy(false)}
+  },[depositionId,printModel,reload,rendered]);
 
   // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
   // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
@@ -395,6 +416,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         </span>
         <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId })} disabled={busy||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
       </header>
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The
@@ -459,7 +481,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className="workspace-body">
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} onSelect={selectPageFragment}/>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} onSelect={selectPageFragment} onSaveParagraph={saveParagraph}/>
           :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
