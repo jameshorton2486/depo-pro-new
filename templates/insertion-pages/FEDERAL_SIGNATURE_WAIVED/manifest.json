@@ -5,5 +5,9 @@
   "reviewStatus": "source-required",
   "sourceFigures": [],
   "expectedTemplatePath": "templates/insertion-pages/FEDERAL_SIGNATURE_WAIVED/certification.tmpl",
-  "templates": {}
+  "templates": {},
+  "blockedBy": [
+    "reviewStatus is \"source-required\": no reviewed federal certificate has been supplied, so there is nothing to render. Supplying one and setting reviewStatus to \"reviewed\" clears this gate only.",
+    "approvals.json carries no entry for this variant. Since 7b2cb3e a variant also needs an approval whose contentDigest covers the reviewed content -- `node scripts/approve-insertion-template.mjs FEDERAL_SIGNATURE_WAIVED --by \"<name>\"` -- and that command deliberately refuses to recompute hashes, so approval cannot be a side effect of supplying the templates."
+  ]
 }
