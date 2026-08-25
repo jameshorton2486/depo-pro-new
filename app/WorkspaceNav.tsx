@@ -12,6 +12,12 @@ type Item = {
 type Group = { heading: string; items: Item[] };
 
 // Grouped by what the reporter is doing, not by which module serves it.
+//
+// "live-capture" is deliberately not here. It was reachable from this nav with no deposition
+// open, which is the one way into recording that skips intake -- so it recorded with no Notice,
+// no extracted case data, and no keyterms, because `liveKeyterms` resolves them from the
+// deposition. The way in now is the Live Deposition option on the intake page, which creates the
+// deposition first. The router still produces the view; nothing navigates to it from here.
 const GROUPS: Group[] = [
   {
     heading: "Library",
@@ -24,7 +30,6 @@ const GROUPS: Group[] = [
     heading: "Audio",
     items: [
       { view: "audio-tools", label: "Audio tools", note: "Processing and repair" },
-      { view: "live-capture", label: "Live deposition", note: "Record now, attach to a case later" },
     ],
   },
   {

@@ -110,7 +110,15 @@ export type IntakeDraft = {
   warnings: string[];
   confidence: string;
 };
-type Props = { creationMode: DepositionCreationMode; onCancel: () => void; onContinue: (draft: IntakeDraft) => void };
+// `onRecordUnattached` is the walk-in case: a deposition nobody noticed, where the reporter needs
+// to be recording before there is anything to extract. Required, not optional -- it is the only
+// surviving entry into capture without a deposition now that the nav item is gone, and optional
+// would let a future caller delete that path with no type error to stop them.
+type Props = {
+  onCancel: () => void;
+  onContinue: (draft: IntakeDraft) => void;
+  onRecordUnattached: () => void;
+};
 function fileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -129,7 +137,11 @@ function toBase64(file: File) {
     reader.readAsDataURL(file);
   });
 }
-export default function IntakeScreen({ creationMode, onCancel, onContinue }: Props) {
+export default function IntakeScreen({
+  onCancel,
+  onContinue,
+  onRecordUnattached,
+}: Props) {
   const [notice, setNotice] = useState<File | null>(null),
     [courtOrder, setCourtOrder] = useState<File | null>(null),
     [supportingFiles, setSupportingFiles] = useState<File[]>([]),
@@ -143,7 +155,11 @@ export default function IntakeScreen({ creationMode, onCancel, onContinue }: Pro
       {},
     ),
     [profiling, setProfiling] = useState<Record<string, boolean>>({}),
-    [showAudioTools, setShowAudioTools] = useState(false);
+    [showAudioTools, setShowAudioTools] = useState(false),
+    // Explicit, never inferred. Audio is optional on the prerecorded path, so deriving the mode
+    // from `audioFiles.length` would read an intake whose recordings arrive later as a live one --
+    // giving it workflowStatus "scheduled" and routing the reporter to the recording screen.
+    [mode, setMode] = useState<DepositionCreationMode>("existing_recording");
   const audioAnalysisPending = Object.values(profiling).some(Boolean);
   useEffect(() => {
     if (!analyzing) return;
@@ -267,7 +283,7 @@ export default function IntakeScreen({ creationMode, onCancel, onContinue }: Pro
       return;
     }
     onContinue({
-      creationMode,
+      creationMode: mode,
       caseStyle: analysis.caseStyle || "",
       witness: analysis.witness || "",
       causeNumber: analysis.causeNumber || analysis.ufmData?.cause_number || "",
@@ -278,8 +294,8 @@ export default function IntakeScreen({ creationMode, onCancel, onContinue }: Pro
       notice,
       courtOrder,
       supportingFiles,
-      audioFiles,
-      audioProfiles,
+      audioFiles: mode === "live" ? [] : audioFiles,
+      audioProfiles: mode === "live" ? {} : audioProfiles,
       keyterms: analysis.keyterms || [],
       parties: analysis.parties || [],
       attorneys: analysis.attorneys || [],
@@ -516,97 +532,173 @@ export default function IntakeScreen({ creationMode, onCancel, onContinue }: Pro
             </div>
           )}
         </section>
-        {creationMode === "existing_recording" ? <section className="intake-panel audio-panel">
+        <section className="intake-panel audio-panel">
           <div className="panel-title">
             <span className="panel-number">2</span>
             <div>
-              <h2>Deposition audio</h2>
+              <h2 id="recording-mode-title">Deposition recording</h2>
               <p>
-                Add one or more recordings, then place them in transcription
-                order.
+                Choose how this record is made. Nothing else on this page
+                decides it: an intake with no audio yet is still a prerecorded
+                deposition, not a live one.
               </p>
             </div>
           </div>
-          <label className="audio-add">
-            <input
-              type="file"
-              accept="audio/*,.mp3,.wav,.flac,.m4a,.mp4,.aac,.wma"
-              multiple
-              onChange={addAudio}
-            />
-            <span>＋ Add audio files</span>
-            <small>MP3, WAV, FLAC, M4A, MP4, AAC, or WMA</small>
-          </label>
-          {audioFiles.length ? (
-            <ol className="audio-list">
-              {audioFiles.map((f, i) => (
-                <li key={`${f.name}-${f.lastModified}-${i}`}>
-                  <span className="audio-order">{i + 1}</span>
-                  <span className="audio-file">
-                    <strong>{f.name}</strong>
-                    <small>{fileSize(f.size)}</small>
-                    {profiling[audioKey(f)] ? (
-                      <span className="audio-profile pending">
-                        Analyzing and preserving original audio…
-                      </span>
-                    ) : audioProfiles[audioKey(f)] ? (
-                      <AudioReviewCard
-                        profile={audioProfiles[audioKey(f)]}
-                        keyterms={analysis?.keyterms || []}
-                        onProfile={(profile) =>
-                          setAudioProfiles((current) => ({
-                            ...current,
-                            [audioKey(f)]: profile,
-                          }))
-                        }
-                      />
-                    ) : null}
-                  </span>
-                  <span className="audio-actions">
-                    <button
-                      type="button"
-                      disabled={i === 0}
-                      onClick={() => move(i, -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      disabled={i === audioFiles.length - 1}
-                      onClick={() => move(i, 1)}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      className="remove-audio"
-                      onClick={() =>
-                        setAudioFiles((a) => a.filter((_, x) => x !== i))
-                      }
-                    >
-                      ×
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <div className="no-audio">
-              No audio files added yet. Audio can also be added later.
-            </div>
-          )}
-        </section> : <section className="intake-panel live-intake-plan" aria-labelledby="live-recording-plan-title">
-          <div className="panel-title"><span className="panel-number">2</span><div>
-            <h2 id="live-recording-plan-title">Live recording plan</h2>
-            <p>The deposition will be created now. Select and test both audio channels when you are ready to record.</p>
-          </div></div>
-          <div className="live-plan-grid">
-            <div><strong>Local microphone</strong><span>Required reporter-room channel</span></div>
-            <div><strong>Virtual meeting audio</strong><span>Separate remote-participant channel</span></div>
-            <div><strong>Deepgram live text</strong><span>Preserved as a provisional transcript</span></div>
-            <div><strong>Working transcript</strong><span>Created explicitly from the preserved audio after recording</span></div>
+          <div
+            className="creation-choice-grid"
+            role="radiogroup"
+            aria-labelledby="recording-mode-title"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "existing_recording"}
+              onClick={() => setMode("existing_recording")}
+            >
+              <strong>Prerecorded Deposition</strong>
+              <span>Audio or video that has already been recorded.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "live"}
+              onClick={() => setMode("live")}
+            >
+              <strong>Live Deposition</strong>
+              <span>
+                Record both channels here, then create the transcript from the
+                preserved audio.
+              </span>
+            </button>
           </div>
-        </section>}
+          {mode === "existing_recording" ? (
+            <>
+              <h3 className="mode-panel-title">Prerecorded Deposition</h3>
+              <p className="mode-panel-note">
+                Add one or more recordings, then place them in transcription
+                order.
+              </p>
+              <label className="audio-add">
+                <input
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.flac,.m4a,.mp4,.aac,.wma"
+                  multiple
+                  onChange={addAudio}
+                />
+                <span>＋ Add audio files</span>
+                <small>MP3, WAV, FLAC, M4A, MP4, AAC, or WMA</small>
+              </label>
+              {audioFiles.length ? (
+                <ol className="audio-list">
+                  {audioFiles.map((f, i) => (
+                    <li key={`${f.name}-${f.lastModified}-${i}`}>
+                      <span className="audio-order">{i + 1}</span>
+                      <span className="audio-file">
+                        <strong>{f.name}</strong>
+                        <small>{fileSize(f.size)}</small>
+                        {profiling[audioKey(f)] ? (
+                          <span className="audio-profile pending">
+                            Analyzing and preserving original audio…
+                          </span>
+                        ) : audioProfiles[audioKey(f)] ? (
+                          <AudioReviewCard
+                            profile={audioProfiles[audioKey(f)]}
+                            keyterms={analysis?.keyterms || []}
+                            onProfile={(profile) =>
+                              setAudioProfiles((current) => ({
+                                ...current,
+                                [audioKey(f)]: profile,
+                              }))
+                            }
+                          />
+                        ) : null}
+                      </span>
+                      <span className="audio-actions">
+                        <button
+                          type="button"
+                          disabled={i === 0}
+                          onClick={() => move(i, -1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={i === audioFiles.length - 1}
+                          onClick={() => move(i, 1)}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="remove-audio"
+                          onClick={() =>
+                            setAudioFiles((a) => a.filter((_, x) => x !== i))
+                          }
+                        >
+                          ×
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <div className="no-audio">
+                  No audio files added yet. Audio can also be added later.
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <h3 className="mode-panel-title">Live Deposition</h3>
+              <p className="mode-panel-note">
+                The deposition will be created now. Select and test both audio
+                channels when you are ready to record.
+              </p>
+              <div className="live-plan-grid">
+                <div>
+                  <strong>Local microphone</strong>
+                  <span>Required reporter-room channel</span>
+                </div>
+                <div>
+                  <strong>Virtual meeting audio</strong>
+                  <span>Separate remote-participant channel</span>
+                </div>
+                <div>
+                  <strong>Deepgram live text</strong>
+                  <span>Preserved as a provisional transcript</span>
+                </div>
+                <div>
+                  <strong>Working transcript</strong>
+                  <span>
+                    Created explicitly from the preserved audio after recording
+                  </span>
+                </div>
+              </div>
+              {audioFiles.length > 0 && (
+                <div className="analysis-warning">
+                  <strong>The audio added above will not be attached</strong>
+                  <ul>
+                    <li>
+                      A live deposition records its own audio, so the{" "}
+                      {audioFiles.length} file
+                      {audioFiles.length === 1 ? "" : "s"} listed under
+                      Prerecorded are not carried forward. Select Prerecorded
+                      Deposition to keep them.
+                    </li>
+                  </ul>
+                </div>
+              )}
+              <button
+                className="creation-emergency"
+                type="button"
+                onClick={onRecordUnattached}
+              >
+                Recording without a Notice? Record now and attach to a case
+                later.
+              </button>
+            </>
+          )}
+        </section>
         <footer className="intake-footer">
           <button type="button" className="secondary-button" onClick={onCancel}>
             Cancel

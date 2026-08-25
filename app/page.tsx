@@ -130,8 +130,6 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [storeIssues,setStoreIssues]=useState<Array<{folder:string;code:string;message:string}>>([]);
   const [creating,setCreating]=useState(false);
-  const [showCreationChoice,setShowCreationChoice]=useState(false);
-  const [creationMode,setCreationMode]=useState<DepositionCreationMode>("existing_recording");
   const [libraryLoaded,setLibraryLoaded]=useState(false);
 
   useEffect(() => {
@@ -174,6 +172,7 @@ export default function Home() {
 
   async function createDeposition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if(!intakeDraft)return;
     const data = new FormData(event.currentTarget);
     const reporter = reporters.find((item) => item.id === selectedReporterId);
     const item: Deposition = {
@@ -212,11 +211,11 @@ export default function Home() {
       parties: intakeDraft?.parties ?? [],
       attorneys: intakeDraft?.attorneys ?? [],
       audioIntakeIds: intakeDraft ? intakeDraft.audioFiles.map(file=>intakeDraft.audioProfiles[audioProfileKey(file)]?.uploadId).filter((value):value is string=>Boolean(value)) : [],
-      creationMode: intakeDraft?.creationMode ?? creationMode,
-      workflowStatus: (intakeDraft?.creationMode ?? creationMode) === "live" ? "scheduled" : "review",
+      creationMode: intakeDraft.creationMode,
+      workflowStatus: intakeDraft.creationMode === "live" ? "scheduled" : "review",
       createdAt: new Date().toISOString(),
     };
-    if(!intakeDraft)return;setCreating(true);setNotice("");
+    setCreating(true);setNotice("");
     try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,deepgramArtifact:intakeDraft.deepgramArtifact,ufmData:{...intakeDraft.ufmData,cause_number:item.causeNumber},warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved);setShowLiveCapture(item.creationMode==="live")}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
   }
 
@@ -268,8 +267,7 @@ export default function Home() {
   if (showAdmin) {
     return frame(<AdminSettings onClose={() => setShowAdmin(false)} />);
   }
-  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowIntake(false);setShowLiveCapture(false);setShowOpening(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowCreationChoice(true)}
-  function chooseCreationMode(mode:DepositionCreationMode){setCreationMode(mode);setShowCreationChoice(false);setShowIntake(true)}
+  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowLiveCapture(false);setShowOpening(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowIntake(true)}
   async function openAudioTools() {
     if (intakeDraft?.audioFiles.length) setAudioToolFiles(intakeDraft.audioFiles);
     else if (depositions[0]) {
@@ -295,7 +293,7 @@ export default function Home() {
     // without clearing the active deposition dropped the reporter into the Workspace of whatever
     // was open before -- which reads as the app refusing to leave, particularly when intake was
     // reached from the nav while a deposition was open.
-    return frame(<IntakeScreen creationMode={creationMode} onCancel={() => { setShowIntake(false); setActive(null); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
+    return frame(<IntakeScreen onCancel={() => { setShowIntake(false); setActive(null); }} onRecordUnattached={() => { setShowIntake(false); setActive(null); setShowLiveCapture(true); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
     if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(true)}} />);
@@ -354,19 +352,6 @@ export default function Home() {
           <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>New Deposition</button>}</div>
         )}
       </section>
-
-      {showCreationChoice && <div className="modal-backdrop" role="presentation" onMouseDown={(event)=>event.target===event.currentTarget&&setShowCreationChoice(false)}>
-        <section className="modal creation-choice-modal" role="dialog" aria-modal="true" aria-labelledby="creation-choice-title">
-          <button className="close-button" aria-label="Close" onClick={()=>setShowCreationChoice(false)}>×</button>
-          <span className="eyebrow">NEW DEPOSITION</span><h2 id="creation-choice-title">How will you create the transcript?</h2>
-          <p>Both paths begin with the Notice of Deposition and extracted case information.</p>
-          <div className="creation-choice-grid">
-            <button type="button" onClick={()=>chooseCreationMode("existing_recording")}><strong>From an existing recording</strong><span>Upload audio or video that has already been recorded.</span></button>
-            <button type="button" onClick={()=>chooseCreationMode("live")}><strong>Prepare for a live deposition</strong><span>Schedule the case, record two channels, and create the transcript afterward.</span></button>
-          </div>
-          <button className="creation-emergency" type="button" onClick={()=>{setShowCreationChoice(false);setActive(null);setShowLiveCapture(true)}}>Emergency: record now and attach later</button>
-        </section>
-      </div>}
 
       {showModal && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowModal(false)}>
