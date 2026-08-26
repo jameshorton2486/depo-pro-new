@@ -14,7 +14,7 @@
 
 export const OVERLAY_SCHEMA_VERSION = "2.0.0";
 export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "label", "replace", "delete", "insert", "flag", "unflag"]);
+export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review"]);
 export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[], transactionSizes:[], redoTransactions:[] });
 
 const text = value => String(value ?? "");
@@ -39,6 +39,10 @@ export function validateOperation(input) {
   if (op === "split") {
     if (!trimmed(input.beforeWordId)) return { ok:false, message:"split requires beforeWordId." };
     return { ok:true, operation:{ op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId) } };
+  }
+  if (op === "join") {
+    if (!trimmed(input.leadingWordId) || !trimmed(input.trailingWordId)) return { ok:false, message:"join requires leadingWordId and trailingWordId." };
+    return { ok:true, operation:{ op, leadingWordId:trimmed(input.leadingWordId), trailingWordId:trimmed(input.trailingWordId), leadingFirstWordId:trimmed(input.leadingFirstWordId)||trimmed(input.leadingWordId), trailingLastWordId:trimmed(input.trailingLastWordId)||trimmed(input.trailingWordId) } };
   }
   if (op === "label") {
     if (!trimmed(input.segmentId) && !trimmed(input.wordId)) return { ok:false, message:"label requires segmentId or wordId." };
@@ -75,6 +79,12 @@ export function validateOperation(input) {
   if (op === "unflag") {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
+  }
+  if (op === "review") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"review requires wordId." };
+    const disposition=trimmed(input.disposition).toUpperCase();
+    if (!['APPROVED','CORRECTED'].includes(disposition)) return { ok:false, message:"review disposition must be APPROVED or CORRECTED." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId), disposition, at:trimmed(input.at)||null, actor:trimmed(input.actor)||null } };
   }
   if (!trimmed(input.afterWordId) && !trimmed(input.beforeWordId)) return { ok:false, message:"insert requires afterWordId or beforeWordId." };
   if (trimmed(input.afterWordId) && trimmed(input.beforeWordId)) return { ok:false, message:"insert accepts one anchor, not both." };
@@ -118,6 +128,17 @@ function splitSegments(segments, segmentId, beforeWordId) {
   return { ok:true, segments:[...segments.slice(0, index), head, tail, ...segments.slice(index + 1)] };
 }
 
+function joinSegments(segments, operation) {
+  const left=segmentHolding(segments,operation.leadingFirstWordId),boundaryLeft=segmentHolding(segments,operation.leadingWordId),boundaryRight=segmentHolding(segments,operation.trailingWordId),right=segmentHolding(segments,operation.trailingLastWordId);
+  if([left,boundaryLeft,boundaryRight,right].some(index=>index<0))return{ok:false,reason:"WORD_NOT_FOUND"};
+  if(boundaryRight!==boundaryLeft+1||left>boundaryLeft||boundaryRight>right)return{ok:false,reason:"PARAGRAPHS_NOT_ADJACENT"};
+  const joined=segments.slice(left,right+1),leading=joined[0],trailing=joined.at(-1);
+  if(joined.some(item=>item.sourceJobIdentity!==leading.sourceJobIdentity||item.sourceUploadId!==leading.sourceUploadId))return{ok:false,reason:"SOURCE_BOUNDARY"};
+  const merged={...leading,forceParagraphBoundaryBefore:true,asrWordIds:joined.flatMap(item=>item.asrWordIds||[]),end:trailing.end??leading.end};
+  const following=segments[right+1]?{...segments[right+1],forceParagraphBoundaryBefore:true}:null;
+  return{ok:true,segments:[...segments.slice(0,left),merged,...(following?[following]:[]),...segments.slice(right+2)]};
+}
+
 /**
  * Applies the overlay to the projection's segments.
  *
@@ -134,7 +155,7 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   const replaced = new Map(), deleted = new Set(), inserted = new Map(), insertedBefore = new Map(), authoredIds = new Set();
   // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
   // rather than stacking two, and an unflag has one thing to address.
-  const flags = new Map();
+  const flags = new Map(), reviews = new Map();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
@@ -143,6 +164,12 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       const result = splitSegments(current, operation.segmentId, operation.beforeWordId);
       if (!result.ok) return orphan(result.reason);
       current = result.segments;
+      return;
+    }
+    if(operation.op==="join"){
+      const result=joinSegments(current,operation);
+      if(!result.ok)return orphan(result.reason);
+      current=result.segments;
       return;
     }
     if (operation.op === "label") {
@@ -179,6 +206,11 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       if (!flags.delete(operation.fromWordId)) return orphan("FLAG_NOT_FOUND");
       return;
     }
+    if(operation.op==="review"){
+      if(!anchorExists(operation.wordId))return orphan("WORD_NOT_FOUND");
+      reviews.set(operation.wordId,{disposition:operation.disposition,at:operation.at,actor:operation.actor});
+      return;
+    }
     const anchor=operation.afterWordId??operation.beforeWordId;
     if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
     const target=operation.beforeWordId?insertedBefore:inserted;
@@ -205,7 +237,7 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   }
   // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
   // reader reads, and a caller that only asks for the text gets the text.
-  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, orphaned };
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */

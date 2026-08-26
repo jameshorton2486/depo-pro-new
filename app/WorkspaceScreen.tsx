@@ -4,13 +4,13 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
-import { paragraphEditTransaction } from "./paragraph-edit-transaction.mjs";
+import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
-type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string };
+type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
-type Finding = { code:string; message:string };
-type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
-type Candidate = { id:string; label:string; defaultRole:string };
+type Finding = { code:string; message:string; speakerIdentity?:string; name?:string };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Candidate = { id:string; label:string; defaultRole:string; honorific?:string|null };
 type PrintModel = { pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:{linesPerPage:number;charactersPerLine:number}; findings:{print:Finding[]} };
 
 // One paragraph, memoized, because without this a single word click reconciles every word in the
@@ -100,6 +100,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const [errorCode,setErrorCode] = useState("");
   const [busy,setBusy] = useState(false);
   const [showSpeakers,setShowSpeakers] = useState(false);
+  const [toolsCollapsed,setToolsCollapsed] = useState(false);
+  const [lowConfidenceMode,setLowConfidenceMode] = useState(false);
+  const [searchOpen,setSearchOpen]=useState(false),[replaceOpen,setReplaceOpen]=useState(false),[searchText,setSearchText]=useState(""),[replaceText,setReplaceText]=useState(""),[matchCase,setMatchCase]=useState(false),[wholeWords,setWholeWords]=useState(false),[excludedMatches,setExcludedMatches]=useState<Set<string>>(new Set()),[searchIndex,setSearchIndex]=useState(0);
   // Saving the map changed the transcript and said nothing. The only existing signal was the
   // toggle's own label flipping to "Speakers assigned" on status "reconciled" -- which never
   // fired here, because two source jobs left the map "partially_reconciled" however many
@@ -116,6 +119,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const [assignments,setAssignments] = useState<Record<string,{ speakerIdentity:string; transcriptRole:string }>>({});
   const player = useRef<HTMLAudioElement|null>(null);
   const playbackEnd = useRef<number|null>(null);
+  const [playbackTime,setPlaybackTime]=useState<number|null>(null);
 
   // A token rather than a callback, so the effect owns the fetch and every setState happens
   // inside the promise rather than in the effect body -- which also gives the cancellation the
@@ -271,7 +275,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // against the right text -- the failure a reporter is least able to catch by reading.
   const multiVolume = useMemo(()=>(rendered?.findings ?? []).some(finding=>finding.code==="MULTI_VOLUME_UNSUPPORTED"),[rendered]);
   const seek = useCallback((seconds:number|null)=>{ if(seconds===null||multiVolume||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[multiVolume]);
-  const playParagraph = useCallback((paragraph:Paragraph|null)=>{if(!paragraph||paragraph.start===null||paragraph.end===null||multiVolume||!player.current)return;playbackEnd.current=paragraph.end;player.current.currentTime=paragraph.start;void player.current.play().catch(()=>{})},[multiVolume]);
+  const playParagraph = useCallback((paragraph:Paragraph|null)=>{if(!paragraph||paragraph.start===null||multiVolume||!player.current)return;playbackEnd.current=null;player.current.currentTime=Math.max(0,paragraph.start-.5);void player.current.play().catch(()=>{})},[multiVolume]);
   // The functional form of setSelected is what keeps this stable: reading `selected` directly would
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.
@@ -289,14 +293,36 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // segments and the client cannot tell which one holds a given word; addressing by word lets
   // the server resolve it, and after a split the segment holding the anchor is the new tail.
   function relabel(paragraph:Paragraph, speakerIdentity:string|null, transcriptRole:string|null) {
-    const anchor = selected?.paragraphId===paragraph.id ? selected.wordId : paragraph.words[0]?.id;
+    const anchor = paragraph.words.find(word=>!word.authored)?.id;
     if(!anchor) return;
-    const operations:Operation[] = [];
-    if(paragraph.words[0]?.id !== anchor) operations.push({ op:"split", beforeWordId:anchor });
-    operations.push({ op:"label", wordId:anchor, speakerIdentity, transcriptRole });
     setSelected(null);
-    void append(operations);
+    void append([{ op:"label", wordId:anchor, speakerIdentity, transcriptRole }]);
   }
+
+  const structuralTransaction=useCallback(async(operations:Operation[])=>{
+    if(!printModel)return false;
+    setBusy(true);setError("");
+    try{
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
+      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");reload();return true;
+    }catch(reason){setError(reason instanceof Error?reason.message:"The structural edit could not be saved.");return false}finally{setBusy(false)}
+  },[depositionId,printModel,reload]);
+  const splitParagraph=useCallback(async(paragraphId:string,caret:number)=>{
+    const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)return false;
+    const anchor=wordCharacterRanges(paragraph).find(range=>range.start>=caret)?.word;
+    if(!anchor||anchor.id===paragraph.words[0]?.id){setError("Place the caret at a word boundary inside the paragraph before pressing Enter.");return false}
+    return structuralTransaction([{op:"split",beforeWordId:anchor.id},{op:"label",wordId:anchor.id,speakerIdentity:paragraph.speakerIdentity,transcriptRole:paragraph.transcriptRole}]);
+  },[rendered,structuralTransaction]);
+  const joinParagraph=useCallback(async(paragraphId:string,direction:"previous"|"next")=>{
+    const paragraphs=rendered?.paragraphs??[],index=paragraphs.findIndex(item=>item.id===paragraphId);
+    const left=direction==="previous"?paragraphs[index-1]:paragraphs[index],right=direction==="previous"?paragraphs[index]:paragraphs[index+1];
+    const leadingWordId=left?.asrWordIds.at(-1),trailingWordId=right?.asrWordIds[0],leadingFirstWordId=left?.asrWordIds[0],trailingLastWordId=right?.asrWordIds.at(-1);
+    if(!leadingWordId||!trailingWordId){setError("These paragraphs do not share a safely traceable evidence boundary.");return false}
+    return structuralTransaction([{op:"join",leadingWordId,trailingWordId,leadingFirstWordId,trailingLastWordId}]);
+  },[rendered,structuralTransaction]);
+  const editingChange=useCallback((value:boolean)=>{if(value){setToolsCollapsed(true);player.current?.pause()}},[]);
+  const activePlaybackWordId=useMemo(()=>{if(playbackTime===null)return null;for(const paragraph of rendered?.paragraphs??[])for(const word of paragraph.words)if(word.start!==null&&word.end!==null&&playbackTime>=word.start&&playbackTime<word.end)return word.id;return null},[rendered,playbackTime]);
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
   const speakerMapStatus = rendered?.speakerMap?.status ?? "unreconciled";
@@ -306,6 +332,8 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // Saying so is the difference between working-as-designed and apparently-failing.
   const awaitingSpeakerMap = Boolean(rendered?.counts.paragraphs) && speakerMapStatus === "unreconciled";
   const unassignedSpeakers = useMemo(()=>(rendered?.paragraphs ?? []).filter(paragraph=>paragraph.unlabeledSpeaker).length,[rendered]);
+  const unresolvedHonorifics=useMemo(()=>(rendered?.findings??[]).filter(finding=>finding.code==="HONORIFIC_MISSING"),[rendered]);
+  async function resolveHonorific(participantId:string,honorific:string|null){await post("/api/deposition/honorific",{depositionId,participantId,honorific})}
   // The panel held only the reporter's unsaved changes and never the saved map, so every select
   // read "Unassigned" against a fully reconciled transcript -- and "Save speaker map" then sent
   // an empty array and un-reconciled it. A destructive click that looked idempotent. Local state
@@ -353,6 +381,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     for(const paragraph of rendered?.paragraphs ?? []) for(const word of paragraph.words) if(word.id===selected.wordId) return word;
     return null;
   },[rendered,selected]);
+  const lowConfidenceWords=useMemo(()=>(rendered?.paragraphs??[]).flatMap(paragraph=>paragraph.words.filter(word=>word.lowConfidence).map(word=>({paragraphId:paragraph.id,wordId:word.id}))),[rendered]);
+  const searchMatches=useMemo(()=>{
+    if(!searchText)return[];
+    const escaped=searchText.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),pattern=wholeWords?`\\b${escaped}\\b`:escaped,flags=matchCase?"g":"gi",matches:{id:string;paragraphId:string;start:number;end:number;context:string}[]=[];
+    for(const paragraph of rendered?.paragraphs??[]){const regex=new RegExp(pattern,flags);for(const found of paragraph.text.matchAll(regex)){const start=found.index??0;matches.push({id:`${paragraph.id}:${start}`,paragraphId:paragraph.id,start,end:start+found[0].length,context:paragraph.text.slice(Math.max(0,start-35),Math.min(paragraph.text.length,start+found[0].length+35))})}}
+    return matches;
+  },[rendered,searchText,matchCase,wholeWords]);
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key.toLowerCase()==="f"){event.preventDefault();setSearchOpen(true);setReplaceOpen(false);setToolsCollapsed(false)}if(event.key.toLowerCase()==="h"){event.preventDefault();setSearchOpen(true);setReplaceOpen(true);setToolsCollapsed(false)}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[]);
+  function navigateMatch(index:number){if(!searchMatches.length)return;const bounded=(index+searchMatches.length)%searchMatches.length,match=searchMatches[bounded],paragraph=rendered?.paragraphs.find(item=>item.id===match.paragraphId),word=paragraph&&wordCharacterRanges(paragraph).find(range=>range.end>match.start)?.word;if(!word)return;setSearchIndex(bounded);setSelected({paragraphId:paragraph.id,wordId:word.id,extentWordId:null});document.querySelector<HTMLElement>(`[data-token-id="${word.id}"]`)?.scrollIntoView({block:"center",behavior:"smooth"})}
+  async function replaceMatches(matches:typeof searchMatches){const byParagraph=new Map<string,typeof searchMatches>();for(const match of matches){const list=byParagraph.get(match.paragraphId)??[];list.push(match);byParagraph.set(match.paragraphId,list)}const operations:Operation[]=[];for(const [paragraphId,list] of byParagraph){const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)continue;let value=paragraph.text;for(const match of [...list].sort((a,b)=>b.start-a.start))value=`${value.slice(0,match.start)}${replaceText}${value.slice(match.end)}`;operations.push(...paragraphEditTransaction(paragraph,value) as Operation[])}if(operations.length)await structuralTransaction(operations)}
+  function moveLowConfidence(direction:1|-1){if(!lowConfidenceWords.length)return;const at=selected?lowConfidenceWords.findIndex(item=>item.wordId===selected.wordId):-1;const next=at<0?(direction===1?0:lowConfidenceWords.length-1):(at+direction+lowConfidenceWords.length)%lowConfidenceWords.length,target=lowConfidenceWords[next];setSelected({paragraphId:target.paragraphId,wordId:target.wordId,extentWordId:null});document.querySelector<HTMLElement>(`[data-token-id="${target.wordId}"]`)?.scrollIntoView({block:"center",behavior:"smooth"})}
 
   // The mark. One button, one meaning: this passage needs another listen. A range marks the range,
   // a single word marks that word -- validation turns the second into a range of one, so there is
@@ -391,9 +430,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             without one -- the element then reports MEDIA_ERR_SRC_NOT_SUPPORTED, which reads as
             "this audio is the wrong format" and sent an entire investigation down a codec path.
             With it the request is CORS and carries the Origin the gate expects. */}
-        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined} onTimeUpdate={()=>{if(player.current&&playbackEnd.current!==null&&player.current.currentTime>=playbackEnd.current){player.current.pause();playbackEnd.current=null}}}>
+        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined} onTimeUpdate={()=>{if(player.current){setPlaybackTime(player.current.currentTime);if(playbackEnd.current!==null&&player.current.currentTime>=playbackEnd.current){player.current.pause();playbackEnd.current=null}}}} onEnded={()=>setPlaybackTime(null)}>
           <track kind="captions" label="No captions" src="data:text/vtt,WEBVTT" default />
         </audio>
+        <button type="button" disabled={!playbackSource} onClick={()=>{if(!player.current)return;player.current.pause();player.current.currentTime=0;setPlaybackTime(null)}}>Stop</button>
         {!playbackSource && media?.needsProxy && (
           <button type="button" onClick={()=>{ void buildProxy(); }} disabled={building}>
             {building ? "Preparing audio… (about a minute)" : "Prepare audio for playback"}
@@ -425,9 +465,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           already says what to do about it. Suppressed only when there is audio waiting -- with
           no audio at all, something really is wrong and the reporter should see it. */}
       {error && !notTranscribedYet && <p className="analysis-error" role="alert">{error}</p>}
-      {rendered && rendered.findings.length>0 && (
+      {rendered && rendered.findings.some(finding=>finding.code!=="HONORIFIC_MISSING") && (
         <ul className="workspace-findings" role="alert">
-          {rendered.findings.slice(0,6).map((finding,index)=><li key={`${finding.code}:${index}`}>{finding.message}</li>)}
+          {rendered.findings.filter(finding=>finding.code!=="HONORIFIC_MISSING").slice(0,6).map((finding,index)=><li key={`${finding.code}:${index}`}>{finding.message}</li>)}
         </ul>
       )}
 
@@ -480,14 +520,49 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         </section>
       )}
 
-      <div className="workspace-body">
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} onSelect={selectPageFragment} onSaveParagraph={saveParagraph}/>
+      <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onEditingChange={editingChange}/>
           :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
-        <aside className="workspace-menu" aria-label="Paragraph labels">
+        <button type="button" className="workspace-tools-toggle" onClick={()=>setToolsCollapsed(value=>!value)} aria-expanded={!toolsCollapsed}>{toolsCollapsed?"Open transcript tools":"Collapse transcript tools"}</button>
+        <aside className="workspace-menu" aria-label="Paragraph labels" hidden={toolsCollapsed}>
           <h2>Label</h2>
+          <section className="workspace-review-tools" aria-label="Low confidence review">
+            <h3>Low confidence</h3>
+            <label><input type="checkbox" checked={lowConfidenceMode} onChange={event=>setLowConfidenceMode(event.target.checked)}/> Show review marks</label>
+            <p className="workspace-hint">{lowConfidenceWords.length} unresolved · provisional configurable threshold</p>
+            <div><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(-1)}>Previous</button><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(1)}>Next</button></div>
+            {selectedWord?.lowConfidence&&<button type="button" disabled={busy} onClick={()=>void structuralTransaction([{op:"review",wordId:selectedWord.id,disposition:"APPROVED",at:new Date().toISOString()}])}>Approve selected occurrence</button>}
+          </section>
+          <section className="workspace-review-tools" aria-label="Find and replace">
+            <h3>Find / Replace</h3>
+            <button type="button" onClick={()=>setSearchOpen(value=>!value)} aria-expanded={searchOpen}>Find transcript (Ctrl+F)</button>
+            {searchOpen&&<>
+              <label>Find<input value={searchText} onChange={event=>setSearchText(event.target.value)}/></label>
+              <label><input type="checkbox" checked={matchCase} onChange={event=>setMatchCase(event.target.checked)}/> Match case</label>
+              <label><input type="checkbox" checked={wholeWords} onChange={event=>setWholeWords(event.target.checked)}/> Whole words</label>
+              <p className="workspace-hint">{searchMatches.length?`${Math.min(searchIndex+1,searchMatches.length)} of ${searchMatches.length} matches across all testimony`:"No matches"}</p>
+              <div><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex-1)}>Previous</button><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex+1)}>Next</button></div>
+              <button type="button" onClick={()=>setReplaceOpen(value=>!value)} aria-expanded={replaceOpen}>Replace (Ctrl+H)</button>
+              {replaceOpen&&<><label>Replace with<input value={replaceText} onChange={event=>setReplaceText(event.target.value)}/></label>
+                <div className="workspace-match-list">{searchMatches.map(match=><label key={match.id}><input type="checkbox" checked={!excludedMatches.has(match.id)} onChange={event=>setExcludedMatches(current=>{const next=new Set(current);if(event.target.checked)next.delete(match.id);else next.add(match.id);return next})}/><span>…{match.context}…</span></label>)}</div>
+                <button type="button" disabled={!searchMatches.length||busy} onClick={()=>{const match=searchMatches[searchIndex];if(match)void replaceMatches([match])}}>Replace current</button>
+                <button type="button" disabled={!searchMatches.some(match=>!excludedMatches.has(match.id))||busy} onClick={()=>{const chosen=searchMatches.filter(match=>!excludedMatches.has(match.id));if(window.confirm(`Replace ${chosen.length} selected occurrence${chosen.length===1?"":"s"} as one undoable action?`))void replaceMatches(chosen)}}>Replace selected ({searchMatches.filter(match=>!excludedMatches.has(match.id)).length})</button>
+              </>}
+            </>}
+          </section>
+          <section className="workspace-review-tools" aria-label="Unresolved participant honorifics">
+            <h3>Honorifics</h3>
+            <p className="workspace-hint">{unresolvedHonorifics.length} unresolved participant{unresolvedHonorifics.length===1?"":"s"}</p>
+            {unresolvedHonorifics.map(finding=><div className="workspace-honorific" key={finding.speakerIdentity}>
+              <strong>{finding.name||finding.speakerIdentity}</strong>
+              {["MR.","MS.","MRS.","DR."].map(value=><button type="button" key={value} disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,value)}>{value}</button>)}
+              <button type="button" disabled={busy} onClick={()=>{const value=window.prompt("Enter the participant's honorific");if(value&&finding.speakerIdentity)void resolveHonorific(finding.speakerIdentity,value)}}>Other</button>
+              <button type="button" disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,null)}>None</button>
+            </div>)}
+          </section>
           <p className="workspace-hint">
             {range ? `${rangeWords} words selected. Choosing a label still acts on the anchor word; single-word edits are unavailable while a range is selected.`
               : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`

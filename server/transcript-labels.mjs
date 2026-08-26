@@ -178,10 +178,13 @@ export function buildSpeakerLabels(candidates = []) {
     if (FIXED_LABELS[role]) { labels[id] = FIXED_LABELS[role]; continue; }
     const name = String(candidate?.label ?? candidate?.fullName ?? "").trim();
     const surname = name.split(/\s+/).filter(Boolean).at(-1) ?? "";
-    const honorific = String(candidate?.honorific ?? "").trim().replace(/\.?$/, ".");
+    const rawHonorific=String(candidate?.honorific??"").trim().toUpperCase();
+    const honorific = rawHonorific==="NONE"?"":rawHonorific.replace(/\.?$/, ".");
     if (!candidate?.honorific) {
       findings.push({ code:"HONORIFIC_MISSING", speakerIdentity:id, name, message:`No honorific recorded for ${name || id}. The label reads "${surname.toUpperCase()}" until one is set; Depo-Pro will not guess between MR., MS., and DR.` });
       labels[id] = surname.toUpperCase();
+    } else if(rawHonorific==="NONE") {
+      labels[id]=surname.toUpperCase();
     } else {
       labels[id] = `${honorific} ${surname}`.toUpperCase();
     }

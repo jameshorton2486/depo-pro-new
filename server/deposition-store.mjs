@@ -272,6 +272,21 @@ export function readDepositionCorrections(root, id, options = {}) {
   return fs.existsSync(file) ? parseCorrectionLog(fs.readFileSync(file, "utf8")) : [];
 }
 
+/** Resolves one generated transcript designation through the existing canonical correction log. */
+export function writeParticipantHonorific(root,{depositionId,participantId,honorific,who="Workspace reporter",storageRoot}={}){
+  const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
+  if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
+  const record=JSON.parse(fs.readFileSync(file,"utf8")),index=(record.counsel||[]).findIndex(item=>item.id===participantId);
+  if(index<0)throw new Error("Honorific resolution currently requires a canonical counsel participant.");
+  const current=record.counsel[index]?.honorific?.value??null,next=honorific===null?"NONE":String(honorific??"").trim().toUpperCase().replace(/\.?$/,".");
+  if(next!=="NONE"&&!/^[A-Z][A-Z .'-]{0,19}\.$/.test(next))throw new Error("Enter a short honorific containing letters, spaces, apostrophes, or hyphens.");
+  // Records created before counsel honorifics entered the canonical schema legitimately lack the
+  // envelope. Add only that declared field, as MISSING, before using the ordinary append-only
+  // correction path. This is not an inferred title and does not touch testimony or evidence.
+  if(!record.counsel[index].honorific){record.counsel[index]={...record.counsel[index],honorific:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
+  return appendDepositionCorrections(root,{depositionId,storageRoot,who,corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
+}
+
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 

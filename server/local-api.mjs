@@ -38,7 +38,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -337,6 +337,10 @@ const server = http.createServer(async (req,res) => {
       // The candidate list is returned with it so the caller never has to guess whether the
       // roster it is about to label against reflects what was just saved.
       return json(res,200,{...written,candidates:getSpeakerCandidates(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}).candidates},origin);
+    }
+    if(req.url==="/api/deposition/honorific"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeParticipantHonorific(root,{depositionId:input.depositionId,participantId:input.participantId,honorific:input.honorific??null,who:input.who||"Workspace reporter",storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}

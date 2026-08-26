@@ -15,6 +15,10 @@ import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
+// Product threshold is deliberately configurable and provisional. It is a review aid, not a
+// claim about legal accuracy; Deepgram's measured value remains untouched on every word.
+export const LOW_CONFIDENCE_REVIEW_THRESHOLD = Number(process.env.DEPO_LOW_CONFIDENCE_THRESHOLD ?? 0.8);
+
 /**
  * Indexes ASR word evidence by word id. Evidence arrives per job -- a deposition with three
  * audio files has three evidence documents -- and word ids are namespaced by job identity, so
@@ -95,6 +99,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       for (const extra of applied.insertedBefore.get(id) ?? []) if(!applied.deleted.has(extra.id)) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:applied.replaced.get(extra.id) ?? extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true, ...(applied.replaced.has(extra.id)?{edited:true,originalText:extra.text}:{}) });
       const original = word.punctuatedWord ?? word.word ?? "";
       const override = applied.replaced.get(id);
+      const review=applied.reviews.get(id)??null;
+      const reviewDisposition=review?.disposition??(override!==undefined||applied.deleted.has(id)?"CORRECTED":null);
       resolved.push({
         id:word.id, tokenId:word.id, tokenKind:"evidence", sourceWordId:word.id,
         text:override ?? original, start:word.start, end:word.end,
@@ -106,6 +112,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
         // The word reads exactly as it did unflagged. `flaggedFrom` names the passage it belongs
         // to so a click anywhere inside one can clear all of it.
         ...(applied.flagged.has(id) ? { flagged:true, flaggedFrom:applied.flagged.get(id) } : {}),
+        reviewDisposition, reviewAt:review?.at??null, reviewActor:review?.actor??null,
+        lowConfidence:Number.isFinite(word.confidence)&&word.confidence<LOW_CONFIDENCE_REVIEW_THRESHOLD&&!reviewDisposition,
       });
       // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
       // human-added words distinguishable at a glance.
@@ -203,7 +211,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       operations:overlay?.operations?.length ?? 0, redoTransactions:overlay?.redoTransactions?.length ?? 0, orphaned:applied.orphaned.length,
       // Passages, not words. "31 flagged" would mean nothing to a scopist working through them;
       // the number they care about is how many places still need another listen.
-      flags:new Set(applied.flagged.values()).size },
+      flags:new Set(applied.flagged.values()).size,
+      lowConfidenceUnresolved:paragraphs.flatMap(paragraph=>paragraph.words).filter(word=>word.lowConfidence).length },
     diarized, paragraphs, findings,
   };
 }

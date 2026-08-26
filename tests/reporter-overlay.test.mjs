@@ -3,7 +3,7 @@ import test from "node:test";
 import { EVIDENCE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/etminan-evidence.mjs";
 import { ELEMENT } from "../server/transcript-labels.mjs";
 import { renderTranscript } from "../server/transcript-render.mjs";
-import { appendOperations, applyOverlay, emptyOverlay, undoLast, validateOperation } from "../server/reporter-overlay.mjs";
+import { appendOperations, appendTransaction, applyOverlay, emptyOverlay, redoLastTransaction, undoLast, undoLastTransaction, validateOperation } from "../server/reporter-overlay.mjs";
 
 const overlayOf = (...operations) => ({ ...emptyOverlay("DEP-TEST"), operations });
 const render = overlay => renderTranscript({ working:WORKING, evidence:[EVIDENCE], speakerCandidates:SPEAKER_CANDIDATES, examinerIdentity:"counsel-bentley", overlay });
@@ -119,6 +119,48 @@ test("split separates a paragraph and each half seeks to its own first word",()=
   assert.ok(tail,"the second half must begin at the split word");
   assert.equal(tail.start, EVIDENCE.words.find(word => word.id === MIDWORD).start,"and seek to that word, not to the segment it inherited");
   assert.notEqual(tail.start, ANSWER.start,"the fixture must actually separate the two");
+});
+
+test("an intentional join removes one boundary while preserving every evidence word",()=>{
+  const split=appendOperations(emptyOverlay("DEP-TEST"),{op:"split",beforeWordId:MIDWORD});
+  const joined=appendOperations(split,{op:"join",leadingWordId:ANSWER.asrWordIds[0],trailingWordId:MIDWORD});
+  const before=render(overlayOf()),after=render(joined);
+  assert.equal(after.counts.paragraphs,before.counts.paragraphs);
+  assert.deepEqual(
+    after.paragraphs.flatMap(paragraph=>paragraph.words.filter(word=>!word.authored).map(word=>word.id)).sort(),
+    EVIDENCE.words.map(word=>word.id).sort(),
+  );
+  assert.equal(after.findings.filter(finding=>finding.code==="ORPHANED_OPERATION").length,0);
+});
+
+test("join keeps the leading paragraph speaker and role and is one undoable transaction",()=>{
+  const split=appendTransaction(emptyOverlay("DEP-TEST"),[
+    {op:"split",beforeWordId:MIDWORD},
+    {op:"label",wordId:MIDWORD,speakerIdentity:"counsel-ramon",transcriptRole:"DEFENDING_ATTORNEY"},
+  ]);
+  const splitRender=render(split);
+  const joined=appendTransaction(split,{op:"join",leadingWordId:ANSWER.asrWordIds[ANSWER.asrWordIds.indexOf(MIDWORD)-1],trailingWordId:MIDWORD,leadingFirstWordId:ANSWER.asrWordIds[0],trailingLastWordId:ANSWER.asrWordIds.at(-1)});
+  const paragraph=render(joined).paragraphs.find(item=>item.words.some(word=>word.id===MIDWORD));
+  assert.equal(render(joined).counts.paragraphs,splitRender.counts.paragraphs-1,"one join removes exactly one rendered boundary");
+  assert.equal(paragraph.speakerIdentity,ANSWER.speakerIdentity);
+  assert.equal(paragraph.transcriptRole,ANSWER.transcriptRole);
+  assert.deepEqual(redoLastTransaction(undoLastTransaction(joined).overlay).overlay.operations,joined.operations);
+});
+
+test("low-confidence review is durable and undoable without changing evidence confidence",()=>{
+  const word=EVIDENCE.words.find(item=>Number.isFinite(item.confidence));
+  const approved=appendTransaction(emptyOverlay("DEP-TEST"),{op:"review",wordId:word.id,disposition:"APPROVED",at:"2026-08-26T12:00:00.000Z",actor:"reporter"});
+  const rendered=render(approved),current=rendered.paragraphs.flatMap(paragraph=>paragraph.words).find(item=>item.id===word.id);
+  assert.equal(current.reviewDisposition,"APPROVED");
+  assert.equal(current.confidence,word.confidence);
+  assert.equal(render(undoLastTransaction(approved).overlay).paragraphs.flatMap(paragraph=>paragraph.words).find(item=>item.id===word.id).reviewDisposition,null);
+});
+
+test("correcting a low-confidence evidence word records CORRECTED while retaining confidence",()=>{
+  const word=EVIDENCE.words.find(item=>Number.isFinite(item.confidence));
+  const corrected=render(appendTransaction(emptyOverlay("DEP-TEST"),{op:"replace",wordId:word.id,text:"Corrected"})).paragraphs.flatMap(paragraph=>paragraph.words).find(item=>item.id===word.id);
+  assert.equal(corrected.reviewDisposition,"CORRECTED");
+  assert.equal(corrected.confidence,word.confidence);
 });
 
 test("label relabels a split half without touching the other",()=>{

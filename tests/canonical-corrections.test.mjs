@@ -15,7 +15,7 @@ import path from "node:path";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
 import { applyCorrection, correctionId, parseCorrectionLog, replayCorrections, resolveField, validateCorrection } from "../server/canonical-corrections.mjs";
-import { appendDepositionCorrections, createDeposition, readDepositionCorrections } from "../server/deposition-store.mjs";
+import { appendDepositionCorrections, createDeposition, readDepositionCorrections, writeParticipantHonorific } from "../server/deposition-store.mjs";
 
 const AT = "2026-08-19T22:00:00.000Z";
 const WHO = "Miah Bardot";
@@ -116,6 +116,13 @@ test("a correction lands in the record and in the log beside it", t => {
   assert.equal(log[0].from, "2026-08-12");
   assert.equal(log[0].who, WHO);
   assert.match(log[0].why, /APRIL 30/);
+});
+
+test("an older canonical counsel record gains only the missing honorific field before audited resolution",t=>{
+  const space=workspace(t),record=space.read();delete record.counsel[0].honorific;fs.writeFileSync(space.recordFile,JSON.stringify(record));
+  writeParticipantHonorific(space.root,{depositionId:space.created.id,participantId:record.counsel[0].id,honorific:"Ms.",who:WHO,...space.options});
+  const updated=space.read();assert.equal(updated.counsel[0].honorific.value,"MS.");assert.equal(updated.counsel[0].honorific.source,"REPORTER_ENTERED");
+  const log=readDepositionCorrections(space.root,space.created.id,space.options);assert.equal(log.at(-1).path,"counsel.0.honorific");assert.equal(log.at(-1).from,null);
 });
 
 test("the log is append-only: a second correction adds a line, never replaces one", t => {
