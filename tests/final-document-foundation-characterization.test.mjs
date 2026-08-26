@@ -121,5 +121,6 @@ test("characterization: Print Model fixes 25 positions per page and traces body 
   assert.ok(occupied.some((line) => line.trace?.sourceWordIds?.length));
   assert.equal(model.source.reviewStateHash, "characterized-review-state");
   assert.equal(model.source.renderedContentHash, rendered.renderedContentHash);
-  assert.ok(model.findings.print.some((finding) => finding.code === "PRINT_LAYOUT_PROFILE_UNVERIFIED"));
+  assert.equal(model.layoutProfile.id,"TEXAS_FREELANCE_DEPOSITION_V1");
+  assert.equal(model.findings.print.some((finding) => finding.code === "PRINT_LAYOUT_PROFILE_UNVERIFIED"),false);
 });
