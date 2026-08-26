@@ -13,6 +13,7 @@
 # testing
 /coverage
 /.verify-*/
+/.milestone2-data/
 
 # next.js
 /.next/
