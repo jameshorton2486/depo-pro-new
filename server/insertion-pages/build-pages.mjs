@@ -3,7 +3,7 @@ import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
 
 const value = (field) => field && typeof field === "object" && "value" in field ? field.value : field;
-const methodLabel = (method, detail) => method === "in-person" ? "" : ` (Via ${detail || method})`;
+const methodLabel = (method, detail) => !method || method === "in-person" ? "" : ` (Via ${detail || method})`;
 
 // The joined strings are the printed form of the same two lists assemble put in fieldValues, so a
 // caption line and the guard that clears it cannot disagree about who the parties are.

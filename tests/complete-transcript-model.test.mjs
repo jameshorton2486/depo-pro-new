@@ -20,6 +20,7 @@ test("complete model assembles approved front matter, unchanged testimony, and c
   assert.deepEqual(model.pages.slice(3,5).map(page=>page.lines),printModel.pages.map((page,pageIndex)=>page.lines.map(line=>({...line,modelTestimonyPage:pageIndex+1}))));
   assert.equal(model.pagination.index.reportersCertification.startPage,8);
   assert.match(model.pages[2].lines.map(line=>line.content).join("\n"),/Pat Counsel.*4-5/);
+  assert.doesNotMatch(model.pages[1].lines.map(line=>line.content).join("\n"),/Via null|Via undefined/);
   const spec=createFixedPageDocxSpec(model);
   assert.equal(spec.documentRecordType,"COMPLETE_TRANSCRIPT_DOCUMENT_MODEL");
   assert.deepEqual(spec.pages.map(page=>page.sectionKind),["administrative","administrative","administrative","testimony","testimony","administrative","administrative","administrative","administrative","administrative"]);

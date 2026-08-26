@@ -21,6 +21,15 @@ def set_font(run,profile):
     name=profile["font"]["family"];run.font.name=name;run.font.size=Pt(profile["font"]["pointSize"])
     fonts=run._element.get_or_add_rPr().get_or_add_rFonts();fonts.set(qn("w:ascii"),name);fonts.set(qn("w:hAnsi"),name)
 
+def fit_administrative_line(run,line,page,profile):
+    # Reviewed administrative templates occasionally express a rule as 68 underscore
+    # characters.  They are document furniture, not testimony wrapping input.  Word otherwise
+    # turns that one modeled physical line into two at the proven 63-cell testimony width and
+    # spills the fixed page.  fitText preserves the approved template bytes and constrains the
+    # run to the model's one physical line; testimony never enters this path.
+    if page.get("sectionKind")!="administrative" or len(line.get("text", ""))<=profile["charactersPerLine"]:return
+    fit=OxmlElement("w:fitText");fit.set(qn("w:val"),str(profile["text"]["widthTwips"]));run._element.get_or_add_rPr().append(fit)
+
 def configure(section,profile):
     page=profile["page"];text=profile["text"];box=profile["formatBox"]
     section.page_width=Inches(page["widthTwips"]/1440);section.page_height=Inches(page["heightTwips"]/1440)
@@ -48,7 +57,7 @@ def main():
         for line_index,line in enumerate(page_lines):
             paragraph=doc.add_paragraph();fmt=paragraph.paragraph_format;fmt.space_before=Pt(0);fmt.space_after=Pt(0);fmt.line_spacing=Pt(profile["text"]["lineSpacingTwips"]/20);fmt.widow_control=False;fmt.keep_together=True
             if page_index and line_index==0:fmt.page_break_before=True
-            set_font(paragraph.add_run(line["text"]),profile)
+            run=paragraph.add_run(line["text"]);set_font(run,profile);fit_administrative_line(run,line,page,profile)
             mapping.append({"modelPage":page["pageNumber"],"modelLine":line["position"],"docxParagraph":len(mapping)+1,"paragraphId":line.get("paragraphId"),"fragmentIds":line.get("fragmentIds",[]),"sourceWordIds":line.get("sourceWordIds",[])})
     output=Path(args.output).resolve();output.parent.mkdir(parents=True,exist_ok=True);doc.save(output);Path(args.mapping).write_text(json.dumps({"modelHash":spec.get("modelHash"),"profile":profile["id"],"lines":mapping},indent=2),encoding="utf-8")
     print(json.dumps({"renderer":"DEPO_PRO_INTERNAL_FIXED_PAGE_OOXML_V1","outputPath":str(output),"pages":len(pages),"physicalLines":len(mapping),"profile":profile["id"]}))
