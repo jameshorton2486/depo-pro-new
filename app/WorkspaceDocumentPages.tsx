@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "
 
 export type DocumentFragment={id:string;kind:"evidence"|"authored"|"generated";role:string;text:string;sourceWordId:string|null;sourceStart?:number;sourceEnd?:number};
 export type DocumentLine={position:number;occupied:boolean;content:string;paragraphId:string|null;fragments:DocumentFragment[]};
-export type DocumentPage={id:string;pageNumber:number;lines:DocumentLine[]};
+export type DocumentPage={id:string;pageNumber:number;role?:string;sectionKind?:"administrative"|"testimony";editable?:boolean;lines:DocumentLine[]};
 export type EditableParagraph={id:string;text:string};
 type ActiveEdit={paragraphId:string;lineKey:string;draft:string;baseText:string;caret:number;status:"editing"|"saving"|"saved"|"conflict"|"failed"};
 export type LayoutProfile={id:string;version:string;linesPerPage:number;font:{family:string;pointSize:number};formatBox:{leftInches:number;rightClearanceInches:number;widthInches:number;topInches:number;heightInches:number;borderPoints:number};text:{leftMarginTwips:number;rightMarginTwips:number;topMarginTwips:number;lineSpacingTwips:number};lineNumbers:{distanceTwips:number}};
@@ -17,17 +17,17 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
   const editor=useRef<HTMLTextAreaElement|null>(null);
   const clickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   useEffect(()=>{if(!editor.current||!activeEdit)return;editor.current.focus();editor.current.setSelectionRange(activeEdit.caret,activeEdit.caret)},[activeEdit]);
-  return <article className="workspace-paper" style={geometryStyle(profile)} data-layout-profile={`${profile.id}@${profile.version}`} data-page={page.pageNumber} aria-label={`Transcript body page ${page.pageNumber}`}><div className="workspace-format-box" aria-hidden="true"/>
+  return <article className={`workspace-paper ${page.sectionKind??"testimony"}`} style={geometryStyle(profile)} data-layout-profile={`${profile.id}@${profile.version}`} data-page={page.pageNumber} data-page-role={page.role??"testimony"} aria-label={`${page.role??"Testimony"} page ${page.pageNumber}`}><div className="workspace-format-box" aria-hidden="true"/>
     <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
         onChange={event=>onChange(event.target.value,event.target.selectionStart)} onBlur={onSave}
         onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==="s"){event.preventDefault();onSave();return}if(event.key==="Enter"){event.preventDefault();onSplit(event.currentTarget.selectionStart);return}if(event.key==="Backspace"&&event.currentTarget.selectionStart===0&&event.currentTarget.selectionEnd===0){event.preventDefault();onJoinPrevious();return}if(event.key==="Delete"&&event.currentTarget.selectionStart===activeEdit.draft.length&&event.currentTarget.selectionEnd===activeEdit.draft.length){event.preventDefault();onJoinNext();return}if(event.key==="Escape"){event.preventDefault();onCancel()}}}/>
-      :<code>{line.fragments.map((fragment,index)=>fragment.kind==="generated"
+      :<code>{line.fragments.length?line.fragments.map((fragment,index)=>fragment.kind==="generated"
         ? <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>
         : <button type="button" className={`workspace-page-token ${fragment.kind} ${selectedWordId===fragment.id?"picked":""} ${activePlaybackWordId===fragment.id?"playing":""} ${lowConfidenceWordIds.has(fragment.id)?"low-confidence":""}`}
             data-token-id={fragment.id} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
-            onClick={event=>{event.stopPropagation();if(!line.paragraphId)return;onSelect(line.paragraphId,fragment.id,event.shiftKey);if(!event.shiftKey){if(clickTimer.current)clearTimeout(clickTimer.current);clickTimer.current=setTimeout(()=>onBeginEdit(line.paragraphId!,lineKey,fragment.sourceStart??0),220)}}} onDoubleClick={event=>{event.preventDefault();if(clickTimer.current)clearTimeout(clickTimer.current);clickTimer.current=null;if(line.paragraphId)onPlay(line.paragraphId)}}>{fragment.text}</button>)}</code>}
+            onClick={event=>{event.stopPropagation();if(page.editable===false||!line.paragraphId)return;onSelect(line.paragraphId,fragment.id,event.shiftKey);if(!event.shiftKey){if(clickTimer.current)clearTimeout(clickTimer.current);clickTimer.current=setTimeout(()=>onBeginEdit(line.paragraphId!,lineKey,fragment.sourceStart??0),220)}}} onDoubleClick={event=>{event.preventDefault();if(clickTimer.current)clearTimeout(clickTimer.current);clickTimer.current=null;if(page.editable!==false&&line.paragraphId)onPlay(line.paragraphId)}}>{fragment.text}</button>):line.content}</code>}
     </li>})}</ol>
     <footer>Page {page.pageNumber}</footer>
   </article>;

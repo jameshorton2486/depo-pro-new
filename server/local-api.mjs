@@ -11,6 +11,7 @@ import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, ge
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
+import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
@@ -303,6 +304,14 @@ const server = http.createServer(async (req,res) => {
     if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
       return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
+    }
+    if(req.url?.startsWith("/api/transcript/complete-document-model?")&&req.method==="GET"){
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      return json(res,200,await getCompleteTranscriptModel(root,{depositionId,storageRoot:depositionStorageRoot,examinerIdentity:url.searchParams.get("examinerIdentity")||null}),origin);
+    }
+    if(req.url==="/api/transcript/complete-document-docx"&&req.method==="POST"){
+      const input=await body(req,64*1024),model=await getCompleteTranscriptModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
+      return json(res,200,createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel:model,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url==="/api/transcript/final-document-docx"&&req.method==="POST"){
       const input=await body(req,64*1024),printModel=getTranscriptPrintModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});

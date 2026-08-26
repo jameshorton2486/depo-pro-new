@@ -11,7 +11,7 @@ type Paragraph = { id:string; elementType:string; label:string|null; byLine:stri
 type Finding = { code:string; message:string; speakerIdentity?:string; name?:string };
 type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string; honorific?:string|null };
-type PrintModel = { pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:import("./WorkspaceDocumentPages").LayoutProfile; findings:{print:Finding[]} };
+type PrintModel = { recordType?:string; pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:import("./WorkspaceDocumentPages").LayoutProfile; findings:{print?:Finding[];assembly?:Finding[]} };
 
 // One paragraph, memoized, because without this a single word click reconciles every word in the
 // deposition -- measured at 150-200ms of blocked main thread per click on ETM01's 12,174 words.
@@ -149,7 +149,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       try {
         const [renderRes,printRes,candidateRes,mediaRes] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
-          fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}),
+          fetch(`${API}/api/transcript/complete-document-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}).then(async response=>response.ok?response:fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"})),
           fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
           fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
@@ -244,7 +244,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
   }
-  async function generateDocx(){setBusy(true);setError("");try{const response=await fetch(`${API}/api/transcript/final-document-docx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(`Word proof generated from the shared pages: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
+  async function generateDocx(){setBusy(true);setError("");try{const endpoint=printModel?.recordType==="COMPLETE_TRANSCRIPT_DOCUMENT_MODEL"?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(`Word proof generated from the shared pages: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
   const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
