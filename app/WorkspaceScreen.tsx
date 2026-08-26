@@ -244,6 +244,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
   }
+  async function generateDocx(){setBusy(true);setError("");try{const response=await fetch(`${API}/api/transcript/final-document-docx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(`Word proof generated from the shared pages: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
   const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
@@ -457,6 +458,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId })} disabled={busy||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
+        <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>Generate Word DOCX</button>
       </header>
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The

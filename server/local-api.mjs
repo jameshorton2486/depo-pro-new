@@ -10,6 +10,7 @@ import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } fr
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
 import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
@@ -302,6 +303,10 @@ const server = http.createServer(async (req,res) => {
     if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
       return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
+    }
+    if(req.url==="/api/transcript/final-document-docx"&&req.method==="POST"){
+      const input=await body(req,64*1024),printModel=getTranscriptPrintModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
+      return json(res,200,createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel,storageRoot:depositionStorageRoot}),origin);
     }
     // The only two write paths for reporter edits. Deliberately not an editable operation list:
     // append and undo are enough to work, and every additional verb is another way for the
