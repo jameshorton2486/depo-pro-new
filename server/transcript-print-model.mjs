@@ -8,20 +8,15 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
-import { UFM_FREELANCE_LAYOUT_PROFILE, isLayoutProfileVerified } from "./insertion-pages/layout-profile.mjs";
+import { isLayoutProfileVerified } from "./insertion-pages/layout-profile.mjs";
 import { computeReviewStateHash } from "./review-state-hash.mjs";
 import { buildSharedDocumentModel } from "./shared-document-model.mjs";
-import { LINE_WIDTH } from "./transcript-labels.mjs";
+import { TEXAS_FREELANCE_DEPOSITION_V1 } from "./texas-freelance-deposition-profile.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getSpeakerCandidates, getWorkingTranscript, readAsrEvidence, readReporterOverlay } from "./transcription-jobs.mjs";
 
 export const TRANSCRIPT_PRINT_MODEL_VERSION = "1.0.0";
-export const TRANSCRIPT_BODY_LAYOUT_PROFILE = Object.freeze({
-  ...UFM_FREELANCE_LAYOUT_PROFILE,
-  version:"transcript-body-preview-v1",
-  scope:"transcript-body",
-  charactersPerLine:LINE_WIDTH,
-});
+export const TRANSCRIPT_BODY_LAYOUT_PROFILE = TEXAS_FREELANCE_DEPOSITION_V1;
 
 const CACHE = new Map();
 

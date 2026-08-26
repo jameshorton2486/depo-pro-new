@@ -1,12 +1,9 @@
 // Pure final-document structure and pagination. It has no filesystem, UI, or export concerns.
 // The transcript renderer remains authoritative for words, labels, and paragraph boundaries;
 // this module retains those decisions while adding character/token placement.
-import { LINE_WIDTH } from "./transcript-labels.mjs";
-
 export const SHARED_DOCUMENT_MODEL_VERSION="1.0.0";
 
 const spaces=count=>" ".repeat(Math.max(0,count));
-const centered=text=>`${spaces(Math.floor((LINE_WIDTH-text.length)/2))}${text}`;
 
 function hardWrap(token,width,findings,paragraphId,start){
   findings.push({code:"PRINT_UNBREAKABLE_TOKEN",severity:"warning",target:paragraphId,message:`A ${token.length}-character token exceeds the ${width}-character line area and was hard-wrapped.`});
@@ -70,6 +67,7 @@ function fragmentsFor(piece,runs,prefix,paragraphId,lineIndex){
 }
 
 export function paginateSharedDocument(document,{profile,findings=[]}={}){
+  const lineWidth=profile.charactersPerLine;
   const paragraphs=document.sections.flatMap(section=>section.paragraphs??[]),content=[];
   for(const paragraph of paragraphs){
     const layout=paragraph.layout??{tokenCol:0,textCol:0,wrapCol:0,centered:false},runs=tokenRuns(paragraph);
@@ -77,16 +75,16 @@ export function paginateSharedDocument(document,{profile,findings=[]}={}){
     if(paragraph.byLine){const value=String(paragraph.byLine);content.push({content:value,paragraphId:paragraph.id,trace,kind:"by-line",fragments:[{id:`generated:${paragraph.id}:by-line`,kind:"generated",role:"by-line",text:value,sourceWordId:null}]})}
     const text=String(paragraph.text??"");
     if(layout.centered){
-      for(const [index,piece] of wrapText(text,LINE_WIDTH,LINE_WIDTH,findings,paragraph.id).entries()){
-        const prefix=spaces(Math.floor((LINE_WIDTH-piece.text.length)/2));
-        content.push({content:centered(piece.text),paragraphId:paragraph.id,trace,kind:"paragraph",fragments:fragmentsFor(piece,runs,prefix,paragraph.id,index)});
+      for(const [index,piece] of wrapText(text,lineWidth,lineWidth,findings,paragraph.id).entries()){
+        const prefix=spaces(Math.floor((lineWidth-piece.text.length)/2));
+        content.push({content:`${prefix}${piece.text}`,paragraphId:paragraph.id,trace,kind:"paragraph",fragments:fragmentsFor(piece,runs,prefix,paragraph.id,index)});
       }
       continue;
     }
     const tokenCol=Number.isInteger(layout.tokenCol)?layout.tokenCol:null,textCol=Number.isInteger(layout.textCol)?layout.textCol:null,wrapCol=Number.isInteger(layout.wrapCol)?layout.wrapCol:0;
     let prefix="",firstTextCol=textCol??0;
     if(paragraph.label&&tokenCol!==null){prefix=`${spaces(tokenCol)}${paragraph.label}`;prefix+=textCol!==null?spaces(textCol-prefix.length):String(layout.inlineAfterLabel??"  ");firstTextCol=prefix.length}else if(textCol!==null)prefix=spaces(textCol);
-    const pieces=wrapText(text,Math.max(1,LINE_WIDTH-firstTextCol),Math.max(1,LINE_WIDTH-wrapCol),findings,paragraph.id);
+    const pieces=wrapText(text,Math.max(1,lineWidth-firstTextCol),Math.max(1,lineWidth-wrapCol),findings,paragraph.id);
     pieces.forEach((piece,index)=>{const indentation=index===0?prefix:spaces(wrapCol);content.push({content:`${indentation}${piece.text}`,paragraphId:paragraph.id,trace,kind:"paragraph",fragments:fragmentsFor(piece,runs,indentation,paragraph.id,index)})});
   }
   for(const line of content)if(line.content.length>profile.charactersPerLine)findings.push({code:"PRINT_LINE_OVERFLOW",severity:"blocking",target:line.paragraphId,message:`A rendered line occupies ${line.content.length} characters; the profile permits ${profile.charactersPerLine}.`});

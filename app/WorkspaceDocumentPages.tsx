@@ -1,21 +1,23 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 export type DocumentFragment={id:string;kind:"evidence"|"authored"|"generated";role:string;text:string;sourceWordId:string|null;sourceStart?:number;sourceEnd?:number};
 export type DocumentLine={position:number;occupied:boolean;content:string;paragraphId:string|null;fragments:DocumentFragment[]};
 export type DocumentPage={id:string;pageNumber:number;lines:DocumentLine[]};
 export type EditableParagraph={id:string;text:string};
 type ActiveEdit={paragraphId:string;lineKey:string;draft:string;baseText:string;caret:number;status:"editing"|"saving"|"saved"|"conflict"|"failed"};
+export type LayoutProfile={id:string;version:string;linesPerPage:number;font:{family:string;pointSize:number};formatBox:{leftInches:number;rightClearanceInches:number;widthInches:number;topInches:number;heightInches:number;borderPoints:number};text:{leftMarginTwips:number;rightMarginTwips:number;topMarginTwips:number;lineSpacingTwips:number};lineNumbers:{distanceTwips:number}};
+function geometryStyle(profile:LayoutProfile):CSSProperties{return {"--page-font":profile.font.family,"--page-font-size":`${profile.font.pointSize}pt`,"--box-left":`${profile.formatBox.leftInches}in`,"--box-top":`${profile.formatBox.topInches}in`,"--box-width":`${profile.formatBox.widthInches}in`,"--box-height":`${profile.formatBox.heightInches}in`,"--box-border":`${profile.formatBox.borderPoints}pt`,"--text-left":`${profile.text.leftMarginTwips/1440}in`,"--text-top":`${profile.text.topMarginTwips/1440}in`,"--line-height":`${profile.text.lineSpacingTwips/20}pt`,"--line-number-gap":`${profile.lineNumbers.distanceTwips/1440}in`,"--page-number-right":`${profile.formatBox.rightClearanceInches}in`} as CSSProperties}
 
 // React renders physical lines already decided by the shared paginator. The temporary textarea
 // is a controlled editor for one canonical paragraph; after save the server model repaginates it.
 // It never decides permanent line or page boundaries.
-export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onSelect,onBeginEdit,onChange,onSave,onCancel,onSplit,onJoinPrevious,onJoinNext,onPlay}:{page:DocumentPage;selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onBeginEdit:(paragraphId:string,lineKey:string,offset:number)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onSplit:(caret:number)=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlay:(paragraphId:string)=>void}){
+export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,profile,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onSelect,onBeginEdit,onChange,onSave,onCancel,onSplit,onJoinPrevious,onJoinNext,onPlay}:{page:DocumentPage;profile:LayoutProfile;selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onBeginEdit:(paragraphId:string,lineKey:string,offset:number)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onSplit:(caret:number)=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlay:(paragraphId:string)=>void}){
   const editor=useRef<HTMLTextAreaElement|null>(null);
   const clickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   useEffect(()=>{if(!editor.current||!activeEdit)return;editor.current.focus();editor.current.setSelectionRange(activeEdit.caret,activeEdit.caret)},[activeEdit]);
-  return <article className="workspace-paper" data-page={page.pageNumber} aria-label={`Transcript body page ${page.pageNumber}`}>
+  return <article className="workspace-paper" style={geometryStyle(profile)} data-layout-profile={`${profile.id}@${profile.version}`} data-page={page.pageNumber} aria-label={`Transcript body page ${page.pageNumber}`}><div className="workspace-format-box" aria-hidden="true"/>
     <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
@@ -31,7 +33,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,sel
   </article>;
 });
 
-export default function WorkspaceDocumentPages({pages,paragraphs,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,onSelect,onSaveParagraph,onSplitParagraph,onJoinParagraph,onPlayParagraph,onEditingChange}:{pages:DocumentPage[];paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onSplitParagraph:(paragraphId:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onEditingChange:(editing:boolean)=>void}){
+export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,onSelect,onSaveParagraph,onSplitParagraph,onJoinParagraph,onPlayParagraph,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onSplitParagraph:(paragraphId:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onEditingChange:(editing:boolean)=>void}){
   const scroller=useRef<HTMLDivElement|null>(null),saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),[currentPage,setCurrentPage]=useState(1),[storedEdit,setActiveEdit]=useState<ActiveEdit|null>(null);
   const total=pages.length,paragraphById=useMemo(()=>new Map(paragraphs.map(paragraph=>[paragraph.id,paragraph])),[paragraphs]);
   const savedCanonical=storedEdit?.status==="saved"?paragraphById.get(storedEdit.paragraphId)?.text:undefined;
@@ -59,7 +61,7 @@ export default function WorkspaceDocumentPages({pages,paragraphs,selectedParagra
       <span className="workspace-geometry-note">Shared-model pages · one-paragraph editing</span>
     </nav>
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
-      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} selectedParagraphId={selectedParagraphId} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onSelect={onSelect} onBeginEdit={beginEdit} onChange={(draft,caret)=>setActiveEdit(activeEdit?{...activeEdit,draft,caret,status:"editing"}:null)} onSave={()=>{void save()}} onCancel={()=>setActiveEdit(null)} onSplit={caret=>{void structural("split",caret)}} onJoinPrevious={()=>{void structural("previous")}} onJoinNext={()=>{void structural("next")}} onPlay={onPlayParagraph}/>) }
+      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onSelect={onSelect} onBeginEdit={beginEdit} onChange={(draft,caret)=>setActiveEdit(activeEdit?{...activeEdit,draft,caret,status:"editing"}:null)} onSave={()=>{void save()}} onCancel={()=>setActiveEdit(null)} onSplit={caret=>{void structural("split",caret)}} onJoinPrevious={()=>{void structural("previous")}} onJoinNext={()=>{void structural("next")}} onPlay={onPlayParagraph}/>) }
     </div>
   </section>;
 }

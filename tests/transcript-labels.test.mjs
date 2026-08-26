@@ -134,11 +134,11 @@ test("centered parentheticals compute their column from the string, not a consta
   // This is the correction that matters. Nine identical "(Exhibit N marked)" are 18 characters
   // and land at column 22 every time, which reads as a rule and is arithmetic. A hardcoded 22
   // is one column off for a tenth exhibit and badly wrong for anything else.
-  assert.equal(LINE_WIDTH,62);
+  assert.equal(LINE_WIDTH,63);
   assert.equal(centerColumn("(Exhibit 1 marked)"),22);
-  assert.equal(centerColumn("(Exhibit 10 marked)"),21,"a two-digit exhibit shifts by one; a constant 22 would not");
-  assert.equal(centerColumn("(Deposition concluded at 2:50 p.m.)"),13);
-  assert.equal(centerColumn("EXAMINATION"),25);
+  assert.equal(centerColumn("(Exhibit 10 marked)"),22,"a two-digit exhibit shifts by one; a constant 22 would not");
+  assert.equal(centerColumn("(Deposition concluded at 2:50 p.m.)"),14);
+  assert.equal(centerColumn("EXAMINATION"),26);
   assert.equal(centerColumn("x".repeat(80)),0,"a string wider than the line clamps at zero rather than going negative");
 });
 
@@ -195,9 +195,9 @@ test("the ruler is the specimen's own",()=>{
   // 1.25-inch left margin the paper centres 3.0 from the margin and the text block centres at
   // 3.10 -- one character apart, and the page was chosen.
   assert.deepEqual(TAB_STOPS.twips.left, [720, 1440, 2160]);
-  assert.equal(TAB_STOPS.twips.centre, 4320);
+  assert.equal(TAB_STOPS.twips.centre, 3912);
   assert.deepEqual(TAB_STOPS.leftInches, [0.5, 1.0, 1.5]);
-  assert.equal(TAB_STOPS.centreInches, 3.0);
+  assert.equal(TAB_STOPS.centreInches, 3912/1440);
 });
 
 test("colloquy sits at column 15, against the specimen and on purpose",()=>{
@@ -213,8 +213,8 @@ test("the centre stop is the page centre, not the text-block centre",()=>{
   // 3.0 inches from a 1.25-inch margin is the middle of the paper; the text block centres at
   // 3.10. One character apart, and the reporter chose the page. centerColumn computes the
   // text-block centre and must not be used to position an exported line.
-  assert.equal(TAB_STOPS.centreInches, 3.0);
-  assert.equal(TAB_STOPS.twips.centre, 4320);
+  assert.equal(TAB_STOPS.centreInches, 3912/1440);
+  assert.equal(TAB_STOPS.twips.centre, 3912);
   assert.notEqual(TAB_STOPS.twips.centre, 4680, "4680 is 3.25in, the text-block centre");
 });
 
@@ -223,8 +223,8 @@ test("the centre stop is derived from the page, not typed",()=>{
   // instead of silently invalidating it. Tab positions are measured from the left margin, so
   // the centre of the paper is half the page width less that margin.
   assert.equal(TAB_STOPS.twips.centre, PAGE.widthTwips / 2 - PAGE.marginTwips.left);
-  assert.equal(TAB_STOPS.twips.centre, 4320);
-  assert.equal(TAB_STOPS.centreInches, 3.0);
+  assert.equal(TAB_STOPS.twips.centre, 3912);
+  assert.equal(TAB_STOPS.centreInches, 3912/1440);
 });
 
 test("the centre stop is neither of the two values it could be mistaken for",()=>{
@@ -233,7 +233,7 @@ test("the centre stop is neither of the two values it could be mistaken for",()=
   //   4500 text-block centre  3.125in
   //   4680 the specimen's own 3.250in   ← defined in 710 paragraphs, used by none
   const textBlockCentre = (PAGE.widthTwips - PAGE.marginTwips.left - PAGE.marginTwips.right) / 2;
-  assert.equal(textBlockCentre, 4500);
+  assert.equal(textBlockCentre, 4561);
   assert.notEqual(TAB_STOPS.twips.centre, textBlockCentre, "the text block centres 180 twips right of the page");
   assert.notEqual(TAB_STOPS.twips.centre, 4680, "the specimen's encoded stop positions no character and measures nothing");
 });
@@ -243,7 +243,7 @@ test("the page geometry is the specimen's own",()=>{
   // characters -- every line in the document sits inside them.
   assert.equal(PAGE.widthTwips, 12240);
   assert.equal(PAGE.heightTwips, 15840);
-  assert.equal(PAGE.marginTwips.left, 1800);
-  assert.equal(PAGE.marginTwips.right, 1440);
-  assert.equal(PAGE.widthTwips - PAGE.marginTwips.left - PAGE.marginTwips.right, 9000, "a 6.25in text block");
+  assert.equal(PAGE.marginTwips.left, 2208);
+  assert.equal(PAGE.marginTwips.right, 910);
+  assert.equal(PAGE.widthTwips - PAGE.marginTwips.left - PAGE.marginTwips.right, 9122, "Profile B Word-proven text width");
 });

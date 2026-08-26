@@ -8,7 +8,9 @@
 // XPS print image plus the DOCX), not taken from a specification. Where the specimen was
 // internally inconsistent, the plurality form is used and the reason is recorded on the rule.
 
-export const LINE_WIDTH = 62; // measured: right edge at 7.45in, 10 cpi, col 0 at 1.25in
+import { TEXAS_FREELANCE_DEPOSITION_V1 } from "./texas-freelance-deposition-profile.mjs";
+
+export const LINE_WIDTH = TEXAS_FREELANCE_DEPOSITION_V1.charactersPerLine;
 
 export const ELEMENT = Object.freeze({
   QUESTION: "QUESTION", ANSWER: "ANSWER", COLLOQUY: "COLLOQUY", NEW_PARAGRAPH: "NEW_PARAGRAPH",
@@ -110,9 +112,9 @@ export const LAYOUT = Object.freeze({
 // The page the specimen is set on, read from its sectPr. Present so the centre stop can be
 // derived rather than asserted: a margin change must move the stop, not silently invalidate it.
 export const PAGE = Object.freeze({
-  widthTwips: 12240,   // 8.5in
-  heightTwips: 15840,  // 11in
-  marginTwips: Object.freeze({ left:1800, right:1440, top:1440, bottom:1440 }),
+  widthTwips: TEXAS_FREELANCE_DEPOSITION_V1.page.widthTwips,
+  heightTwips: TEXAS_FREELANCE_DEPOSITION_V1.page.heightTwips,
+  marginTwips: Object.freeze({ left:TEXAS_FREELANCE_DEPOSITION_V1.text.leftMarginTwips, right:TEXAS_FREELANCE_DEPOSITION_V1.text.rightMarginTwips, top:TEXAS_FREELANCE_DEPOSITION_V1.text.topMarginTwips, bottom:TEXAS_FREELANCE_DEPOSITION_V1.text.bottomMarginTwips }),
 });
 
 // Tab positions are measured from the left margin, so the centre of the paper is half the page
@@ -120,7 +122,7 @@ export const PAGE = Object.freeze({
 const PAGE_CENTRE_FROM_MARGIN = PAGE.widthTwips / 2 - PAGE.marginTwips.left;
 
 export const TAB_STOPS = Object.freeze({
-  leftInches: Object.freeze([0.5, 1.0, 1.5]),
+  leftInches: TEXAS_FREELANCE_DEPOSITION_V1.tabs.inches,
   centreInches: PAGE_CENTRE_FROM_MARGIN / 1440,
   twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:PAGE_CENTRE_FROM_MARGIN }),
 });
