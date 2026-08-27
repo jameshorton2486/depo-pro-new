@@ -3,7 +3,7 @@ import { useState, type KeyboardEvent } from "react";
 import { DEPONENT_TYPES } from "./intake-logistics.mjs";
 import { COUNSEL_SIDES, MANUAL_REQUIRED_FIELDS } from "./manual-intake.mjs";
 
-export type ManualAttorney = { name:string; firm:string; represents:string; side:string };
+export type ManualAttorney = { name:string; firm:string; represents:string; side:string; sideOther:string };
 export type ManualParty = { name:string; role:string };
 export type ManualFields = {
   caseStyle:string; witness:string; causeNumber:string; depositionDate:string; deponentType:string;
@@ -12,7 +12,7 @@ export type ManualFields = {
 
 const EMPTY:ManualFields = {
   caseStyle:"", witness:"", causeNumber:"", depositionDate:"", deponentType:"",
-  attorneys:[{ name:"", firm:"", represents:"", side:"" }],
+  attorneys:[{ name:"", firm:"", represents:"", side:"", sideOther:"" }],
   parties:[{ name:"", role:"" }],
 };
 
@@ -45,6 +45,11 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
     event.preventDefault();
     attempt();
   };
+  // Changing away from Other drops its wording with it. Left behind, it would be a value the
+  // reporter had abandoned sitting on a row bound for a certified page.
+  const chooseSide = (index:number, value:string) =>
+    set("attorneys", fields.attorneys.map((row,position) => position===index
+      ? { ...row, side:value, sideOther: value==="Other" ? row.sideOther : "" } : row));
   const editParty = (index:number, key:keyof ManualParty, value:string) =>
     set("parties", fields.parties.map((row,position) => position===index ? { ...row, [key]:value } : row));
 
@@ -82,13 +87,16 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
             <label>Represents<input value={attorney.represents} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,'represents',event.target.value)} placeholder='Alex Plaintiff' /></label>
             {/* The party NAMES this attorney appears for. The side is the separate field below:
                 one is who, the other is which side, and the appearance page needs both. */}
-            <label>Appears for<select value={attorney.side} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"side",event.target.value)}>
+            <label>Appears for<select value={attorney.side} onKeyDown={submitOnEnter} onChange={event=>chooseSide(index,event.target.value)}>
               <option value="">Select the side</option>
               {(COUNSEL_SIDES as readonly string[]).map(option => <option key={option} value={option}>{option}</option>)}
             </select></label>
+            {attorney.side==="Other" && (
+              <label>How this side should print<input value={attorney.sideOther} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"sideOther",event.target.value)} placeholder="Guardian Ad Litem" /></label>
+            )}
           </div>
         ))}
-        <button type="button" className="secondary-button" onClick={()=>set("attorneys",[...fields.attorneys,{ name:"", firm:"", represents:"", side:"" }])}>Add counsel</button>
+        <button type="button" className="secondary-button" onClick={()=>set("attorneys",[...fields.attorneys,{ name:"", firm:"", represents:"", side:"", sideOther:"" }])}>Add counsel</button>
       </fieldset>
 
       <fieldset className="manual-intake-rows">

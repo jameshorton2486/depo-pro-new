@@ -121,6 +121,7 @@ export function manualIntakeAnalysis(fields = {}) {
       firm: text(attorney.firm),
       represents: asList(attorney.represents),
       side: text(attorney.side),
+      sideOther: text(attorney.sideOther),
     }));
   const parties = (fields.parties ?? [])
     .filter(party => text(typeof party === "string" ? party : party?.name))

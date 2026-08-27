@@ -73,3 +73,28 @@ test("every side the form offers is one the record accepts", () => {
   assert.ok(COUNSEL_SIDES.includes("Other"), "Other is a value a reporter can choose");
   assert.equal(new Set(COUNSEL_SIDES).size, COUNSEL_SIDES.length, "a duplicate side is offered twice");
 });
+
+// "Other" needs wording or it is a null in disguise: fail-closed on its own would make it and
+// MISSING behave identically at the appearance page, which is the same nothing said twice.
+const withSide = (side, sideOther) => ({ ...ENTERED, attorneys:[{ ...ENTERED.attorneys[0], side, sideOther }] });
+
+test("the wording an Other side prints as reaches the record", t => {
+  const counsel = created(withSide("Other", "Guardian Ad Litem for the minor claimant"), t).canonicalData.counsel[0];
+  assert.equal(counsel.side.value, "Other");
+  assert.equal(counsel.sideOther.value, "Guardian Ad Litem for the minor claimant");
+  assert.equal(counsel.sideOther.source, "REPORTER_ENTERED");
+  assert.equal(counsel.sideOther.state, "REPORTER_ADDED");
+});
+
+test("an Other side with no wording is refused", t => {
+  assert.throws(() => created(withSide("Other", ""), t), /must record the wording it should print as/);
+  // Whitespace is not wording.
+  assert.throws(() => created(withSide("Other", "   "), t), /must record the wording it should print as/);
+});
+
+test("a named side carries no wording of its own", t => {
+  // Wording belongs to Other. On a named side it would be a second, competing print form.
+  const counsel = created(withSide("Intervenor", "Guardian Ad Litem"), t).canonicalData.counsel[0];
+  assert.equal(counsel.sideOther.value, null);
+  assert.equal(counsel.sideOther.state, "MISSING");
+});
