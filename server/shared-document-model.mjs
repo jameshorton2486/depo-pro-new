@@ -55,9 +55,13 @@ function tokenRuns(paragraph){
   return runs;
 }
 
-function fragmentsFor(piece,runs,prefix,paragraphId,lineIndex){
+function fragmentsFor(piece,runs,prefix,paragraphId,lineIndex,inlineByLine=null){
   const fragments=[];
   if(prefix)fragments.push({id:`generated:${paragraphId}:layout:${lineIndex}`,kind:"generated",role:"layout",text:prefix,sourceWordId:null});
+  if(inlineByLine){
+    fragments.push({id:`generated:${paragraphId}:by-line`,kind:"generated",role:"by-line",text:inlineByLine,sourceWordId:null});
+    fragments.push({id:`generated:${paragraphId}:by-line-separator`,kind:"generated",role:"separator",text:" ",sourceWordId:null});
+  }
   for(const run of runs){
     const start=Math.max(piece.start,run.start),end=Math.min(piece.end,run.end);
     if(end<=start)continue;
@@ -72,7 +76,6 @@ export function paginateSharedDocument(document,{profile,findings=[]}={}){
   for(const paragraph of paragraphs){
     const layout=paragraph.layout??{tokenCol:0,textCol:0,wrapCol:0,centered:false},runs=tokenRuns(paragraph);
     const trace={paragraphId:paragraph.id,sourceSegmentIds:[...(paragraph.segmentIds??[])],sourceWordIds:[...(paragraph.asrWordIds??[])],start:paragraph.start??null,end:paragraph.end??null};
-    if(paragraph.byLine){const value=String(paragraph.byLine);content.push({content:value,paragraphId:paragraph.id,trace,kind:"by-line",fragments:[{id:`generated:${paragraph.id}:by-line`,kind:"generated",role:"by-line",text:value,sourceWordId:null}]})}
     const text=String(paragraph.text??"");
     if(layout.centered){
       for(const [index,piece] of wrapText(text,lineWidth,lineWidth,findings,paragraph.id).entries()){
@@ -84,8 +87,10 @@ export function paginateSharedDocument(document,{profile,findings=[]}={}){
     const tokenCol=Number.isInteger(layout.tokenCol)?layout.tokenCol:null,textCol=Number.isInteger(layout.textCol)?layout.textCol:null,wrapCol=Number.isInteger(layout.wrapCol)?layout.wrapCol:0;
     let prefix="",firstTextCol=textCol??0;
     if(paragraph.label&&tokenCol!==null){prefix=`${spaces(tokenCol)}${paragraph.label}`;prefix+=textCol!==null?spaces(textCol-prefix.length):String(layout.inlineAfterLabel??"  ");firstTextCol=prefix.length}else if(textCol!==null)prefix=spaces(textCol);
+    const inlineByLine=paragraph.byLine?String(paragraph.byLine):null;
+    if(inlineByLine)firstTextCol+=inlineByLine.length+1;
     const pieces=wrapText(text,Math.max(1,lineWidth-firstTextCol),Math.max(1,lineWidth-wrapCol),findings,paragraph.id);
-    pieces.forEach((piece,index)=>{const indentation=index===0?prefix:spaces(wrapCol);content.push({content:`${indentation}${piece.text}`,paragraphId:paragraph.id,trace,kind:"paragraph",fragments:fragmentsFor(piece,runs,indentation,paragraph.id,index)})});
+    pieces.forEach((piece,index)=>{const indentation=index===0?prefix:spaces(wrapCol),byLine=index===0?inlineByLine:null,generated=byLine?`${byLine} `:"";content.push({content:`${indentation}${generated}${piece.text}`,paragraphId:paragraph.id,trace,kind:"paragraph",fragments:fragmentsFor(piece,runs,indentation,paragraph.id,index,byLine)})});
   }
   for(const line of content)if(line.content.length>profile.charactersPerLine)findings.push({code:"PRINT_LINE_OVERFLOW",severity:"blocking",target:line.paragraphId,message:`A rendered line occupies ${line.content.length} characters; the profile permits ${profile.charactersPerLine}.`});
   const pages=[];

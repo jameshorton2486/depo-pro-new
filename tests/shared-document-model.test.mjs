@@ -38,6 +38,17 @@ test("generated layout is explicit and cannot be mistaken for spoken evidence",(
   assert.ok(generated.some(fragment=>fragment.role==="layout"));
 });
 
+test("a resumption by-line shares the Q. physical line and remains generated",()=>{
+  const paragraph={...rendered.paragraphs.find(item=>item.elementType==="QUESTION"),byLine:"(BY MR. BENTLEY)"};
+  const document=buildSharedDocumentModel({rendered:{...rendered,paragraphs:[paragraph]},profile:TRANSCRIPT_BODY_LAYOUT_PROFILE});
+  const occupied=document.pages.flatMap(page=>page.lines).filter(line=>line.occupied);
+  assert.match(occupied[0].content,/Q\.\s+\(BY MR\. BENTLEY\)\s+/);
+  assert.equal(occupied.some(line=>line.kind==="by-line"),false,"a resumption by-line must not consume its own physical line");
+  const fragment=occupied[0].fragments.find(item=>item.role==="by-line");
+  assert.equal(fragment.kind,"generated");
+  assert.equal(fragment.sourceWordId,null);
+});
+
 test("shared paginator is deterministic, pure, and preserves current Preview content",()=>{
   const document=build(),snapshot=JSON.stringify(document.sections);
   const again=paginateSharedDocument({sections:document.sections},{profile:TRANSCRIPT_BODY_LAYOUT_PROFILE,findings:[]});

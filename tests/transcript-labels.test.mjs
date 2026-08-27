@@ -62,6 +62,28 @@ test("opposing counsel becomes colloquy under their own name",()=>{
   ])).at(-1),[ELEMENT.COLLOQUY,"MR. RAMON:",null]);
 });
 
+test("an attorney objection preserves the pending question for the responsive answer",()=>{
+  const result=run([
+    say("counsel-bentley","QUESTIONING_ATTORNEY","Why did you get involved in litigation?"),
+    say("counsel-ramon","DEFENDING_ATTORNEY","Objection.  Form."),
+    say("witness","WITNESS","I think I have been doing this for 15 years."),
+  ]);
+  assert.deepEqual(shape(result),[
+    [ELEMENT.QUESTION,"Q.",null],
+    [ELEMENT.COLLOQUY,"MR. RAMON:",null],
+    [ELEMENT.ANSWER,"A.",null],
+  ]);
+});
+
+test("non-attorney colloquy closes the pending question and preserves legitimate witness colloquy",()=>{
+  const result=run([
+    say("counsel-bentley","QUESTIONING_ATTORNEY","Would you identify the exhibit?"),
+    say("reporter","COURT_REPORTER","Please wait while I mark it."),
+    say("witness","WITNESS","May I see that exhibit?"),
+  ]);
+  assert.deepEqual(shape(result).at(-1),[ELEMENT.COLLOQUY,"THE WITNESS:",null]);
+});
+
 test("a question resuming after colloquy carries an inline by-line",()=>{
   // The specimen has 21 inline (BY MR. BENTLEY) against one standalone BY MR. BENTLEY:, with a
   // single examiner throughout -- so this fires on resumption after colloquy, not on examiner
@@ -70,6 +92,16 @@ test("a question resuming after colloquy carries an inline by-line",()=>{
     say("counsel-bentley","QUESTIONING_ATTORNEY"),
     say("counsel-ramon","DEFENDING_ATTORNEY","Objection.  Form."),
     say("counsel-bentley","QUESTIONING_ATTORNEY"),
+  ]);
+  assert.deepEqual(shape(result).at(-1),[ELEMENT.QUESTION,"Q.","(BY MR. BENTLEY)"]);
+});
+
+test("the resumption by-line survives the responsive answer after an objection",()=>{
+  const result=run([
+    say("counsel-bentley","QUESTIONING_ATTORNEY","Why?"),
+    say("counsel-ramon","DEFENDING_ATTORNEY","Objection.  Form."),
+    say("witness","WITNESS","Because."),
+    say("counsel-bentley","QUESTIONING_ATTORNEY","What happened next?"),
   ]);
   assert.deepEqual(shape(result).at(-1),[ELEMENT.QUESTION,"Q.","(BY MR. BENTLEY)"]);
 });

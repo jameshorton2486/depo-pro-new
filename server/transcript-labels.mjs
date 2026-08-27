@@ -207,7 +207,13 @@ export function buildSpeakerLabels(candidates = []) {
  */
 export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null } = {}) {
   let examiner = examinerIdentity;
-  let previous = null;
+  // Attorney colloquy can interrupt a question without closing its Q/A relationship. Keep that
+  // semantic state separately from the immediately preceding rendered element so an objection
+  // does not turn the responsive testimony into generic witness colloquy.
+  let pendingQuestion = false;
+  // A resumption marker survives the responsive answer: the next question is still the
+  // examiner's return from the intervening attorney colloquy.
+  let resumptionByLinePending = false;
   return paragraphs.map(paragraph => {
     const role = String(paragraph?.transcriptRole ?? "").toUpperCase();
     const identity = paragraph?.speakerIdentity ?? null;
@@ -215,26 +221,34 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
 
     // The witness answering a question is "A."; the witness speaking when no question is open
     // -- asking to see an exhibit, responding to the reporter -- is "THE WITNESS:". The
-    // specimen uses both, 2 of the latter. The distinction is the preceding element, and it is
-    // a judgement the reporter can override from the Workspace when it is wrong.
+    // specimen uses both, 2 of the latter. The distinction is whether a question remains open;
+    // attorney colloquy can intervene without closing it. The reporter can still override this
+    // judgement from the Workspace when the record establishes otherwise.
     if (role === "WITNESS") {
-      if (previous === ELEMENT.QUESTION) return emit(ELEMENT.ANSWER, "A.", null);
+      if (pendingQuestion) return emit(ELEMENT.ANSWER, "A.", null, false);
       return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS.WITNESS}:`, null);
     }
     if (identity && examiner && identity === examiner) {
-      const byLine = previous !== null && previous !== ELEMENT.QUESTION && previous !== ELEMENT.ANSWER && label ? `(BY ${label})` : null;
-      return emit(ELEMENT.QUESTION, "Q.", byLine);
+      const byLine = resumptionByLinePending && label ? `(BY ${label})` : null;
+      resumptionByLinePending = false;
+      return emit(ELEMENT.QUESTION, "Q.", byLine, true);
     }
     if (!examiner && ATTORNEY_ROLES.has(role) && role === "QUESTIONING_ATTORNEY" && identity) {
       // First questioning attorney seen becomes the examiner, so a transcript with no examiner
       // set still renders as questions and answers rather than as undifferentiated colloquy.
       examiner = identity;
-      return emit(ELEMENT.QUESTION, "Q.", null);
+      resumptionByLinePending = false;
+      return emit(ELEMENT.QUESTION, "Q.", null, true);
     }
-    return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null);
+    if(ATTORNEY_ROLES.has(role)){
+      if(pendingQuestion)resumptionByLinePending = true;
+      return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
+    }
+    resumptionByLinePending = false;
+    return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, false);
 
-    function emit(elementType, token, byLine) {
-      previous = elementType;
+    function emit(elementType, token, byLine, nextPendingQuestion = false) {
+      pendingQuestion = nextPendingQuestion;
       return { ...paragraph, elementType, label:token, byLine, layout:LAYOUT[elementType], unlabeledSpeaker:!label && elementType === ELEMENT.COLLOQUY };
     }
   });
