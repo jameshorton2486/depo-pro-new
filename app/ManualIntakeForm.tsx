@@ -1,9 +1,9 @@
 "use client";
 import { useState, type KeyboardEvent } from "react";
 import { DEPONENT_TYPES } from "./intake-logistics.mjs";
-import { MANUAL_REQUIRED_FIELDS } from "./manual-intake.mjs";
+import { COUNSEL_SIDES, MANUAL_REQUIRED_FIELDS } from "./manual-intake.mjs";
 
-export type ManualAttorney = { name:string; firm:string; represents:string };
+export type ManualAttorney = { name:string; firm:string; represents:string; side:string };
 export type ManualParty = { name:string; role:string };
 export type ManualFields = {
   caseStyle:string; witness:string; causeNumber:string; depositionDate:string; deponentType:string;
@@ -12,7 +12,7 @@ export type ManualFields = {
 
 const EMPTY:ManualFields = {
   caseStyle:"", witness:"", causeNumber:"", depositionDate:"", deponentType:"",
-  attorneys:[{ name:"", firm:"", represents:"" }],
+  attorneys:[{ name:"", firm:"", represents:"", side:"" }],
   parties:[{ name:"", role:"" }],
 };
 
@@ -79,10 +79,16 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
           <div className="form-row" key={index}>
             <label>Name<input value={attorney.name} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"name",event.target.value)} placeholder="Pat Counsel" /></label>
             <label>Firm<input value={attorney.firm} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"firm",event.target.value)} placeholder="Plaintiff Firm" /></label>
-            <label>Represents<input value={attorney.represents} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"represents",event.target.value)} placeholder="Alex Plaintiff" /></label>
+            <label>Represents<input value={attorney.represents} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,'represents',event.target.value)} placeholder='Alex Plaintiff' /></label>
+            {/* The party NAMES this attorney appears for. The side is the separate field below:
+                one is who, the other is which side, and the appearance page needs both. */}
+            <label>Appears for<select value={attorney.side} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"side",event.target.value)}>
+              <option value="">Select the side</option>
+              {(COUNSEL_SIDES as readonly string[]).map(option => <option key={option} value={option}>{option}</option>)}
+            </select></label>
           </div>
         ))}
-        <button type="button" className="secondary-button" onClick={()=>set("attorneys",[...fields.attorneys,{ name:"", firm:"", represents:"" }])}>Add counsel</button>
+        <button type="button" className="secondary-button" onClick={()=>set("attorneys",[...fields.attorneys,{ name:"", firm:"", represents:"", side:"" }])}>Add counsel</button>
       </fieldset>
 
       <fieldset className="manual-intake-rows">

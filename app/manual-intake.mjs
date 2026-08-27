@@ -32,6 +32,26 @@ const asList = value => Array.isArray(value)
   ? value.map(text).filter(Boolean)
   : text(value) ? [text(value)] : [];
 
+/**
+ * The side counsel appears for. Its own fact, and not any of the three it sits near:
+ *
+ * - `represents` holds PARTY NAMES, and has correction-log entries against it. A side put there
+ *   would change what those corrections corrected.
+ * - `appearanceRole` (QUESTIONING_ATTORNEY / DEFENDING_ATTORNEY) is examination POSTURE. An
+ *   attorney can defend a deposition while appearing for an intervenor. Both facts are needed and
+ *   neither derives from the other. Do not merge them.
+ * - PARTY_ROLES in canonical-deposition-record.mjs is the role of a PARTY, not of counsel, and is
+ *   a different list for that reason. A party is a plaintiff; counsel appears for one.
+ *
+ * Texas practice is routinely more than two sides -- intervenors in subrogation and probate,
+ * third-party defendants in construction defect, ad litem appointments for minors and missing
+ * heirs, and petitioner/respondent in family, probate and appellate matters.
+ */
+export const COUNSEL_SIDES = Object.freeze([
+  "Plaintiff", "Defendant", "Intervenor", "Third-Party Defendant", "Cross-Defendant",
+  "Counter-Defendant", "Non-Party Witness", "Ad Litem", "Petitioner", "Respondent", "Other",
+]);
+
 export const MANUAL_REQUIRED_FIELDS = Object.freeze([
   { key:"caseStyle", label:"Case style", message:"Enter the case style, as it appears in the caption." },
   { key:"witness", label:"Witness", message:"Enter the name of the witness being deposed." },
@@ -100,6 +120,7 @@ export function manualIntakeAnalysis(fields = {}) {
       name: text(attorney.name),
       firm: text(attorney.firm),
       represents: asList(attorney.represents),
+      side: text(attorney.side),
     }));
   const parties = (fields.parties ?? [])
     .filter(party => text(typeof party === "string" ? party : party?.name))

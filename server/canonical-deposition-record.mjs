@@ -1,3 +1,5 @@
+import { COUNSEL_SIDES } from "../app/manual-intake.mjs";
+
 export const CANONICAL_RECORD_VERSION="1.0.0";
 export const FIELD_SOURCES=Object.freeze(["NOD_EXTRACTED","REPORTER_PROFILE","REPORTER_ENTERED","TRANSCRIPT_DERIVED","WORKFLOW_DERIVED","SYSTEM_GENERATED"]);
 export const FIELD_STATES=Object.freeze(["EXTRACTED","CONFIRMED","CONFLICTING","MISSING","REPORTER_ADDED","DERIVED"]);
@@ -42,6 +44,14 @@ const missing=(source="REPORTER_ENTERED")=>field(null,{source,state:"MISSING"});
  * REPORTER_ENTERED and REPORTER_ADDED are not new vocabulary; both were already declared in
  * FIELD_SOURCES and FIELD_STATES and simply unused on counsel.
  */
+function sideField(value) {
+  if (value === undefined || value === null || value === "") return missing("REPORTER_ENTERED");
+  if (!COUNSEL_SIDES.includes(value)) {
+    throw new Error(`Counsel side ${JSON.stringify(value)} is not one of: ${COUNSEL_SIDES.join(", ")}.`);
+  }
+  return field(value, { source:"REPORTER_ENTERED", state:"REPORTER_ADDED" });
+}
+
 export function counselEntry(attorney = {}, index = 0, { source = "NOD_EXTRACTED" } = {}) {
   const supplied = value => {
     const present = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
@@ -55,6 +65,14 @@ export function counselEntry(attorney = {}, index = 0, { source = "NOD_EXTRACTED
     barNumber:supplied(attorney.barNumber), firm:supplied(attorney.firm), address:supplied(attorney.address),
     phone:supplied(attorney.phone), fax:supplied(attorney.fax), email:supplied(attorney.email),
     represents:supplied(represents), appearanceRole:supplied(attorney.appearanceRole),
+    // The side counsel appears for. Always the reporter's answer: nothing in the extraction schema
+    // asks a Notice for it, so a NOD_EXTRACTED source here would cite a document that never stated
+    // it -- the same reason actualAppearance below is fixed to REPORTER_ENTERED.
+    //
+    // Refused, never coerced and never defaulted. A side outside the list would print under FOR on
+    // a certified appearance page, and 'Other' is a real answer a reporter can choose rather than
+    // something this decides on their behalf.
+    side:sideField(attorney.side),
     // Appearance is the reporter's observation whatever the Notice said, so it is never extracted.
     actualAppearance:attorney.actualAppearance === undefined || attorney.actualAppearance === null
       ? missing("REPORTER_ENTERED")
