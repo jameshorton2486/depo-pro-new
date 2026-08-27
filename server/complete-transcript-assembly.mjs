@@ -104,11 +104,19 @@ export function validateProvenance(actor) {
 /**
  * Reads the stored assembly.
  *
- * A file written before revisions and provenance existed (schemaVersion 1.0.0, as the browser
- * fixture writes) still reads. Refusing it would take away the only complete transcript this
- * application can currently produce, and reading a record is not the act provenance protects --
- * writing one is. Its revision reads as 0, so the first write through this module supersedes it
- * and records an author for what replaces it.
+ * A file written before revisions and provenance existed (schemaVersion 1.0.0) still reads.
+ * Refusing it would take away the only complete transcript this application could produce, and
+ * reading a record is not the act provenance protects -- writing one is. Its revision reads as 0,
+ * so the first write through this module supersedes it and records an author for the replacement.
+ *
+ * DELETE THIS LEGACY BRANCH AT CHECKPOINT 3.
+ *
+ * Trigger, so this is not carried as an unnamed compatibility path: delete it once a test asserts
+ * that no assembly file in the tree reads revision 0. The whole legacy population was ever one
+ * synthetic fixture -- no reporter-created deposition has had an assembly file, because until
+ * this module existed nothing but the fixture generator could write one -- and that generator now
+ * calls writeAssembly like every other caller. When that test exists, this branch is dead code
+ * carrying a compatibility promise to no one.
  */
 export function readAssembly(root, { depositionId, storageRoot } = {}) {
   const file = assemblyPath(root, depositionId, storageRoot);

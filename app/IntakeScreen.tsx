@@ -5,6 +5,8 @@ import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import AudioReviewCard from "./AudioReviewCard";
 import AudioToolsScreen from "./AudioToolsScreen";
 import TermReviewTable from "./TermReviewTable";
+import ManualIntakeForm from "./ManualIntakeForm";
+import { manualIntakeAnalysis, validateManualIntake } from "./manual-intake.mjs";
 import { KEYTERM_PRODUCT_CAP } from "@/server/keyterm-limits.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import type { ClaudeIntakeAnalysis, DepositionCreationMode, IntakeAttorney } from "./intake-types";
@@ -156,6 +158,7 @@ export default function IntakeScreen({
     ),
     [profiling, setProfiling] = useState<Record<string, boolean>>({}),
     [showAudioTools, setShowAudioTools] = useState(false),
+    [manualOpen, setManualOpen] = useState(false),
     // Explicit, never inferred. Audio is optional on the prerecorded path, so deriving the mode
     // from `audioFiles.length` would read an intake whose recordings arrive later as a live one --
     // giving it workflowStatus "scheduled" and routing the reporter to the recording screen.
@@ -495,6 +498,42 @@ export default function IntakeScreen({
                   : "Analyze documents with Claude"}
             </button>
           </div>
+
+          {/* An explicit choice, set the way creationMode is -- never inferred from whether a
+              key is configured or a notice was uploaded. Inferring it would silently downgrade
+              a reporter who meant to extract into typing everything, on a day the service
+              happened to be unreachable. */}
+          <div className="manual-intake-choice">
+            <button
+              type="button"
+              className="secondary-button"
+              aria-expanded={manualOpen}
+              onClick={() => { setManualOpen(open => !open); setError(""); }}
+            >
+              {manualOpen ? "Cancel manual entry" : "No Notice? Enter the deposition details manually"}
+            </button>
+            <small>
+              A walk-in has no Notice to read. Manual entry records the same facts, attributed to
+              you rather than to a document.
+            </small>
+          </div>
+
+          {manualOpen && (
+            <ManualIntakeForm
+              onCancel={() => { setManualOpen(false); setError(""); }}
+              onReady={(entered) => {
+                const problems = validateManualIntake(entered);
+                if (problems.length) { setError(problems.map(problem => problem.message).join(" ")); return; }
+                // Same object the extraction path produces, so there is one submit path and one
+                // draft shape. `notice` is left null: claiming one would make the canonical
+                // record cite a Notice as the source of what was typed here.
+                setAnalysis(manualIntakeAnalysis(entered));
+                setManualOpen(false);
+                setError("");
+              }}
+            />
+          )}
+
           {error && (
             <p className="analysis-error" role="alert">
               {error}
