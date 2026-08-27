@@ -12,8 +12,13 @@ test("fixed-page DOCX spec retains all modeled lines and trace identities",()=>{
 test("fixed-page DOCX boundary refuses another profile",()=>assert.throws(()=>createFixedPageDocxSpec({layoutProfile:{id:"other"},pages:[]}),/FIXED_DOCX_PROFILE_REQUIRED/));
 
 test("complete-document DOCX identifies administrative pages without changing testimony evidence",()=>{
-  const admin=Array.from({length:25},(_,index)=>({position:index+1,content:index===0?"_".repeat(68):"",occupied:index===0,paragraphId:null,fragments:[]}));
+  const admin=Array.from({length:25},(_,index)=>({position:index+1,content:index===0?"_".repeat(63):"",occupied:index===0,paragraphId:null,fragments:[]}));
   const body=Array.from({length:25},(_,index)=>({position:index+1,content:index===0?"    A.    Evidence remains evidence.":"",occupied:index===0,paragraphId:index===0?"p1":null,fragments:index===0?[{id:"f1",sourceWordId:"w1"}]:[]}));
   const spec=createFixedPageDocxSpec({recordType:"COMPLETE_TRANSCRIPT_DOCUMENT_MODEL",modelHash:"complete",source:{reviewStateHash:"review"},layoutProfile:TEXAS_FREELANCE_DEPOSITION_V1,pages:[{id:"admin",pageNumber:1,role:"changes",sectionKind:"administrative",editable:false,lines:admin},{id:"body",pageNumber:2,role:"testimony",sectionKind:"testimony",editable:true,lines:body}]});
-  assert.equal(spec.pages[0].sectionKind,"administrative");assert.equal(spec.pages[0].lines[0].text.length,68);assert.deepEqual(spec.pages[1].lines[0].sourceWordIds,["w1"]);
+  assert.equal(spec.pages[0].sectionKind,"administrative");assert.equal(spec.pages[0].lines[0].text.length,63);assert.deepEqual(spec.pages[1].lines[0].sourceWordIds,["w1"]);
+});
+
+test("DOCX generation refuses a shared model containing any horizontal overflow",()=>{
+  const lines=Array.from({length:25},(_,index)=>({position:index+1,content:index===0?"x".repeat(64):"",occupied:index===0,paragraphId:null,fragments:[]}));
+  assert.throws(()=>createFixedPageDocxSpec({modelHash:"overflow",source:{},layoutProfile:TEXAS_FREELANCE_DEPOSITION_V1,pages:[{id:"admin",pageNumber:1,role:"certification1",sectionKind:"administrative",lines}]}),/FIXED_DOCX_HORIZONTAL_OVERFLOW/);
 });

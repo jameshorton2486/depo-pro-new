@@ -35,3 +35,17 @@ test("waived signature omits changes and signature pages",async()=>{
   assert.deepEqual(model.pages.map(page=>page.role),["title","appearances","index","testimony","certification1","certification2"]);
   assert.equal(model.pagination.index.reportersCertification.startPage,5);
 });
+
+test("variable administrative values wrap inside the shared geometry before DOCX generation",async()=>{
+  const longOperator={...operator,timeUsed:{totalOnRecordMinutes:120,parties:[
+    {name:"Dennis Jonathan Bentley the Third",minutes:60},
+    {name:"Christian Remington Ramon the Second",minutes:60},
+  ]},titleNarrative:["Jordan Example, produced as a witness and duly sworn, with deliberately extended canonical narrative content that must wrap safely."]};
+  const model=await buildCompleteTranscriptModel({depositionId:"DEP-20260826-LONG",printModel:{...printModel,pages:[printModel.pages[0]]},record:canonicalRecord(),intake:{counselOfRecord:["Pat Counsel","Dana Counsel"]},operator:longOperator,generatedAt:"2026-08-26T12:00:00.000Z"});
+  const lines=model.pages.flatMap(page=>page.lines.map(line=>({page:page.pageNumber,role:page.role,text:line.content})));
+  assert.equal(Math.max(...lines.map(line=>line.text.length)),TEXAS_FREELANCE_DEPOSITION_V1.charactersPerLine);
+  assert.equal(model.findings.horizontalOverflow.length,0);
+  assert.ok(lines.filter(line=>line.role==="certification1").some(line=>/Dennis Jonathan Bentley/.test(line.text)));
+  assert.ok(lines.filter(line=>line.role==="certification1").some(line=>/Christian Remington Ramon/.test(line.text)));
+  assert.doesNotThrow(()=>createFixedPageDocxSpec(model));
+});

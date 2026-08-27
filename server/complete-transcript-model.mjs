@@ -4,6 +4,7 @@ import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { assembleInsertionInput } from "./insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "./insertion-pages/build-pages.mjs";
+import { horizontalOverflowFindings } from "./insertion-pages/page-model.mjs";
 import { loadTemplateVariant } from "./insertion-pages/templates.mjs";
 import { validateInsertionInput } from "./insertion-pages/validate.mjs";
 import { selectInsertionVariant } from "./insertion-pages/variants.mjs";
@@ -25,12 +26,13 @@ function shiftTestimonyPage(page,pageNumber){
     lines:page.lines.map(line=>({...line,modelTestimonyPage:page.pageNumber}))};
 }
 
-export function completePagination({testimonyPages,signatureDisposition,examinations=[]}){
-  const testimonyStart=4,testimonyEnd=testimonyStart+testimonyPages-1;
-  const requested=signatureDisposition==="requested",changesStart=requested?testimonyEnd+1:null,certificateStart=testimonyEnd+1+(requested?2:0);
-  return {index:{appearances:{startPage:2},examinations:examinations.length?examinations:[{examiner:"EXAMINING ATTORNEY",startPage:testimonyStart,endPage:testimonyEnd}],
+export function completePagination({testimonyPages,signatureDisposition,examinations=[],frontPages=3,preCertificationPages=null,certificationPages=null}){
+  const testimonyStart=frontPages+1,testimonyEnd=testimonyStart+testimonyPages-1;
+  const requested=signatureDisposition==="requested",beforeCertificate=preCertificationPages??(requested?2:0),certificateCount=certificationPages??(requested?3:2),changesStart=requested?testimonyEnd+1:null,certificateStart=testimonyEnd+1+beforeCertificate;
+  const pageShift=frontPages-3;
+  return {index:{appearances:{startPage:2},examinations:examinations.length?examinations.map(exam=>({...exam,startPage:exam.startPage+pageShift,endPage:exam.endPage+pageShift})):[{examiner:"EXAMINING ATTORNEY",startPage:testimonyStart,endPage:testimonyEnd}],
     changesAndSignature:requested?{startPage:changesStart,endPage:changesStart+1}:null,
-    reportersCertification:{startPage:certificateStart,endPage:certificateStart+(requested?2:1)},entries:[],actualSectionPages:{},declaredSectionPages:{}}};
+    reportersCertification:{startPage:certificateStart,endPage:certificateStart+certificateCount-1},entries:[],actualSectionPages:{},declaredSectionPages:{}}};
 }
 
 export async function buildCompleteTranscriptModel({depositionId,printModel,record,intake={},operator={},generatedAt="1970-01-01T00:00:00.000Z"}={}){
@@ -42,17 +44,25 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   if(!variant)throw new Error("COMPLETE_TRANSCRIPT_VARIANT_REQUIRED");
   const template=await loadTemplateVariant(variant);
   if(!template.available)throw new Error(`COMPLETE_TRANSCRIPT_TEMPLATE_UNAVAILABLE:${variant}`);
-  const pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[]});
-  const input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
+  let pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[]});
+  let input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
   const findings=validateInsertionInput(input),blockers=findings.filter(finding=>finding.severity==="blocking");
   if(blockers.length)throw new Error(`COMPLETE_TRANSCRIPT_VALIDATION_BLOCKED:${blockers.map(item=>`${item.code}:${item.target}`).join(",")}`);
-  const insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
+  let insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
+  const frontPages=insertion.pages.filter(page=>FRONT_ROLES.has(page.role)).length;
+  const preCertificationPages=insertion.pages.filter(page=>["changes","signature"].includes(page.role)).length;
+  const certificationPages=insertion.pages.filter(page=>page.role.startsWith("certification")).length;
+  pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],frontPages,preCertificationPages,certificationPages});
+  input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
+  insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
   const front=insertion.pages.filter(page=>FRONT_ROLES.has(page.role));
   const back=insertion.pages.filter(page=>!FRONT_ROLES.has(page.role));
   const pages=[];
   for(const page of front)pages.push(normalizeAdministrativePage(page,pages.length+1));
   for(const page of printModel.pages)pages.push(shiftTestimonyPage(page,pages.length+1));
   for(const page of back)pages.push(normalizeAdministrativePage(page,pages.length+1));
+  const horizontalOverflow=horizontalOverflowFindings(pages,printModel.layoutProfile);
+  if(horizontalOverflow.length)throw new Error(`COMPLETE_TRANSCRIPT_HORIZONTAL_OVERFLOW:${horizontalOverflow.map(item=>item.target).join(",")}`);
   const sections=[
     {id:"front-matter",kind:"administrative",roles:front.map(page=>page.role),startPage:1,endPage:front.length},
     {id:"testimony",kind:"testimony",roles:["testimony"],startPage:front.length+1,endPage:front.length+printModel.pages.length,sourceModelHash:printModel.modelHash},
@@ -60,7 +70,7 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   ];
   const unsigned={schemaVersion:COMPLETE_TRANSCRIPT_MODEL_VERSION,recordType:"COMPLETE_TRANSCRIPT_DOCUMENT_MODEL",deposition:printModel.deposition,layoutProfile:printModel.layoutProfile,
     source:{testimonyModelHash:printModel.modelHash,reviewStateHash:printModel.source.reviewStateHash,insertionPageSetHash:insertion.sha256,canonicalRecordVersion:record.schemaVersion},
-    variant,signatureDisposition,pagination,sections,paragraphs:printModel.paragraphs,pages,findings:{transcript:printModel.findings,assembly:findings}};
+    variant,signatureDisposition,pagination,sections,paragraphs:printModel.paragraphs,pages,findings:{transcript:printModel.findings,assembly:findings,horizontalOverflow}};
   return {...unsigned,modelHash:hash(unsigned)};
 }
 

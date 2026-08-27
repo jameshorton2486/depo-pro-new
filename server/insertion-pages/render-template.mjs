@@ -21,7 +21,9 @@ export function renderTemplatePage(template, values, { pageNumber, role, linesPe
     const text = sourceLine.replace(FIELD, (_match, field) => values[field] == null ? "" : String(values[field]));
     output.push({ text, fields });
   }
-  while (output.length > linesPerPage && output.at(-1)?.text === "") output.pop();
-  while (output.length < linesPerPage) output.push({ text: "", fields: [] });
+  if (linesPerPage > 0) {
+    while (output.length > linesPerPage && output.at(-1)?.text === "") output.pop();
+    while (output.length < linesPerPage) output.push({ text: "", fields: [] });
+  }
   return { pageNumber, role, lines: output.map((line, index) => ({ line: index + 1, ...line })) };
 }
