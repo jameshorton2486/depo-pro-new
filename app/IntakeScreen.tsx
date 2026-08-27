@@ -387,7 +387,11 @@ export default function IntakeScreen({
                   setAnalysis(null);
                   setError("");
                 }}
-                required
+                // A walk-in has no Notice to attach. Native constraint validation runs before the
+                // submit handler, so an unconditional `required` here refused the manual route in the
+                // browser -- the feature b61c515 claims to deliver -- while every test of
+                // manual-intake.mjs passed. The extraction path keeps its requirement unchanged.
+                required={analysis?.manualEntry !== true}
               />
               <span className="upload-icon">▤</span>
               <strong>{notice ? notice.name : "Notice of Deposition"}</strong>
