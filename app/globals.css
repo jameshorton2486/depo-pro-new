@@ -131,6 +131,26 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .intake-fields label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
 .intake-fields input,.intake-fields textarea { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fafbfd; padding:12px 13px; color:var(--ink); outline:0; resize:vertical; font:inherit; }
 .intake-fields input:focus,.intake-fields textarea:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+/* The manual intake panel was written to the same wrapping-label convention as .modal and
+   .intake-fields -- <label>Text<input/></label> -- but no rule ever scoped it, so its labels fell
+   back to display:inline and the text ran into the control ("WitnessThaddeus Bellweather"). These
+   values are the existing convention, not a fourth one. */
+.manual-intake { display:grid; gap:17px; }
+.manual-intake h3 { margin:0; font-size:17px; }
+.manual-intake-note { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.manual-intake label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.manual-intake input,.manual-intake select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fafbfd; padding:12px 13px; color:var(--ink); outline:0; }
+.manual-intake input:focus,.manual-intake select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+/* One grid for every row -- two fields where there are two, three where there are three -- so the
+   counsel and party rows keep the same column and gap rhythm instead of each inventing spacing. */
+.manual-intake .form-row { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+.manual-intake-rows { display:grid; gap:13px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; }
+.manual-intake-rows legend { padding:0 6px; color:#4b5870; font-size:12px; font-weight:750; }
+/* aria-invalid was set on every required field and had no treatment anywhere in this sheet, so the
+   refusal named the fields at the foot of the form and nothing marked which input it meant. */
+.manual-intake [aria-invalid="true"] { border-color:#b42318; background:#fffafa; }
+.manual-intake [aria-invalid="true"]:focus { border-color:#b42318; box-shadow:0 0 0 3px #fee4e2; }
+.manual-intake-actions { display:flex; justify-content:flex-end; gap:10px; }
 .audio-add { min-height:82px; border:1.5px dashed #cbd5e4; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:var(--blue); font-weight:750; font-size:13px; }
 .audio-list { list-style:none; margin:16px 0 0; padding:0; display:grid; gap:8px; }
 .audio-list li { display:flex; align-items:center; gap:12px; border:1px solid #e1e6ef; border-radius:11px; padding:10px 12px; background:#fafbfd; }

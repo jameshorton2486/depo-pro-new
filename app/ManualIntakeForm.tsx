@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { DEPONENT_TYPES } from "./intake-logistics.mjs";
 import { MANUAL_REQUIRED_FIELDS } from "./manual-intake.mjs";
 
@@ -27,6 +27,17 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
 
   const editAttorney = (index:number, key:keyof ManualAttorney, value:string) =>
     set("attorneys", fields.attorneys.map((row,position) => position===index ? { ...row, [key]:value } : row));
+  // Enter is bound to the fields rather than to the panel, and the panel cannot be a <form> of its
+  // own: it renders inside IntakeScreen's form (IntakeScreen.tsx:360), a nested form is dropped by
+  // the parser, and a type="submit" button would fire the OUTER form -- advancing to Deposition
+  // Setup with these fields incomplete, which is what implicit submission already did here.
+  // Binding to the fields and not the panel also leaves Enter on Add counsel and Add party alone,
+  // where it must still press the button.
+  const submitOnEnter = (event:KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    onReady(fields);
+  };
   const editParty = (index:number, key:keyof ManualParty, value:string) =>
     set("parties", fields.parties.map((row,position) => position===index ? { ...row, [key]:value } : row));
 
@@ -40,15 +51,15 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
       </p>
 
       <div className="form-row">
-        <label>Case style<input value={fields.caseStyle} aria-invalid={missing("caseStyle")} onChange={event=>set("caseStyle",event.target.value)} placeholder="Alex Plaintiff v. Delta Company" /></label>
-        <label>Cause number<input value={fields.causeNumber} aria-invalid={missing("causeNumber")} onChange={event=>set("causeNumber",event.target.value)} placeholder="2026-CI-10001" /></label>
+        <label>Case style<input value={fields.caseStyle} aria-invalid={missing("caseStyle")} onKeyDown={submitOnEnter} onChange={event=>set("caseStyle",event.target.value)} placeholder="Alex Plaintiff v. Delta Company" /></label>
+        <label>Cause number<input value={fields.causeNumber} aria-invalid={missing("causeNumber")} onKeyDown={submitOnEnter} onChange={event=>set("causeNumber",event.target.value)} placeholder="2026-CI-10001" /></label>
       </div>
       <div className="form-row">
-        <label>Witness<input value={fields.witness} aria-invalid={missing("witness")} onChange={event=>set("witness",event.target.value)} placeholder="Full name of the deponent" /></label>
-        <label>Deposition date<input type="date" value={fields.depositionDate} aria-invalid={missing("depositionDate")} onChange={event=>set("depositionDate",event.target.value)} /></label>
+        <label>Witness<input value={fields.witness} aria-invalid={missing("witness")} onKeyDown={submitOnEnter} onChange={event=>set("witness",event.target.value)} placeholder="Full name of the deponent" /></label>
+        <label>Deposition date<input type="date" value={fields.depositionDate} aria-invalid={missing("depositionDate")} onKeyDown={submitOnEnter} onChange={event=>set("depositionDate",event.target.value)} /></label>
       </div>
       <label>Deponent type
-        <select value={fields.deponentType} aria-invalid={missing("deponentType")} onChange={event=>set("deponentType",event.target.value)}>
+        <select value={fields.deponentType} aria-invalid={missing("deponentType")} onKeyDown={submitOnEnter} onChange={event=>set("deponentType",event.target.value)}>
           {/* No default selection. A deponent type nobody stated is unanswered, not a fact witness. */}
           <option value="">Select the deponent type</option>
           {(DEPONENT_TYPES as readonly string[]).map(option => <option key={option} value={option}>{option}</option>)}
@@ -59,9 +70,9 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
         <legend>Counsel</legend>
         {fields.attorneys.map((attorney,index)=>(
           <div className="form-row" key={index}>
-            <label>Name<input value={attorney.name} onChange={event=>editAttorney(index,"name",event.target.value)} placeholder="Pat Counsel" /></label>
-            <label>Firm<input value={attorney.firm} onChange={event=>editAttorney(index,"firm",event.target.value)} placeholder="Plaintiff Firm" /></label>
-            <label>Represents<input value={attorney.represents} onChange={event=>editAttorney(index,"represents",event.target.value)} placeholder="Alex Plaintiff" /></label>
+            <label>Name<input value={attorney.name} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"name",event.target.value)} placeholder="Pat Counsel" /></label>
+            <label>Firm<input value={attorney.firm} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"firm",event.target.value)} placeholder="Plaintiff Firm" /></label>
+            <label>Represents<input value={attorney.represents} onKeyDown={submitOnEnter} onChange={event=>editAttorney(index,"represents",event.target.value)} placeholder="Alex Plaintiff" /></label>
           </div>
         ))}
         <button type="button" className="secondary-button" onClick={()=>set("attorneys",[...fields.attorneys,{ name:"", firm:"", represents:"" }])}>Add counsel</button>
@@ -71,8 +82,8 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
         <legend>Parties</legend>
         {fields.parties.map((party,index)=>(
           <div className="form-row" key={index}>
-            <label>Name<input value={party.name} onChange={event=>editParty(index,"name",event.target.value)} placeholder="Alex Plaintiff" /></label>
-            <label>Role<input value={party.role} onChange={event=>editParty(index,"role",event.target.value)} placeholder="Plaintiff" /></label>
+            <label>Name<input value={party.name} onKeyDown={submitOnEnter} onChange={event=>editParty(index,"name",event.target.value)} placeholder="Alex Plaintiff" /></label>
+            <label>Role<input value={party.role} onKeyDown={submitOnEnter} onChange={event=>editParty(index,"role",event.target.value)} placeholder="Plaintiff" /></label>
           </div>
         ))}
         <button type="button" className="secondary-button" onClick={()=>set("parties",[...fields.parties,{ name:"", role:"" }])}>Add party</button>
