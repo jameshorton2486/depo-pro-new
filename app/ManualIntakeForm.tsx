@@ -21,9 +21,15 @@ const EMPTY:ManualFields = {
 // examiner selection with nothing to reference and the certified index with nothing to print.
 export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields:ManualFields)=>void; onCancel:()=>void }) {
   const [fields,setFields] = useState<ManualFields>(EMPTY);
+  // Marking waits for a submit attempt. aria-invalid is true for an empty required field from
+  // first render, which was invisible until the sheet gave it a border -- and then the panel
+  // opened with all five required fields already marked as errors, before the reporter had typed
+  // anything. A form that accuses on open is telling the reporter they got something wrong
+  // before they did anything at all.
+  const [attempted,setAttempted] = useState(false);
   const set = <K extends keyof ManualFields>(key:K, value:ManualFields[K]) => setFields(current => ({ ...current, [key]:value }));
   const required = new Set(MANUAL_REQUIRED_FIELDS.map((field:{key:string}) => field.key));
-  const missing = (key:string) => required.has(key) && !String(fields[key as keyof ManualFields] ?? "").trim();
+  const missing = (key:string) => attempted && required.has(key) && !String(fields[key as keyof ManualFields] ?? "").trim();
 
   const editAttorney = (index:number, key:keyof ManualAttorney, value:string) =>
     set("attorneys", fields.attorneys.map((row,position) => position===index ? { ...row, [key]:value } : row));
@@ -33,10 +39,11 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
   // Setup with these fields incomplete, which is what implicit submission already did here.
   // Binding to the fields and not the panel also leaves Enter on Add counsel and Add party alone,
   // where it must still press the button.
+  const attempt = () => { setAttempted(true); onReady(fields); };
   const submitOnEnter = (event:KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
-    onReady(fields);
+    attempt();
   };
   const editParty = (index:number, key:keyof ManualParty, value:string) =>
     set("parties", fields.parties.map((row,position) => position===index ? { ...row, [key]:value } : row));
@@ -93,7 +100,7 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
         <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
         {/* Not disabled on incomplete input. A disabled control says "not yet" without saying
             which field, and the refusal message names the field. */}
-        <button type="button" className="primary-button" onClick={()=>onReady(fields)}>Use these details</button>
+        <button type="button" className="primary-button" onClick={attempt}>Use these details</button>
       </div>
     </section>
   );
