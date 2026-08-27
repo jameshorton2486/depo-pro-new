@@ -48,9 +48,43 @@ const asList = value => Array.isArray(value)
  * heirs, and petitioner/respondent in family, probate and appellate matters.
  */
 export const COUNSEL_SIDES = Object.freeze([
-  "Plaintiff", "Defendant", "Intervenor", "Third-Party Defendant", "Cross-Defendant",
-  "Counter-Defendant", "Non-Party Witness", "Ad Litem", "Petitioner", "Respondent", "Other",
+  "PLAINTIFF", "DEFENDANT", "INTERVENOR", "THIRD_PARTY_DEFENDANT", "CROSS_DEFENDANT",
+  "COUNTER_DEFENDANT", "NON_PARTY_WITNESS", "AD_LITEM", "PETITIONER", "RESPONDENT", "OTHER",
 ]);
+
+/**
+ * How each side prints on an appearance page.
+ *
+ * The map holds the COMPLETE PHRASE AFTER "FOR ", article included, and the print site emits
+ * `FOR ${phrase}:` with nothing added. It is not the fragment after "FOR THE ", because a reporter
+ * appearing for a named entity needs `FOR AMERIGROUP TEXAS, INC.:` with no article at all. An
+ * article hardcoded at the print site makes that case inexpressible, and no amount of per-side
+ * data fixes it afterwards.
+ *
+ * Separate from the code so that changing how a side PRINTS never means editing a canonical
+ * record. The code is what the record stores and keeps; the phrase is presentation, and
+ * presentation decisions must not rewrite certified data.
+ *
+ * OTHER deliberately has no entry: its phrase is the reporter's own `sideOther`, which is the same
+ * kind of value -- the complete phrase after "FOR ".
+ */
+export const COUNSEL_SIDE_PHRASES = Object.freeze({
+  PLAINTIFF: "THE PLAINTIFF",
+  DEFENDANT: "THE DEFENDANT",
+  INTERVENOR: "THE INTERVENOR",
+  THIRD_PARTY_DEFENDANT: "THE THIRD-PARTY DEFENDANT",
+  CROSS_DEFENDANT: "THE CROSS-DEFENDANT",
+  COUNTER_DEFENDANT: "THE COUNTER-DEFENDANT",
+  NON_PARTY_WITNESS: "THE NON-PARTY WITNESS",
+  AD_LITEM: "THE GUARDIAN AD LITEM",
+  PETITIONER: "THE PETITIONER",
+  RESPONDENT: "THE RESPONDENT",
+});
+
+/** The phrase for a code, or null where the reporter supplies it (OTHER) or the code is unknown. */
+export function counselSidePhrase(code) {
+  return Object.prototype.hasOwnProperty.call(COUNSEL_SIDE_PHRASES, code) ? COUNSEL_SIDE_PHRASES[code] : null;
+}
 
 export const MANUAL_REQUIRED_FIELDS = Object.freeze([
   { key:"caseStyle", label:"Case style", message:"Enter the case style, as it appears in the caption." },

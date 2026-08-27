@@ -22,7 +22,7 @@ const ENTERED = {
   depositionDate: "2026-08-27",
   deponentType: "Party",
   attorneys: [
-    { name:"Teodora Marchetti", firm:"Marchetti and Vaughn LLP", represents:"Vandermeer Holdings, LLC", side:"Intervenor" },
+    { name:"Teodora Marchetti", firm:"Marchetti and Vaughn LLP", represents:"Vandermeer Holdings, LLC", side:"INTERVENOR" },
     { name:"Ignatius Rourke", firm:"Rourke Legal Group", represents:"Thaddeus Bellweather", side:"" },
   ],
   parties: [{ name:"Thaddeus Bellweather", role:"Witness" }],
@@ -47,7 +47,7 @@ function created(fields, t) {
 test("the side a reporter chose reaches the canonical record", t => {
   const counsel = created(ENTERED, t).canonicalData.counsel;
   const marchetti = counsel[0];
-  assert.equal(marchetti.side.value, "Intervenor");
+  assert.equal(marchetti.side.value, "INTERVENOR");
   assert.equal(marchetti.side.source, "REPORTER_ENTERED");
   assert.equal(marchetti.side.state, "REPORTER_ADDED");
   // Separate from the two fields it sits near, and neither is disturbed by it.
@@ -70,7 +70,7 @@ test("a side outside the list is refused, not stored", t => {
 test("every side the form offers is one the record accepts", () => {
   // The select is built from COUNSEL_SIDES and the write boundary validates against it, so this
   // fails if the two ever stop being the same list.
-  assert.ok(COUNSEL_SIDES.includes("Other"), "Other is a value a reporter can choose");
+  assert.ok(COUNSEL_SIDES.includes("OTHER"), "Other is a value a reporter can choose");
   assert.equal(new Set(COUNSEL_SIDES).size, COUNSEL_SIDES.length, "a duplicate side is offered twice");
 });
 
@@ -79,22 +79,22 @@ test("every side the form offers is one the record accepts", () => {
 const withSide = (side, sideOther) => ({ ...ENTERED, attorneys:[{ ...ENTERED.attorneys[0], side, sideOther }] });
 
 test("the wording an Other side prints as reaches the record", t => {
-  const counsel = created(withSide("Other", "Guardian Ad Litem for the minor claimant"), t).canonicalData.counsel[0];
-  assert.equal(counsel.side.value, "Other");
-  assert.equal(counsel.sideOther.value, "Guardian Ad Litem for the minor claimant");
+  const counsel = created(withSide("OTHER", "THE GUARDIAN AD LITEM for the minor claimant"), t).canonicalData.counsel[0];
+  assert.equal(counsel.side.value, "OTHER");
+  assert.equal(counsel.sideOther.value, "THE GUARDIAN AD LITEM for the minor claimant");
   assert.equal(counsel.sideOther.source, "REPORTER_ENTERED");
   assert.equal(counsel.sideOther.state, "REPORTER_ADDED");
 });
 
 test("an Other side with no wording is refused", t => {
-  assert.throws(() => created(withSide("Other", ""), t), /must record the wording it should print as/);
+  assert.throws(() => created(withSide("OTHER", ""), t), /must record the wording it should print as/);
   // Whitespace is not wording.
-  assert.throws(() => created(withSide("Other", "   "), t), /must record the wording it should print as/);
+  assert.throws(() => created(withSide("OTHER", "   "), t), /must record the wording it should print as/);
 });
 
 test("a named side carries no wording of its own", t => {
   // Wording belongs to Other. On a named side it would be a second, competing print form.
-  const counsel = created(withSide("Intervenor", "Guardian Ad Litem"), t).canonicalData.counsel[0];
+  const counsel = created(withSide("INTERVENOR", "Guardian Ad Litem"), t).canonicalData.counsel[0];
   assert.equal(counsel.sideOther.value, null);
   assert.equal(counsel.sideOther.state, "MISSING");
 });

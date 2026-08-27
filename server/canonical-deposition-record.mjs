@@ -64,7 +64,7 @@ function sideField(value) {
 // a reporter can leave behind on a row whose side they later changed.
 function sideOtherField(side, value) {
   const wording = value === undefined || value === null ? "" : String(value).trim();
-  if (side !== "Other") return missing("REPORTER_ENTERED");
+  if (side !== "OTHER") return missing("REPORTER_ENTERED");
   if (!wording) throw new Error(SIDE_OTHER_REQUIRED);
   return field(wording, { source:"REPORTER_ENTERED", state:"REPORTER_ADDED" });
 }
