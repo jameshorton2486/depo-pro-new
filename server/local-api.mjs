@@ -444,4 +444,17 @@ const server = http.createServer(async (req,res) => {
     }    return json(res,404,{error:"Not found."},origin);
   } catch(error) {if(error?.code==="WORKING_TRANSCRIPT_NOT_CREATED")return json(res,404,{error:error.message,code:error.code},origin);const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
-server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));
+// Binding a port is a side effect of RUNNING this file, not of reading a value out of it.
+//
+// Until this guard existed, `import`ing this module started a listener. That is why every test
+// that needed to know something about these routes read the file as TEXT with readFileSync and
+// asserted on source strings -- eight of them do, and one says so in a comment. Source pinning is
+// a poor instrument: it proves a literal is present, not that the route behaves. Checkpoint 2
+// adds the assembly write path here, and the write path for document-assembly authority is the
+// last thing that should be checked by grepping for its own name.
+//
+// `export`s above are now safe to import. The server starts only when this file is the process
+// entry point, which is how scripts/dev.mjs spawns it.
+export { server };
+const isEntryPoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntryPoint) server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));
