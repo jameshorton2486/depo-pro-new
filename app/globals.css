@@ -585,3 +585,11 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .live-recoverable li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 12px; border: 1px solid #b9c7dd; border-radius: 8px; }
 .live-recoverable span { font-size: 13px; }
+
+/* Document status. The reporter must be able to tell a certified transcript from its bare body
+   without reading the filename, so blocked is coloured as a stop and ready is not. */
+.workspace-document-status { margin:0; padding:10px 14px; border-bottom:1px solid; font-size:13px; line-height:1.5; }
+.workspace-document-status strong { display:block; font-size:14px; }
+.workspace-document-status p { margin:4px 0 0; }
+.workspace-document-status.blocked { background:#fdf3f3; border-color:#e5b4b4; color:#8a2b2b; }
+.workspace-document-status.ready { background:#f2f8f3; border-color:#b7d7bd; color:#1f5b2c; }

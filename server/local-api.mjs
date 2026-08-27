@@ -48,6 +48,13 @@ import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
+import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
+
+// What a rendered document actually is, decided from the model that was actually rendered.
+// COMPLETE_RECORD_TYPE is imported rather than restated so the browser's idea of "complete" and
+// this one cannot drift apart. document-status.mjs is pure -- no DOM, no fs -- which is what
+// makes it safe to read from both sides.
+const documentKindOf = model => model?.recordType === COMPLETE_RECORD_TYPE ? "complete-transcript" : "testimony-only";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -309,13 +316,17 @@ const server = http.createServer(async (req,res) => {
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
       return json(res,200,await getCompleteTranscriptModel(root,{depositionId,storageRoot:depositionStorageRoot,examinerIdentity:url.searchParams.get("examinerIdentity")||null}),origin);
     }
+    // documentKind is reported by whichever endpoint actually ran, read off the model that was
+    // actually rendered. The Workspace used to name its output from its own cached record type,
+    // which can be stale by the time the answer arrives -- the silent-fallback defect one layer
+    // up. What the reporter is told a document is now comes from the side that made it.
     if(req.url==="/api/transcript/complete-document-docx"&&req.method==="POST"){
       const input=await body(req,64*1024),model=await getCompleteTranscriptModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
-      return json(res,200,createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel:model,storageRoot:depositionStorageRoot}),origin);
+      return json(res,200,{...createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel:model,storageRoot:depositionStorageRoot}),documentKind:documentKindOf(model)},origin);
     }
     if(req.url==="/api/transcript/final-document-docx"&&req.method==="POST"){
       const input=await body(req,64*1024),printModel=getTranscriptPrintModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
-      return json(res,200,createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel,storageRoot:depositionStorageRoot}),origin);
+      return json(res,200,{...createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel,storageRoot:depositionStorageRoot}),documentKind:documentKindOf(printModel)},origin);
     }
     // The only two write paths for reporter edits. Deliberately not an editable operation list:
     // append and undo are enough to work, and every additional verb is another way for the

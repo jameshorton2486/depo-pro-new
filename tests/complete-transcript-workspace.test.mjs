@@ -10,7 +10,17 @@ test("Workspace prefers the complete shared model and retains a testimony-only f
   assert.ok(screen.includes("/api/transcript/complete-document-model"));
   assert.ok(screen.includes("/api/transcript/print-model"));
   assert.ok(screen.indexOf("/api/transcript/complete-document-model")<screen.indexOf("/api/transcript/print-model"));
-  assert.ok(screen.includes('printModel?.recordType==="COMPLETE_TRANSCRIPT_DOCUMENT_MODEL"'));
+  // Status and endpoint selection derive from the record type the SERVER actually served, never
+  // from the screen's cached model. This line used to assert the cached form
+  // (`printModel?.recordType===...`), which is the stale-state defect Release Integration
+  // Priority 1 exists to close -- so the cached form is now asserted ABSENT. Merely replacing the
+  // assertion would let it be reintroduced somewhere else in the file without anything noticing.
+  assert.doesNotMatch(screen,/printModel\?\.recordType===/);
+  assert.ok(screen.includes("deriveDocumentStatus({ servedRecordType:servedModel?.recordType"));
+  assert.ok(screen.includes("documentState?.state===DOCUMENT_STATUS.READY"));
+  // The fallback itself must survive: a reporter with no assembly authority still works the
+  // testimony. What changed is that it announces itself, not that it went away.
+  assert.ok(screen.includes("blockedReason"));
 });
 
 test("administrative pages render from modeled lines but cannot become direct-edit authorities",()=>{

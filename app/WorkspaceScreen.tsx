@@ -3,6 +3,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
+import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
@@ -87,6 +88,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const depositionId = deposition.id;
   const [rendered,setRendered] = useState<Rendered|null>(null);
   const [printModel,setPrintModel] = useState<PrintModel|null>(null);
+  const [documentState,setDocumentState] = useState<{state:string;reason:string;absentSections:string[]}|null>(null);
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
   const [examiner,setExaminer] = useState<string>("");
@@ -147,9 +149,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,printRes,candidateRes,mediaRes] = await Promise.all([
+        const [renderRes,printOutcome,candidateRes,mediaRes] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
-          fetch(`${API}/api/transcript/complete-document-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}).then(async response=>response.ok?response:fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"})),
+          // The fallback stays -- a reporter with no assembly authority still needs to see and
+          // work the testimony -- but the reason the complete model refused no longer goes in
+          // the bin. It was the only thing that could tell the reporter what to do about it,
+          // and discarding it is what made the degrade silent.
+          fetch(`${API}/api/transcript/complete-document-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}).then(async response=>{
+            if(response.ok) return { response, blockedReason:"" };
+            const blockedReason = await response.json().then(payload=>String(payload?.error||"")).catch(()=>"");
+            return { response: await fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}), blockedReason };
+          }),
           fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
           fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
@@ -158,7 +168,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         if(cancelled) return;
         if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
         setRendered(body);
-        if(printRes.ok)setPrintModel(await printRes.json());else setPrintModel(null);
+        // Status comes from the record type the server actually served, never from what this
+        // screen asked for. The request and the answer are different moments; deriving from the
+        // request is how a stale flag says "complete" about a body-only document.
+        const printRes=printOutcome.response;
+        const servedModel=printRes.ok?await printRes.json():null;
+        setPrintModel(servedModel);
+        setDocumentState(deriveDocumentStatus({ servedRecordType:servedModel?.recordType??null, blockedReason:printOutcome.blockedReason }));
         if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
         if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
@@ -244,7 +260,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
   }
-  async function generateDocx(){setBusy(true);setError("");try{const endpoint=printModel?.recordType==="COMPLETE_TRANSCRIPT_DOCUMENT_MODEL"?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(`Word proof generated from the shared pages: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
+  // The notice is built from result.documentKind -- the server's report of what it actually
+  // rendered -- not from the record type this screen happened to be holding. Those can disagree,
+  // and when they do the server is right. "Word proof generated from the shared pages" is gone:
+  // it was true of a certified transcript and of a bare testimony body alike, which is exactly
+  // what made it useless to the person deciding whether to send the file.
+  async function generateDocx(){setBusy(true);setError("");try{const endpoint=documentState?.state===DOCUMENT_STATUS.READY?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(generationNotice({producedKind:result.documentKind,outputPath:result.outputPath}))}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
   const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
@@ -458,7 +479,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId })} disabled={busy||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
-        <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>Generate Word DOCX</button>
+        <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
       </header>
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The
@@ -471,6 +492,22 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <ul className="workspace-findings" role="alert">
           {rendered.findings.filter(finding=>finding.code!=="HONORIFIC_MISSING").slice(0,6).map((finding,index)=><li key={`${finding.code}:${index}`}>{finding.message}</li>)}
         </ul>
+      )}
+
+      {/* Shown only once a model has actually been served: a deposition with no transcript yet
+          has no document to be blocked about, and the transcribe panel below already says so.
+          Gated on printModel rather than on documentState so the banner cannot appear before
+          there is a served answer to derive it from. */}
+      {printModel && documentState && (
+        <section className={`workspace-document-status ${documentState.state===DOCUMENT_STATUS.READY?"ready":"blocked"}`} role="status">
+          <strong>{documentState.state}</strong>
+          {documentState.state!==DOCUMENT_STATUS.READY && (
+            <>
+              <p>{documentState.reason}</p>
+              <p>Generating now produces the testimony body only. It will not contain {documentState.absentSections.join(", ")}.</p>
+            </>
+          )}
+        </section>
       )}
 
       {notice && <p className="analysis-note" role="status">{notice}</p>}
