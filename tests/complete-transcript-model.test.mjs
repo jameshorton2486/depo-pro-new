@@ -25,6 +25,9 @@ test("complete model assembles approved front matter, unchanged testimony, and c
   assert.equal(spec.documentRecordType,"COMPLETE_TRANSCRIPT_DOCUMENT_MODEL");
   assert.deepEqual(spec.pages.map(page=>page.sectionKind),["administrative","administrative","administrative","testimony","testimony","administrative","administrative","administrative","administrative","administrative"]);
   assert.deepEqual(spec.pages[3].lines[0].sourceWordIds,["w1"]);
+  const inputIds=printModel.pages.flatMap(page=>page.lines).flatMap(line=>line.fragments.map(fragment=>fragment.sourceWordId).filter(Boolean));
+  const assembledIds=model.pages.filter(page=>page.role==="testimony").flatMap(page=>page.lines).flatMap(line=>line.fragments.map(fragment=>fragment.sourceWordId).filter(Boolean));
+  assert.deepEqual(assembledIds,inputIds,"assembly must copy every testimony evidence identity exactly once, in order");
 });
 
 test("waived signature omits changes and signature pages",async()=>{
