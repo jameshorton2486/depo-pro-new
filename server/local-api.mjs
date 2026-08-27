@@ -49,6 +49,7 @@ import { createReporter, importReporters, listReporters } from "./reporter-store
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
 import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
+import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
 
 // What a rendered document actually is, decided from the model that was actually rendered.
 // COMPLETE_RECORD_TYPE is imported rather than restated so the browser's idea of "complete" and
@@ -311,6 +312,26 @@ const server = http.createServer(async (req,res) => {
     if(req.url?.startsWith("/api/transcript/print-model?")&&req.method==="GET"){
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
       return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
+    }
+    // One resource, GET and POST, rather than a field-per-endpoint surface. The readiness
+    // projection is computed server-side and returned with it: the browser displays readiness,
+    // it does not decide it.
+    if(req.url?.startsWith("/api/transcript/assembly?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,assemblyReadiness(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/transcript/assembly"&&req.method==="POST"){
+      const input=await body(req,256*1024);
+      try{
+        const written=writeAssembly(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,assembly:input.assembly,expectedRevision:input.expectedRevision,actor:input.actor});
+        return json(res,200,{...written,...assemblyReadiness(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot})},origin);
+      }catch(error){
+        // Both registers, from the server. 409 for a conflict because the caller's next move is
+        // to reload and retry -- a different instruction from "fix these fields".
+        if(error instanceof AssemblyConflictError)return json(res,409,{error:error.message,code:error.code,expectedRevision:error.expected,actualRevision:error.actual},origin);
+        if(error instanceof AssemblyRefusedError)return json(res,400,{error:error.message,code:error.code,findings:error.findings},origin);
+        throw error;
+      }
     }
     if(req.url?.startsWith("/api/transcript/complete-document-model?")&&req.method==="GET"){
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
