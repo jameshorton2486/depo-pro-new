@@ -26,11 +26,44 @@ function shiftTestimonyPage(page,pageNumber){
     lines:page.lines.map(line=>({...line,modelTestimonyPage:page.pageNumber}))};
 }
 
-export function completePagination({testimonyPages,signatureDisposition,examinations=[],frontPages=3,preCertificationPages=null,certificationPages=null}){
+/**
+ * The examining attorney, resolved from the canonical id the assembly stores.
+ *
+ * The assembly holds `operator.examiningCounselId` and never a typed name, so the name printed in
+ * the index is looked up here rather than carried alongside the id -- two places holding the same
+ * name is how they come to disagree. The honorific is included when the record has one.
+ *
+ * Returns null when nothing was chosen. It does not invent anybody: the index used to fall back to
+ * a literal "EXAMINING ATTORNEY", which printed confident placeholder prose on a certified page
+ * that nothing in the suite asserted against and no reader would recognise as a defect.
+ */
+function examinerName(record, operator) {
+  const id = String(operator?.examiningCounselId ?? "").trim();
+  if (!id) return null;
+  const entry = (record?.counsel ?? []).find(item => item.id === id);
+  if (!entry) throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:${id}`);
+  const name = String(value(entry.fullName) ?? "").trim();
+  if (!name) throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:${id}`);
+  const honorific = String(value(entry.honorific) ?? "").trim();
+  return honorific ? `${honorific} ${name}` : name;
+}
+
+export function completePagination({testimonyPages,signatureDisposition,examinations=[],examiner=null,frontPages=3,preCertificationPages=null,certificationPages=null}){
   const testimonyStart=frontPages+1,testimonyEnd=testimonyStart+testimonyPages-1;
   const requested=signatureDisposition==="requested",beforeCertificate=preCertificationPages??(requested?2:0),certificateCount=certificationPages??(requested?3:2),changesStart=requested?testimonyEnd+1:null,certificateStart=testimonyEnd+1+beforeCertificate;
   const pageShift=frontPages-3;
-  return {index:{appearances:{startPage:2},examinations:examinations.length?examinations.map(exam=>({...exam,startPage:exam.startPage+pageShift,endPage:exam.endPage+pageShift})):[{examiner:"EXAMINING ATTORNEY",startPage:testimonyStart,endPage:testimonyEnd}],
+  // The reporter never enters page ranges. A single examination spans the testimony, and its bounds
+  // come from the paginator that already knows where testimony starts and ends.
+  //
+  // Refused rather than defaulted when there is no examiner. This used to emit
+  // { examiner: "EXAMINING ATTORNEY" } and the index printed it.
+  const examinationEntries = examinations.length
+    ? examinations.map(exam => ({ ...exam, startPage:exam.startPage + pageShift, endPage:exam.endPage + pageShift }))
+    : examiner
+      ? [{ examiner, startPage:testimonyStart, endPage:testimonyEnd }]
+      : null;
+  if (!examinationEntries) throw new Error("COMPLETE_TRANSCRIPT_EXAMINER_REQUIRED");
+  return {index:{appearances:{startPage:2},examinations:examinationEntries,
     changesAndSignature:requested?{startPage:changesStart,endPage:changesStart+1}:null,
     reportersCertification:{startPage:certificateStart,endPage:certificateStart+certificateCount-1},entries:[],actualSectionPages:{},declaredSectionPages:{}}};
 }
@@ -44,7 +77,7 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   if(!variant)throw new Error("COMPLETE_TRANSCRIPT_VARIANT_REQUIRED");
   const template=await loadTemplateVariant(variant);
   if(!template.available)throw new Error(`COMPLETE_TRANSCRIPT_TEMPLATE_UNAVAILABLE:${variant}`);
-  let pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[]});
+  let pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],examiner:examinerName(record,operator)});
   let input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
   const findings=validateInsertionInput(input),blockers=findings.filter(finding=>finding.severity==="blocking");
   if(blockers.length)throw new Error(`COMPLETE_TRANSCRIPT_VALIDATION_BLOCKED:${blockers.map(item=>`${item.code}:${item.target}`).join(",")}`);
@@ -52,7 +85,7 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   const frontPages=insertion.pages.filter(page=>FRONT_ROLES.has(page.role)).length;
   const preCertificationPages=insertion.pages.filter(page=>["changes","signature"].includes(page.role)).length;
   const certificationPages=insertion.pages.filter(page=>page.role.startsWith("certification")).length;
-  pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],frontPages,preCertificationPages,certificationPages});
+  pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],examiner:examinerName(record,operator),frontPages,preCertificationPages,certificationPages});
   input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
   insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
   const front=insertion.pages.filter(page=>FRONT_ROLES.has(page.role));

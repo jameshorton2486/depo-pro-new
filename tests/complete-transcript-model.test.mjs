@@ -31,7 +31,7 @@ test("complete model assembles approved front matter, unchanged testimony, and c
 });
 
 test("waived signature omits changes and signature pages",async()=>{
-  const model=await buildCompleteTranscriptModel({depositionId:"DEP-20260826-M2FIX",printModel:{...printModel,pages:[printModel.pages[0]]},record:canonicalRecord(),operator:{...operator,signatureDisposition:"waived",examinations:[]},generatedAt:"2026-08-26T12:00:00.000Z"});
+  const model=await buildCompleteTranscriptModel({depositionId:"DEP-20260826-M2FIX",printModel:{...printModel,pages:[printModel.pages[0]]},record:canonicalRecord(),operator:{...operator,signatureDisposition:"waived",examinations:[],examiningCounselId:"attorney-1"},generatedAt:"2026-08-26T12:00:00.000Z"});
   assert.deepEqual(model.pages.map(page=>page.role),["title","appearances","index","testimony","certification1","certification2"]);
   assert.equal(model.pagination.index.reportersCertification.startPage,5);
 });
