@@ -76,6 +76,14 @@ test("generation refuses when no examiner was chosen", async () => {
   await assert.rejects(() => build({}), /COMPLETE_TRANSCRIPT_EXAMINER_REQUIRED/);
 });
 
-test("an examiner id that names nobody is refused, not ignored", async () => {
-  await assert.rejects(() => build({ examiningCounselId:"attorney-9" }), /COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED/);
+test("an examiner id that names nobody is refused, and the refusal says why", async () => {
+  // This is the removal case. A reporter deletes an attorney in the counsel editor and the
+  // preparation still names them, so the refusal has to point at the deletion rather than read as a
+  // generic missing examiner -- the two screens are far apart, and the cause is not near the effect.
+  await assert.rejects(() => build({ examiningCounselId:"attorney-9" }), error => {
+    assert.match(error.message, /COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:attorney-9/);
+    assert.match(error.message, /no longer has/, "the refusal does not say the counsel record is gone");
+    assert.match(error.message, /removed/, "the refusal does not tell the reporter a removal caused it");
+    return true;
+  });
 });

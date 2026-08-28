@@ -41,9 +41,16 @@ function examinerName(record, operator) {
   const id = String(operator?.examiningCounselId ?? "").trim();
   if (!id) return null;
   const entry = (record?.counsel ?? []).find(item => item.id === id);
-  if (!entry) throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:${id}`);
+  // Two different causes, said differently. A reporter who removed an attorney in the counsel
+  // editor has broken the preparation that named them, and needs to be told that rather than shown
+  // a generic missing-examiner error: the removal and the refusal are screens apart.
+  if (!entry) {
+    throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:${id}: the preparation names a counsel record this deposition no longer has. If that attorney was removed, choose the examining attorney again in Prepare Complete Transcript.`);
+  }
   const name = String(value(entry.fullName) ?? "").trim();
-  if (!name) throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED:${id}`);
+  if (!name) {
+    throw new Error(`COMPLETE_TRANSCRIPT_EXAMINER_UNNAMED:${id}: the counsel record the preparation names has no name recorded, so the index has nothing to print.`);
+  }
   const honorific = String(value(entry.honorific) ?? "").trim();
   return honorific ? `${honorific} ${name}` : name;
 }

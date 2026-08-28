@@ -16,6 +16,17 @@ import { createDeposition, readDepositionCounsel, writeDepositionCounsel } from 
 //
 // These drive the real write path and read the record back, rather than asking the module whether
 // it accepts a shape.
+//
+// WHICH TEST HERE ACTUALLY CATCHES ID REGENERATION: only "removing one counsel does not renumber
+// the others". Do not read the others as covering it.
+//
+// `attorney-${index + 1}` rebuilt from the index reproduces exactly the ids it replaced whenever
+// the order is unchanged, so "an edited attorney keeps the id it had" and "the examiner reference
+// survives an edit" both PASS under full positional regeneration. That was verified by running the
+// mutation, not assumed. Remove a counsel and the survivors shift: attorney-2 becomes attorney-1,
+// the examiner reference and every speaker mapping re-point, and the save still reports success.
+//
+// If this file is ever trimmed, that test is the one to keep.
 function deposition(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "counsel-"));
   t.after(() => fs.rmSync(root, { recursive:true, force:true }));

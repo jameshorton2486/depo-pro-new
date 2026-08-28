@@ -1,6 +1,11 @@
 # Checkpoint 2D — ordinary-workflow gate
 
 **Run:** 2026-08-27 into 2026-08-28, against `f91c007` on `integration/release-bridge`.
+**Still current at:** `6f3101e`. Six commits have landed since the run — `31da059`, `e9aa445`,
+`e310912`, `7c5f17f`, `6f3101e` and this one. None of them changed a path these steps exercised:
+they close the examiner placeholder, the Preview messaging, the standalone index and counsel
+editing, all downstream of or beside the nine steps below. The results are not re-run against head,
+and this line exists so a later reader knows that rather than inferring it.
 **Deposition:** `DEP-20260827-LL0D2`, *Whitaker v. Brazos Ridge Logistics, LLC* — disposable, created
 through the ordinary reporter path. No real matter was used.
 **Storage root:** `.milestone2-corrected-data`.
