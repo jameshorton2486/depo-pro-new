@@ -81,7 +81,13 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
   }
 
   return (
-    <section className="proceeding-editor" aria-label="Court and deposition method">
+    // Collapsed by default. This is filled once per deposition and then never again, and it was
+    // mounted above the transcript tools in a 262px rail that scrolls -- so it pushed controls a
+    // reporter uses continuously out of view behind controls they use once. A disclosure gives the
+    // rail its length back and still leaves the panel where it belongs, beside the counsel editor.
+    <details className="proceeding-editor">
+      <summary>Court and method</summary>
+      <section aria-label="Court and deposition method">
       <p className="counsel-editor-note">
         The court and how the deposition was taken. Both print on the certified pages, and
         generation is refused rather than guessing while either is unrecorded.
@@ -89,7 +95,7 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
 
       <label>Court
         <input value={form.court} onChange={event => edit({ court:event.target.value })}
-          placeholder="285th Judicial District Court, Bexar County, Texas" />
+          placeholder="e.g. 285th Judicial District Court, Bexar County" />
       </label>
 
       <fieldset className="proceeding-method">
@@ -109,13 +115,13 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
       {form.remote === false && (
         <label>Where testimony was taken
           <input value={form.location} onChange={event => edit({ location:event.target.value })}
-            placeholder="1200 Main Street, Suite 400, San Antonio, Texas" />
+            placeholder="e.g. 1200 Main Street, San Antonio" />
         </label>
       )}
       {form.remote === true && (
         <label>Platform
           <input value={form.remotePlatform} onChange={event => edit({ remotePlatform:event.target.value })}
-            placeholder="Zoom" />
+            placeholder="e.g. Zoom" />
         </label>
       )}
 
@@ -126,6 +132,7 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
           {busy ? "Saving…" : "Save court and method"}
         </button>
       </div>
-    </section>
+      </section>
+    </details>
   );
 }

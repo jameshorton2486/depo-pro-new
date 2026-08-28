@@ -671,7 +671,6 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} />
 
-          <h2>Court and method</h2>
           <ProceedingEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
