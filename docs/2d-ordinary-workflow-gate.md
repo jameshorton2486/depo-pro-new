@@ -187,11 +187,23 @@ where this erases a right one and leaves nothing behind to notice. Fixed in `a2b
 was deliberately left alone, and a mutation making it merge-only fails a test that pins why -- a
 value entered by mistake could then never be cleared.
 
-The second cost three consecutive save attempts by the reporter. Two failed for environmental
-reasons -- measured: no POST reached any Depo Pro instance on the machine, and the record was
-untouched. The third landed partially: `deposition.remote` saved from a radio click while `court`
-and `remotePlatform` stayed MISSING, because the placeholders were complete realistic entries
-rendered grey inside empty boxes and read as data already present. Fixed in `fc21973`.
+The second is a real defect and was fixed in `fc21973`: the placeholders were complete realistic
+entries rendered grey inside empty boxes, and read as data already present.
+
+**It is not, however, what cost the four failed save attempts, and the earlier version of this
+entry said it was.** The correction matters more than the original claim. What was measured on the
+failed attempts is only this: no POST reached any Depo Pro instance on the machine, and the record
+was untouched. When the builder later drove the same form itself, with the values verifiably in
+the fields and the button enabled and `elementFromPoint` returning that button at the click
+coordinates, the handler still never ran -- because the tab had been reloaded with
+`window.location.reload()`, which kills its input pipe. `form_input` kept working, being a DOM
+write rather than an OS event; the click did not. A fresh tab, same values, same button, saved on
+the first attempt.
+
+So one cause is established -- the builder's own harness on the attempts the builder drove -- and
+the cause on the reporter's attempts is *unknown*, not diagnosed. The placeholder explanation fit
+the evidence and was wrong. It is recorded here because a tidy account of four failures with three
+neat causes is exactly the kind of thing this document exists to not contain.
 
 **What this says about where the remaining defects are.** This branch has argued that the gap in
 Depo-Pro is usability rather than depth. The run demonstrated it rather than asserting it: with
