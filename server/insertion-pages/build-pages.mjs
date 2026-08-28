@@ -22,10 +22,26 @@ function captionValues(input) {
   };
 }
 
+// The phrase, or a refusal. validateInsertionInput already blocks a side nobody recorded, and both
+// production callers throw on blocking findings before building -- but they are the only two, and a
+// print site that renders `FOR null:` when a third one forgets is a certified page with a defect
+// nobody would read as one. The guard costs a comparison and removes the whole class.
+//
+// It is separate from appearancePhrase rather than folded into it: the validator needs the null to
+// detect the condition and report it as a finding. This is the print site refusing to be the place
+// that discovers it.
+function printedPhrase(attorney) {
+  const phrase = appearancePhrase(attorney);
+  if (!phrase) {
+    throw new Error(`APPEARANCE_SIDE_MISSING: ${attorney.name || "a counsel record"} has no side recorded, so there is nothing to print after FOR.`);
+  }
+  return phrase;
+}
+
 function appearanceLines(input) {
   const lines = [];
   for (const attorney of input.appearances) {
-    lines.push(`FOR ${appearancePhrase(attorney)}:`);
+    lines.push(`FOR ${printedPhrase(attorney)}:`);
     lines.push(`${attorney.name}${methodLabel(attorney.participation.method, attorney.participation.detail)}`);
     // Omitted, not blanked. The specimens carry no empty lines where a field is absent -- Nunez
     // prints with no phone and no email at all, rather than with labels holding nothing.
@@ -68,7 +84,7 @@ function certificationValues(input) {
     "cert.timeUsedLines": (input.timeUsed?.parties ?? []).map((party) => `${party.name} - ${String(Math.floor((party.minutes ?? 0) / 60)).padStart(2, "0")} HOURS:${String((party.minutes ?? 0) % 60).padStart(2, "0")} MINUTES`).join("; "),
     // The same phrase the appearance page prints. Two notions of what counsel represents in one
     // certified document -- one structured, one free text -- is a divergence reconciled wrongly later.
-    "cert.counselLines": input.appearances.map((attorney) => `${attorney.name}, Attorney for ${appearancePhrase(attorney)}`),
+    "cert.counselLines": input.appearances.map((attorney) => `${attorney.name}, Attorney for ${printedPhrase(attorney)}`),
   };
 }
 

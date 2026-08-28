@@ -480,9 +480,9 @@ export default function IntakeScreen({
           </div>
           <div className="ai-analysis">
             <div>
-              <span className="ai-mark">AI</span>
+              <span className="ai-mark">DA</span>
               <div>
-                <strong>Claude document analysis</strong>
+                <strong>Analyze documents</strong>
                 <p>
                   {analysis
                     ? `Extraction ready · ${analysis.confidence} confidence · ${analysis.keyterms?.length || 0} Deepgram keyterms`

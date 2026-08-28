@@ -74,3 +74,18 @@ test("the certificate's counsel lines use the same phrase as the appearance page
   assert.ok(textOf(pages).includes("Pat Counsel, Attorney for THE PLAINTIFF"),
     `certificate counsel line is: ${textOf(pages).filter(line => line.includes("Attorney for")).join(" | ")}`);
 });
+
+test("the print site refuses a side nobody recorded, even unvalidated", async () => {
+  // validateInsertionInput already blocks this, and both production callers throw on blocking
+  // findings before building. But they are the only two. A third caller that built without
+  // validating would render `FOR null:` onto a certified page -- a defect no reader would
+  // recognise as one -- so the print site refuses rather than trusting that it was checked.
+  const { input } = await generated([
+    { ...PAT, side:"PLAINTIFF" },
+    { name:"Dana Counsel", firm:"Defense Firm", represents:["Delta Company"] },
+  ]);
+  assert.throws(
+    () => buildTexasInsertionPageSet(input, { setId:"s", depositionId:"DEP-20260827-SIDE1", generatedAt:"2026-08-27T00:00:00.000Z" }),
+    /APPEARANCE_SIDE_MISSING: Dana Counsel has no side recorded/,
+  );
+});
