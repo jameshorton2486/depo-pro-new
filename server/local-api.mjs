@@ -40,7 +40,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -379,6 +379,13 @@ const server = http.createServer(async (req,res) => {
     // The certificate facts only a reporter can supply. They go to the canonical record rather
     // than into the render request, so they arrive carrying REPORTER_ENTERED provenance instead of
     // as bare values on an operator payload nothing validates.
+    // The court and the deposition method, which nothing could set after intake. The route is
+    // deliberately as narrow as the certification one beside it: a closed field list, refused by
+    // name, so it cannot become a general canonical-record patch endpoint by accident.
+    if(req.url==="/api/deposition/proceeding"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionProceeding(root,{depositionId:input.depositionId,proceeding:input.proceeding,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url==="/api/deposition/certification"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionCertification(root,{depositionId:input.depositionId,certification:input.certification,storageRoot:depositionStorageRoot}),origin);

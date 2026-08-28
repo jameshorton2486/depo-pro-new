@@ -260,6 +260,63 @@ export function writeDepositionCertification(root, { depositionId, certification
   return { depositionId, certification: certified, signature: { returnedDate: signature.returnedDate } };
 }
 
+/**
+ * Where the deposition was taken, and in what court.
+ *
+ * These four have slots in the canonical record and a place on the certified page, and until now
+ * no screen could set any of them. They are written only by buildCanonicalRecord at intake, from a
+ * Notice the manual route does not have -- so a deposition created by the manual route could never
+ * produce a complete transcript, at any point in its life. This is the missing writer.
+ *
+ * `remote` is three-state and stays that way. A boolean defaulting to false records "taken in
+ * person" when nobody said so, which is the defect the note at the top of
+ * canonical-deposition-record.mjs already names: an unticked checkbox becoming a finding of the
+ * source document. Undefined means unrecorded and keeps blocking, which is correct -- validate.mjs
+ * refuses rather than guessing, because "a certificate that guesses is worse than one that is
+ * refused".
+ *
+ * An untouched text control writes null with state MISSING, never "". isBlank collapses the two,
+ * so an empty string would render a dropped clause with a clean bill of health -- exactly what
+ * UNEXPECTED_BLANK exists to catch. Same rule as writeDepositionCertification above, for the same
+ * reason.
+ */
+const PROCEEDING_TEXT_FIELDS = Object.freeze(["court", "location", "remotePlatform"]);
+
+export function writeDepositionProceeding(root, { depositionId, proceeding = {}, storageRoot } = {}) {
+  if (!proceeding || typeof proceeding !== "object" || Array.isArray(proceeding)) throw new Error("Proceeding must be an object.");
+  const unknown = Object.keys(proceeding).filter((key) => key !== "remote" && !PROCEEDING_TEXT_FIELDS.includes(key));
+  if (unknown.length) throw new Error(`Unsupported proceeding field: ${unknown.join(", ")}`);
+  if (proceeding.remote !== undefined && proceeding.remote !== null && typeof proceeding.remote !== "boolean") {
+    throw new Error("Whether the deposition was remote must be true, false, or null for unrecorded.");
+  }
+
+  const entry = (value) => {
+    const text = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+    return text ? field(text, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }) : field(null, { source: "REPORTER_ENTERED", state: "MISSING" });
+  };
+  // Not entry(). entry() reads false as blank and would erase an answer of "in person" into
+  // MISSING, which is the same field saying the reporter never answered.
+  const method = (value) => typeof value === "boolean"
+    ? field(value, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" })
+    : field(null, { source: "REPORTER_ENTERED", state: "MISSING" });
+
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+
+  const nextCase = { ...record.case, court: entry(proceeding.court) };
+  const nextDeposition = {
+    ...record.deposition,
+    remote: method(proceeding.remote),
+    location: entry(proceeding.location),
+    remotePlatform: entry(proceeding.remotePlatform),
+  };
+
+  atomicJson(file, { ...record, case: nextCase, deposition: nextDeposition });
+  return { depositionId, court: nextCase.court, remote: nextDeposition.remote, location: nextDeposition.location, remotePlatform: nextDeposition.remotePlatform };
+}
+
 export function readDepositionRecord(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"deposition.json");if(!fs.existsSync(file))throw new Error("Deposition record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 /**
  * Appends corrections to the canonical record, and to the log beside it.

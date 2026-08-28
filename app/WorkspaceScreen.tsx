@@ -5,6 +5,7 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
+import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
@@ -669,6 +670,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} />
+
+          <h2>Court and method</h2>
+          <ProceedingEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" onClick={()=>setShowSpeakers(value=>!value)} aria-expanded={showSpeakers} aria-controls="workspace-speakers">
