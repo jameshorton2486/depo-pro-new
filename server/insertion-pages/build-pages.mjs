@@ -8,15 +8,40 @@ const methodLabel = (method, detail) => !method || method === "in-person" ? "" :
 
 // The joined strings are the printed form of the same two lists assemble put in fieldValues, so a
 // caption line and the guard that clears it cannot disagree about who the parties are.
+// Party names print in capitals. They are stored as the reporter typed them -- flattening O'Neill
+// or DeLaGarza into the record would destroy a spelling nothing downstream can recover -- and
+// capitalised here, where the page is what has to conform.
+const upper = value => String(value).toUpperCase();
+
+// The serial joiner for an appearance line: "A, AND B" for two, "A, B, AND C" for three or more.
+//
+// Specimen-derived. Both unambiguous two-party appearance lines use ", AND":
+//
+//   FOR THE DEFENDANTS, SK ELECTRIC, INC., AND CHUN YEAN:      Chun Yean
+//   FOR THE DEFENDANTS, HMK MORTGAGE, LLC, AND HMK LTD.:       Filpi
+//
+// and Filpi's three plaintiffs read JULIAN CAMPOS, ROBERTO BARAHONA, AND MARTIN MORALES. Thomas's
+// plain " AND " is not a counterexample: its heading and its caption label are both singular, so
+// HOME DEPOT U.S.A., INC. A/K/A THE HOME DEPOT AND SHAWN HERBER is one party designation
+// containing the word, not two parties joined.
+//
+// A rule keyed on internal commas was considered and is wrong: Filpi's caption joins
+// HMK MORTGAGE, LLC -- which contains one -- with a plain AND.
+function serialJoin(names) {
+  if (!names.length) return "";
+  if (names.length === 1) return upper(names[0]);
+  return `${names.slice(0, -1).map(upper).join(", ")}, AND ${upper(names[names.length - 1])}`;
+}
+
 function captionValues(input) {
   const { plaintiffs, defendants } = captionParties(input.record);
   return {
     "caption.causeNumber": input.caption.causeNumber,
     "caption.court": input.operator.courtHeadingLine ?? input.caption.court,
     "caption.plaintiffLabel": plaintiffs.length === 1 ? "PLAINTIFF," : "PLAINTIFFS,",
-    "caption.plaintiffs": plaintiffs.join(", "),
+    "caption.plaintiffs": upper(plaintiffs.join(", ")),
     "caption.defendantLabel": defendants.length === 1 ? "DEFENDANT," : "DEFENDANTS,",
-    "caption.defendants": defendants.join(", "),
+    "caption.defendants": upper(defendants.join(", ")),
     "caption.countyCourtLine": input.operator.countyCourtLine ?? "",
     "caption.judicialDistrictLine": input.operator.judicialDistrictLine ?? "",
   };
@@ -52,19 +77,21 @@ function printedPhrase(attorney) {
 // putting the designation inside the heading would make the code compose a string it has no
 // authority over. Do not "correct" this back toward Chun Yean.
 //
-// Two further divergences from Thomas, taken deliberately. Thomas prints the designation uppercase
-// and joins two defendants with " AND "; this prints the caption's own joined string, as stored and
-// comma-joined. Matching Thomas literally would make the appearance line disagree with OUR caption
-// block on the same page -- the specimen has no such problem because its caption carries the
-// identical string. captionParties is read here for that reason: one source, per the note above
-// captionValues.
+// The caption and this line deliberately differ in how they join and case the same parties, and
+// that is not inconsistency. Filpi's caption reads HMK MORTGAGE, LLC AND HMK LTD. while its own
+// appearance page reads HMK MORTGAGE, LLC, AND HMK LTD. -- one document, one reporter. They answer
+// to two authorities: the caption mirrors the court's docket as filed, and the appearance page
+// follows transcription grammar. Do not unify them.
+//
+// captionParties is still read here, because WHO the parties are must never differ between the two
+// blocks -- only how they are joined and capitalised does.
 //
 // A side with no parties recorded in that role prints the heading alone, which is the Goodwin shape.
 function appearanceDesignation(attorney, input) {
   if (attorney.side !== "PLAINTIFF" && attorney.side !== "DEFENDANT") return "";
   const { plaintiffs, defendants } = captionParties(input.record);
   const parties = attorney.side === "PLAINTIFF" ? plaintiffs : defendants;
-  return parties.length ? ` ${parties.join(", ")}` : "";
+  return parties.length ? ` ${serialJoin(parties)}` : "";
 }
 
 function appearanceLines(input) {

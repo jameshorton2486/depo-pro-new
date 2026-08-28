@@ -121,8 +121,8 @@ test("with the parties recorded the render clears and their names are on the pag
   assert.equal(caption.length, 2);
   for (const page of caption) {
     const text = page.lines.map(({ text: line }) => line).join("\n");
-    assert.match(text, /Ruben Vasquez/, `${page.role} prints the plaintiff`);
-    assert.match(text, /Central Texas Logistics, LLC/, `${page.role} prints the defendant`);
+    assert.match(text, /RUBEN VASQUEZ/, `${page.role} prints the plaintiff`);
+    assert.match(text, /CENTRAL TEXAS LOGISTICS, LLC/, `${page.role} prints the defendant`);
   }
 });
 

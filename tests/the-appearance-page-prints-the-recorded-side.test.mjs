@@ -40,6 +40,9 @@ async function generated(attorneys, parties = [{ name: "Alex Plaintiff", role: "
 
 const PAT = { name:"Pat Counsel", firm:"Plaintiff Firm", address:"100 Main, San Antonio, Texas", phone:"210-555-0101", represents:["Alex Plaintiff"] };
 const textOf = pages => pages.pages.flatMap(page => page.lines).map(line => line.text);
+// A long designation wraps across physical lines -- the page is fixed-width -- so assertions about
+// the joined text read the page flattened rather than any single line.
+const flatText = pages => textOf(pages).join(" ").replace(/s+/g, " ");
 
 test("a named side prints its phrase on the appearance page", async () => {
   const { blockers, pages } = await generated([{ ...PAT, side:"AD_LITEM" }]);
@@ -100,7 +103,7 @@ test("the print site refuses a side nobody recorded, even unvalidated", async ()
 test("the appearance line puts the designation after the colon, not inside the heading", async () => {
   const { pages } = await generated([{ ...PAT, side:"PLAINTIFF" }]);
   const forLines = textOf(pages).filter(line => line.startsWith("FOR "));
-  assert.ok(forLines.includes("FOR THE PLAINTIFF: Alex Plaintiff"), `got ${forLines.join(" | ")}`);
+  assert.ok(forLines.includes("FOR THE PLAINTIFF: ALEX PLAINTIFF"), `got ${forLines.join(" | ")}`);
   assert.ok(!forLines.some(line => /^FOR THE PLAINTIFF, /.test(line)), "the designation moved inside the heading");
 });
 
@@ -111,13 +114,36 @@ test("a side with no specimen support prints its heading alone", async () => {
   const forLines = textOf(pages).filter(line => line.startsWith("FOR "));
   assert.deepEqual(forLines, ["FOR THE INTERVENOR:"]);
 });
-
-test("the designation after the colon is the caption's own, not a second join", async () => {
-  // One source: a caption line and an appearance line must not disagree about who the parties are.
-  // Two plaintiffs, so the join is visible: with one party any join looks the same.
-  const { input, pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
+test("multiple parties join with a serial comma and AND", async () => {
+  // Specimen-derived from both unambiguous two-party appearance lines --
+  //   FOR THE DEFENDANTS, SK ELECTRIC, INC., AND CHUN YEAN:
+  //   FOR THE DEFENDANTS, HMK MORTGAGE, LLC, AND HMK LTD.:
+  // -- and from Filpi's three plaintiffs. A plain " AND " on two matches no appearance line.
+  const two = await generated([{ ...PAT, side:"PLAINTIFF" }],
     [{ name:"Alex Plaintiff", role:"Plaintiff" }, { name:"Marisol Vantongeren", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
-  const { plaintiffs } = captionParties(input.record);
-  assert.equal(plaintiffs.length, 2, "the fixture must have two parties for the join to mean anything");
-  assert.ok(textOf(pages).includes(`FOR THE PLAINTIFF: ${plaintiffs.join(", ")}`));
+  assert.ok(flatText(two.pages).includes("FOR THE PLAINTIFF: ALEX PLAINTIFF, AND MARISOL VANTONGEREN"), flatText(two.pages).slice(0, 400));
+
+  const three = await generated([{ ...PAT, side:"PLAINTIFF" }],
+    [{ name:"Alex Plaintiff", role:"Plaintiff" }, { name:"Marisol Vantongeren", role:"Plaintiff" }, { name:"Rufus Pemberton", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
+  assert.ok(flatText(three.pages).includes("FOR THE PLAINTIFF: ALEX PLAINTIFF, MARISOL VANTONGEREN, AND RUFUS PEMBERTON"), flatText(three.pages).slice(0, 400));
+});
+
+test("party names print in capitals though the record keeps the reporter's spelling", async () => {
+  // Stored as typed -- flattening O'Neill or DeLaGarza into the record destroys a spelling nothing
+  // downstream can recover. The page is what conforms.
+  const { input, pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
+    [{ name:"Delia DeLaGarza", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
+  assert.equal(captionParties(input.record).plaintiffs[0], "Delia DeLaGarza", "the record was flattened to capitals");
+  assert.ok(textOf(pages).includes("FOR THE PLAINTIFF: DELIA DELAGARZA"));
+});
+
+test("the caption and the appearance page join the same parties differently, deliberately", async () => {
+  // Not inconsistency. Filpi's caption reads HMK MORTGAGE, LLC AND HMK LTD. while its own
+  // appearance page reads HMK MORTGAGE, LLC, AND HMK LTD. The caption mirrors the docket as filed;
+  // the appearance page follows transcription grammar. Two authorities, so do not unify them.
+  const { pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
+    [{ name:"Alex Plaintiff", role:"Plaintiff" }, { name:"Marisol Vantongeren", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
+  const text = textOf(pages).join("\n");
+  assert.match(text, /ALEX PLAINTIFF, MARISOL VANTONGEREN\b/, "the caption stopped using its own join");
+  assert.match(text, /ALEX PLAINTIFF, AND MARISOL VANTONGEREN/, "the appearance page stopped using the serial joiner");
 });
