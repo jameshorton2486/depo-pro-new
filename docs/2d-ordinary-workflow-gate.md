@@ -27,13 +27,14 @@ the screen. Screen-only steps are marked as such, because nothing else can check
 | 7 | Examining attorney selected from canonical counsel | **PASS** |
 | 8 | Preparation saved; survives reload | **PASS** |
 | 9 | A stale second save is refused | **PASS** |
-| 10 | Generate; open the DOCX in desktop Word | **not begun** |
-| 11 | Read the index: real examiner, matching range | **not begun** |
+| 10 | Generate; open the DOCX in desktop Word | **PASS** (builder-entered certification values) |
+| 11 | Read the index: real examiner, matching range | **PASS** |
 | 12 | Clear the examiner; generation refuses | **not begun** |
-| 13 | Immutable evidence and overlays unchanged across the run | **not begun** |
+| 13 | Immutable evidence and overlays unchanged across the run | **PASS** |
 
-Nine of thirteen. Steps 10–13 need a transcript on this deposition, which needs audio through
-Deepgram — still `NOT TESTED — EXTERNAL CONFIGURATION REQUIRED`.
+Twelve of thirteen. Steps 10, 11 and 13 were run on 2026-08-28 against a real 8m51s local capture
+and are recorded below. Step 12 -- clearing the examiner and confirming generation refuses -- is the
+only one still not begun.
 
 ## Evidence
 
@@ -166,6 +167,63 @@ Missing.
 **Instrument note.** Browser clicks stop dispatching after `window.location.reload()`, the same as
 after `navigate`; `scroll_to` keeps working because it is not an input event, and only a fresh tab
 recovers input. Two silent no-op clicks were discarded rather than read as results.
+
+## Steps 10, 11 and 13: the first complete transcript
+
+Generated 2026-08-28 16:20:18 from `DEP-20260827-LL0D2`: 43,944 bytes, twelve pages.
+
+**Step 11 -- every prediction registered before the file existed.** Written down while generation
+was still blocked, then read off the document: twelve pages decomposing as 3 front + 7 testimony +
+2 certification; examination range 4-10; appearances at page 2; certificate at 11; no changes-and-
+signature section, signature being waived. All hold. The index reads
+
+```
+  Appearances................................ 2
+  Dana Ellsworth Whitaker
+    Examination by Rufus Q. Pemberton-Stack........... 4-10
+  Reporter's Certificate..................... 11
+```
+
+`EXAMINING ATTORNEY` appears nowhere and neither does `WITNESS`, so the placeholder removed in
+e14ea85 stayed removed and the one still live at build-pages.mjs:156 did not fire. The appearance
+page prints `FOR BRAZOS RIDGE MUTUAL INSURANCE COMPANY:` -- attorney-2's OTHER wording, as a
+heading alone -- beside `FOR THE PLAINTIFF:` naming its represented party.
+
+**Step 13 -- generation adds and does not mutate.** Against a capture taken at 15:48, immediately
+before generating: zero files changed, three added (the docx, the rendering spec, the line map).
+The audio, the capture manifest, the ASR evidence, the raw Deepgram response and request, the
+deposition record, the canonical record, the assembly and the intake are all byte-identical. The
+WAV's sha256 is the value the capture session computed when recording stopped at 18:03:53,
+unchanged through the attach, the transcription, every record edit since, and now generation.
+
+**Step 10 -- Word round trip, verified by comparison rather than by eye.** The document was opened
+in desktop Word, saved, closed and reopened. Comparing the generated file with Word's output: 300
+paragraphs both, text byte-identical across all 300, page size 12240x15840 DXA and identical
+margins, one sectPr each, zero explicit page breaks in both -- pagination is line-count driven, as
+designed. Word rewrote the container and shrank it (43,944 to 38,389 bytes) and changed nothing
+that matters.
+
+The decisive figure is Word's own: `docProps/app.xml` reports **Pages 12, Lines 333, Words 2077**.
+That is Word paginating the document itself, not the application asserting its own page count, and
+it confirms the 3 + 7 + 2 decomposition independently.
+
+The round-trip artifact is not committed -- it is 38 kB of binary reproducible by repeating the
+round trip. Its sha256 is
+`392c8198246257e32a97c8bf5f39666009c9d7c56fe0376691812110c96aeb09`.
+
+**The caveat that governs all three.** This document carries certification values entered by the
+builder, not by the reporter: custodial attorney, officer's charges, charges billed to and
+certification date were typed at 13:44 during setup and were never overwritten before generation.
+So these steps establish that the machinery produces a correct certified document. They do not
+establish that a reporter carried a deposition through to a certified deliverable, which is what
+the gate exists to show. The regeneration after the reporter enters those four is the document
+that answers the second question, and this record must not be read as though it already had.
+
+**Two defects the document itself revealed**, neither visible to any test: the certificate printed
+`That $$1,240.00` because the template supplies the dollar sign the field also accepted (fixed in
+27104bc), and the time-allocation clause renders an empty paragraph between "as follows:" and the
+next clause. A third, the caption's right-hand column collapsing three lines into one, is recorded
+below as part of the unfinished operator boundary.
 
 ## Finding: three defects of one shape, none of them test-detectable
 
