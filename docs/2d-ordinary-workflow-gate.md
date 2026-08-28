@@ -29,12 +29,12 @@ the screen. Screen-only steps are marked as such, because nothing else can check
 | 9 | A stale second save is refused | **PASS** |
 | 10 | Generate; open the DOCX in desktop Word | **PASS** (builder-entered certification values) |
 | 11 | Read the index: real examiner, matching range | **PASS** |
-| 12 | Clear the examiner; generation refuses | **not begun** |
+| 12 | Clear the examiner; generation refuses | **PASS (property)** — method unreachable |
 | 13 | Immutable evidence and overlays unchanged across the run | **PASS** |
 
-Twelve of thirteen. Steps 10, 11 and 13 were run on 2026-08-28 against a real 8m51s local capture
-and are recorded below. Step 12 -- clearing the examiner and confirming generation refuses -- is the
-only one still not begun.
+Thirteen of thirteen, with step 12 qualified. Steps 10, 11 and 13 were run on 2026-08-28 against a
+real 8m51s local capture. Step 12's property holds by construction rather than by the method the
+step describes; the distinction is recorded below rather than absorbed into the count.
 
 ## Evidence
 
@@ -224,6 +224,56 @@ that answers the second question, and this record must not be read as though it 
 27104bc), and the time-allocation clause renders an empty paragraph between "as follows:" and the
 next clause. A third, the caption's right-hand column collapsing three lines into one, is recorded
 below as part of the unfinished operator boundary.
+
+## Step 12: the property holds, and the step's method is unreachable
+
+Step 12 asks for the examiner to be cleared and generation to refuse. The state it describes cannot
+be reached from any screen, by either route:
+
+- Clearing the examiner in Prepare Complete Transcript is refused at the preparation boundary --
+  `ASSEMBLY_EXAMINER_MISSING`, "Select the examining attorney from the participants on this
+  deposition." The save does not happen; the record stayed byte-identical to the capture taken
+  immediately before the attempt, revision 3, examiner `attorney-2`.
+- Removing the examining attorney through the counsel editor is not possible either. CounselEditor
+  offers Add and Save and has no remove control at all.
+
+So `COMPLETE_TRANSCRIPT_EXAMINER_REQUIRED` and `COMPLETE_TRANSCRIPT_EXAMINER_UNRESOLVED` are
+unreachable from the application. They are exercised by unit tests, and by construction a reporter
+cannot enter the state they guard.
+
+That is a stronger property than the step asked for -- prevention rather than detection -- and it
+is deliberately not recorded as a plain PASS. What was verified is that the application refuses to
+create the condition. What was not verified, because it cannot be, is the model-level refusal
+firing in a running application. Reaching it would have required writing the record directly, which
+this gate forbids: a refusal manufactured that way proves nothing about the software.
+
+**A gap this surfaced.** `6f3101e` added counsel editing after intake and handles add and edit but
+not remove. A reporter who lists an attorney by mistake has no way to take them off;
+`actualAppearance: false` covers "listed but did not appear" and not "should never have been
+listed". Recorded, not fixed.
+
+## A refusal that occupies the position of a confirmation
+
+Observed while the reporter saved the certificate. Preview on the standalone Certification pages
+screen saves first and renders second, so a successful save followed by a refused render shows only
+
+```
+INSERTION_VALIDATION_BLOCKED: UNEXPECTED_BLANK:index.examinations,
+UNEXPECTED_BLANK:index.reportersCertification
+```
+
+in the same message line a success would have used. The refusal is correct -- `7c5f17f` again: the
+standalone path has no authoritative pagination, so the index cannot say which page the examination
+or the certificate falls on, and it refuses rather than inventing numbers. The screen even says
+where to go instead, on the button below: "Full transcript: generate in the Workspace."
+
+But a reporter reading that line cannot tell "your values were saved and the preview cannot be
+rendered here" from "your save failed". Those need different reactions, and after six earlier saves
+that genuinely had not landed, the wrong reading is the natural one. The message should say the
+values were saved before it says what could not be rendered.
+
+Same shape as the rest of this run's findings: the code is right and the screen does not say what
+happened.
 
 ## Finding: three defects of one shape, none of them test-detectable
 
