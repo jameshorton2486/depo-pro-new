@@ -26,8 +26,18 @@ test("rendering spec rejects pages outside the canonical 25-line model", () => {
 });
 
 test("Python transcript formatter renders the shared spec without changing text", t => {
-  const formatterRoot=process.env.DEPO_PRO_FORMATTER_ROOT??path.join(os.homedir(),"transcript_formatter"),formatter=path.join(formatterRoot,"docx_exporter.py"),python=process.env.DEPO_PRO_PYTHON;
-  if(!python||!fs.existsSync(python))return t.skip("DEPO_PRO_PYTHON must point to an available Python interpreter for the formatter integration test.");
+  const formatterRoot=process.env.DEPO_PRO_FORMATTER_ROOT??path.join(os.homedir(),"transcript_formatter"),formatter=path.join(formatterRoot,"docx_exporter.py");
+  // Resolved exactly as server/final-document-docx.mjs resolves it. This gate used to demand that
+  // DEPO_PRO_PYTHON be set AND name an existing file, while the runtime accepts the bare string and
+  // falls back to "python" -- and scripts/test-all.mjs never loads .env.local, so the variable was
+  // always unset under the suite. The test therefore skipped on the very machine whose PATH resolves
+  // python to the interpreter .env.local names, and the skip read as "no interpreter here" when the
+  // truth was "this test asked a question the runtime does not ask". A skip is scored as a pass, so
+  // nothing went red while an integration test sat idle for months.
+  const python=process.env.DEPO_PRO_PYTHON??"python";
+  const probe=spawnSync(python,["-c","import docx, lxml"],{encoding:"utf8",windowsHide:true});
+  if(probe.error)return t.skip(`no Python interpreter resolved from DEPO_PRO_PYTHON ?? "python" (tried ${python}: ${probe.error.message})`);
+  if(probe.status!==0)return t.skip(`Python at ${python} cannot import python-docx/lxml: ${(probe.stderr||"").trim()}`);
   if(!fs.existsSync(formatter))return t.skip(`Transcript formatter is unavailable at ${formatterRoot}; set DEPO_PRO_FORMATTER_ROOT to run this integration test.`);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "depo-pro-renderer-"));
   const specPath = path.join(temporary, "spec.json");
