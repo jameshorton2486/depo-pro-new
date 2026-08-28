@@ -116,7 +116,7 @@ test("with the parties recorded the render clears and their names are on the pag
   const input = await assembled(PARTIES);
   assert.deepEqual(blockers(input), []);
   // Across the boundary: the guard cleared, so the names have to actually be there.
-  const pages = buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP-20260824-CAP01", generatedAt: "2026-08-24T00:00:00.000Z" });
+  const pages = buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP-20260824-CAP01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true });
   const caption = pages.pages.filter(({ role }) => ["title", "certification1"].includes(role));
   assert.equal(caption.length, 2);
   for (const page of caption) {

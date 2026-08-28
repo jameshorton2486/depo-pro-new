@@ -133,13 +133,30 @@ function appearanceLines(input) {
   return lines;
 }
 
+// A page number the index cannot prove is not printed.
+//
+// These were `?? 2` for Appearances and `?? ""` for Changes and Signature and the Reporter's
+// Certificate. The standalone certification path supplies no pagination at all, so a document
+// generated there printed "Appearances................ 2" -- a number nobody computed, indexed to
+// nothing -- and a certificate line ending in blank space. Both looked like answers.
+//
+// There is no second paginator to fall back to and there must not be: complete-transcript
+// pagination is the only authority that knows where these sections land. So the index refuses, and
+// a document that cannot have an index does not get one -- see certificateOnly below.
+function indexPage(value, section) {
+  if (!Number.isInteger(value)) {
+    throw new Error(`INDEX_PAGE_UNAVAILABLE: the index cannot state a page for ${section}; no authoritative pagination supplied one.`);
+  }
+  return value;
+}
+
 function indexLines(input) {
   const index = input.pagination.index ?? {};
-  const lines = [`Appearances................................ ${index.appearances?.startPage ?? 2}`, ""];
+  const lines = [`Appearances................................ ${indexPage(index.appearances?.startPage, "Appearances")}`, ""];
   lines.push(input.deposition.witness ?? "WITNESS");
   for (const exam of index.examinations ?? []) lines.push(`  Examination by ${exam.examiner}........... ${exam.startPage}-${exam.endPage}`);
-  if (input.signatureDisposition === "requested") lines.push(`Changes and Signature...................... ${index.changesAndSignature?.startPage ?? ""}`);
-  lines.push(`Reporter's Certificate..................... ${index.reportersCertification?.startPage ?? ""}`);
+  if (input.signatureDisposition === "requested") lines.push(`Changes and Signature...................... ${indexPage(index.changesAndSignature?.startPage, "Changes and Signature")}`);
+  lines.push(`Reporter's Certificate..................... ${indexPage(index.reportersCertification?.startPage, "the Reporter's Certificate")}`);
   if ((index.exhibits ?? []).length) {
     lines.push("", "EXHIBITS", "NO.  DESCRIPTION                            PAGE");
     for (const exhibit of index.exhibits) lines.push(`${exhibit.number}    ${exhibit.description}    ${exhibit.page}`);
@@ -196,10 +213,10 @@ function renderRolePages(template, values, { role, profile }) {
   return pages.length ? pages : [{ pageNumber: 0, role, lines: Array.from({ length: profile.linesPerPage }, (_, index) => ({ line: index + 1, text: "", fields: [] })) }];
 }
 
-export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt }) {
+export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {
   if (!input.variant?.startsWith("TEXAS_STATE_")) throw new Error(`Texas page builder cannot render ${input.variant ?? "an unspecified variant"}`);
   const templates = input.template.templates;
-  const values = {
+  const baseValues = {
     ...input.fieldValues,
     ...captionValues(input),
     ...certificationValues(input),
@@ -214,11 +231,22 @@ export function buildTexasInsertionPageSet(input, { setId, depositionId, generat
     "deposition.narrative.8": input.operator.titleNarrative?.[7] ?? "",
     "deposition.narrative.9": input.operator.titleNarrative?.[8] ?? "",
     "appearances.lines": appearanceLines(input),
-    "index.lines": indexLines(input),
   };
-  const roles = input.signatureDisposition === "requested"
+  // certificateOnly is the standalone certification path: a document with no transcript behind it,
+  // and therefore no authoritative pagination. It carries NO INDEX, because an index states where
+  // sections land and only complete-transcript pagination knows that. Omitting the page is the
+  // honest form -- printing one with invented numbers was the defect.
+  //
+  // The index lines are built only when the index page is, so a certificate-only document never
+  // asks for a number nobody can supply.
+  const allRoles = input.signatureDisposition === "requested"
     ? ["title", "appearances", "index", "changes", "signature", "certification1", "certification2", "certification3"]
     : ["title", "appearances", "index", "certification1", "certification2"];
+  const roles = certificateOnly ? allRoles.filter(role => role !== "index") : allRoles;
+  const values = {
+    ...baseValues,
+    ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}),
+  };
   const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
   const pages = roles.flatMap((role) => renderRolePages(templates[role], values, { role, profile }));
   pages.forEach((page, index) => { page.pageNumber = index + 1; });

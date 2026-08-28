@@ -84,7 +84,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   }
 
   async function generate() {
-    setBusy(true); setMessage("Rendering the Word document…");
+    setBusy(true); setMessage("Rendering the certification pages…");
     try {
       const body = (await post("/api/insertion-pages/docx")) as Artifact;
       setArtifact(body);
@@ -160,7 +160,12 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
 
         <div className="insertion-actions">
           <button type="button" className="primary-button" disabled={!ready || busy} onClick={runPreview}>{busy && !artifact ? "Working…" : "Preview certification pages"}</button>
-          <button type="button" className="audio-save-button" disabled={!preview || blocking.length > 0 || busy} onClick={generate}>Generate Word document</button>
+          <button type="button" className="audio-save-button" disabled={!preview || blocking.length > 0 || busy} onClick={generate}>Generate certification pages</button>
+          {/* This screen has no transcript behind it and therefore no authoritative pagination, so
+              what it produces carries no index. The full document is generated in the Workspace,
+              from the complete-transcript model that owns the page numbers -- this hands the
+              reporter there rather than rendering a second, thinner document that looks like one. */}
+          <button type="button" className="secondary-button" onClick={onBack} title="The full transcript is generated in the Workspace, where the page numbering is authoritative.">Full transcript: generate in the Workspace</button>
         </div>
         <p className="insertion-message">{message}</p>
       </section>

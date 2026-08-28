@@ -69,7 +69,10 @@ export async function prepareInsertionRenderingArtifact(root, depositionId, requ
   const findings = validateInsertionInput(assembled);
   const blockers = findings.filter((finding) => finding.severity === "blocking");
   if (blockers.length) throw new Error(`INSERTION_VALIDATION_BLOCKED: ${blockers.map((finding) => `${finding.code}:${finding.target}`).join(", ")}`);
-  const pageSet = buildTexasInsertionPageSet(assembled, { setId: randomId(), depositionId, generatedAt: now() });
+  // The standalone path has no transcript behind it and therefore no authoritative pagination, so
+  // what it renders is a certificate-only document with no index. The full document is generated
+  // from the Workspace, through the complete-transcript model that owns the page numbers.
+  const pageSet = buildTexasInsertionPageSet(assembled, { setId: randomId(), depositionId, generatedAt: now(), certificateOnly: true });
   const renderingSpec = createRenderingSpec({ depositionId, insertionPageSet: pageSet, transcriptPages: readCanonicalTranscriptPages(directory, request), generatedAt: now() });
   const specPath = safeTranscriptPath(directory, request.renderingSpecRelativePath ?? "transcript/final-rendering-spec.json");
   writeJsonAtomic(specPath, renderingSpec);

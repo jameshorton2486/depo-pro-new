@@ -62,7 +62,7 @@ function render(reporterProfile) {
     template,
   });
   const blocking = validateInsertionInput(assembled).filter(finding => finding.severity === "blocking");
-  return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z" }) };
+  return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true }) };
 }
 
 test("the store keeps both fields now, and still drops a firm registration number", t => {

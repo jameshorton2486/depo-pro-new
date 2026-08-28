@@ -69,7 +69,7 @@ async function renderedPages(counsel, participants) {
     record:{ counsel, parties:[], participants, case:{}, deposition:{} }, intake:{}, template, pagination:{},
     operator:{ jurisdiction:"texas-state", signatureDisposition:"requested", signatureDispositionBasis:"Stated on the record" },
   });
-  return buildTexasInsertionPageSet(assembled, { setId:"s", depositionId:"d", generatedAt:"2026-08-19T00:00:00Z" });
+  return buildTexasInsertionPageSet(assembled, { setId:"s", depositionId:"d", generatedAt:"2026-08-19T00:00:00Z", certificateOnly: true });
 }
 
 test("ALSO PRESENT prints even when nobody was", async () => {
