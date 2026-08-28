@@ -56,6 +56,19 @@ export function stripLeadingCurrency(value) {
   return String(value).replace(/^\s*\$\s?/, "");
 }
 
+// The certificate reads "^reporter.name^, Texas CSR ^reporter.csrNumber^", and the reporter modal
+// labels the field "CSR number" -- so "CSR 9174" is the natural thing to type and printed
+// "Texas CSR CSR 9174". Same defect as the doubled dollar sign, one token over: the template writes
+// a label the field also accepts.
+//
+// Stripped here rather than at the write boundary, for the same reason: the reporter profile keeps
+// what was entered, and the page prints what its own sentence needs. One leading CSR only, so
+// "CSR CSR 9174" prints "CSR 9174" and stays visibly odd rather than being silently made right.
+export function stripLeadingCsrLabel(value) {
+  if (value === null || value === undefined) return value;
+  return String(value).replace(/^\s*CSR\b\s*(?:(?:NO|NUMBER)\b\.?\s*)?[.:-]?\s*/i, "");
+}
+
 export function captionParties(record) {
   const parties = record?.parties ?? [];
   const inRole = pattern => parties
@@ -86,7 +99,7 @@ export function captionParties(record) {
 function reporterFromCanonical(reporter = {}, override = {}) {
   return {
     name: override.name ?? canonicalValue(reporter.fullName),
-    csrNumber: override.csrNumber ?? canonicalValue(reporter.csrNumber),
+    csrNumber: stripLeadingCsrLabel(override.csrNumber ?? canonicalValue(reporter.csrNumber)),
     csrExpirationDate: override.csrExpirationDate ?? canonicalValue(reporter.csrExpiration),
     address: override.address ?? canonicalValue(reporter.address),
     phone: override.phone ?? canonicalValue(reporter.phone),

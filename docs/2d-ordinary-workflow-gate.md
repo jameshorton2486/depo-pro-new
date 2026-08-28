@@ -27,7 +27,7 @@ the screen. Screen-only steps are marked as such, because nothing else can check
 | 7 | Examining attorney selected from canonical counsel | **PASS** |
 | 8 | Preparation saved; survives reload | **PASS** |
 | 9 | A stale second save is refused | **PASS** |
-| 10 | Generate; open the DOCX in desktop Word | **PASS** (builder-entered certification values) |
+| 10 | Generate; open the DOCX in desktop Word | **PASS** — reporter-completed document, 18:05:13 |
 | 11 | Read the index: real examiner, matching range | **PASS** |
 | 12 | Clear the examiner; generation refuses | **PASS (property)** — method unreachable |
 | 13 | Immutable evidence and overlays unchanged across the run | **PASS** |
@@ -251,6 +251,41 @@ this gate forbids: a refusal manufactured that way proves nothing about the soft
 not remove. A reporter who lists an attorney by mistake has no way to take them off;
 `actualAppearance: false` covers "listed but did not appear" and not "should never have been
 listed". Recorded, not fixed.
+
+## The reporter-completed document
+
+The document read for steps 10 and 11 above carried certification values the builder had typed
+during setup. At 18:01:29 the reporter entered their own -- custodial attorney Rufus Q. Pemberton,
+charges $1,200, billed to Brazos Ridge, certified 2026-08-28 -- through Certification pages, where
+Preview saves before it renders. At 18:05:13 they regenerated.
+
+That document, 43,929 bytes, is the one step 10 turns on. It was produced end to end from a
+deposition a reporter created: manual intake, capture through the application's own recorder,
+Deepgram transcription, reporter-entered court and method, reporter-entered certification. The
+earlier document demonstrated the machinery; this one demonstrates the workflow, and the record
+should not be read as though the first had done both.
+
+Predictions registered before it was generated, and held: twelve pages decomposing 3 + 7 + 2,
+examination 4-10, appearances 2, certificate 11, and `That $1,200` with one dollar sign. The last
+is the behaviour proof that the restart carrying 27104bc took -- registered in place of arguing
+from process timestamps, and answered by the file.
+
+Step 13 re-run against it: the audio sha256 and the capture manifest are identical to the values
+from before any of the day's edits, and the only changed file is the canonical record, which the
+reporter changed by typing into it at 18:01:29. That attribution is by timestamp rather than by a
+capture taken between the save and the regenerate, and is recorded as inference.
+
+299 paragraphs rather than 300: one trailing blank line dropped from the final page, which the
+renderer does by design when content runs longer. Not a defect.
+
+**And the document showed a second doubled label.** `Marguerite Okonkwo-Vance, Texas CSR CSR 9174`
+-- the template writes `Texas CSR ` and the reporter modal labels the field "CSR number", so the
+natural entry duplicates it. Identical in shape to the doubled dollar sign found in the first
+document, and found the same way: by reading a certificate. Every template token was then checked
+against the last word of the literal preceding it. Two double in practice; two more would if a
+reporter typed the label (`caption.causeNumber` after `NO.:`, `reporter.firmRegistrationNumber`
+after `Firm Registration No.`); the rest are prose prepositions where a value beginning "the" or
+"to" reads correctly and a strip would corrupt it. The two latent ones are deliberately left alone.
 
 ## A refusal that occupies the position of a confirmation
 
