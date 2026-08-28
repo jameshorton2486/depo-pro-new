@@ -182,6 +182,21 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .counsel-editor .form-row { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
 .counsel-editor-appeared { display:flex; align-items:center; gap:8px; font-weight:750; }
 .counsel-editor-appeared input { width:auto; }
+/* The proceeding editor shipped with no rules of its own, so its inputs fell back to a 195px
+   transparent box 24px tall with no border: the label text ran into the field, and what the
+   reporter typed sat on a background indistinguishable from the page. Same treatment as the
+   counsel editor above, because it is the same kind of form on the same screen and should not
+   look like it came from a different application. */
+.proceeding-editor { display:grid; gap:14px; margin:12px 0 20px; }
+.proceeding-editor label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.proceeding-editor input { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:10px 12px; color:var(--ink); outline:0; }
+.proceeding-editor input:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.proceeding-method { display:grid; gap:8px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; background:#fafbfd; }
+.proceeding-method legend { padding:0 6px; color:#8995a8; font-size:10px; font-weight:800; letter-spacing:.08em; }
+/* Radio rows read across, not down, and a radio must keep its own size rather than stretching to
+   the full width the text fields want. */
+.proceeding-method label { display:flex; align-items:center; gap:8px; font-weight:750; }
+.proceeding-method input { width:auto; }
 .counsel-editor-error { margin:0; padding:10px 12px; border:1px solid #b42318; border-radius:10px; background:#fffafa; color:#b42318; font-size:12px; }
 .counsel-editor-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .counsel-editor-actions .primary-button { margin-left:auto; }

@@ -98,3 +98,17 @@ test("fields the editor does not own are left exactly as they were", () => {
   assert.deepEqual(after.case.causeNumber, before.case.causeNumber);
   assert.deepEqual(after.deposition.witness, before.deposition.witness);
 });
+
+// The editor shipped with no stylesheet rules of its own and inherited a transparent 195x24 box
+// with no border, so the label ran into the field and typed text sat on a background the same
+// colour as the page. Measured on the running screen, not asserted from the sheet -- but the rule
+// is pinned here because a stylesheet is the one place a working screen silently regresses.
+test("the editor's fields are given a field's appearance", () => {
+  const sheet = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const rule = sheet.match(/\.proceeding-editor input \{[^}]*\}/)?.[0] ?? "";
+  assert.match(rule, /background:#fff/, "an input with no background is indistinguishable from the page");
+  assert.match(rule, /border:1px/, "an input with no border has no edges to type inside");
+  assert.match(sheet, /\.proceeding-editor label \{[^}]*display:grid/, "an inline label collides with its own field");
+  // A radio stretched to the width of a text field is not a radio any more.
+  assert.match(sheet, /\.proceeding-method input \{ width:auto/);
+});
