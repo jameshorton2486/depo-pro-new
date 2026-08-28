@@ -47,6 +47,39 @@ const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, 
 // Absent is null rather than "". `[].join(", ")` answers "this case has no plaintiffs", which the
 // record does not say; what it says is that no party carries the role. Only the caller composing a
 // line turns that into text.
+// THE RULE, and the whole class it governs.
+//
+// A template that writes a label must not accept a value containing it. Two templates do, and both
+// reached certified pages before anyone noticed: "That $^cert.charges^" printed $1,240.00, and
+// "Texas CSR ^reporter.csrNumber^" printed CSR CSR 9174. In both cases the form field invited
+// exactly the thing that doubled -- a field called "Deposition officer's charges" asks for a sum of
+// money, and money has a dollar sign on it.
+//
+// The strip below is the cheap correct fix. The durable one is the form label, which now says who
+// writes the prefix ("Digits only; the certificate prints \"Texas CSR\" before it", and
+// "Deposition officer's charges (amount only)"). A strip that silently corrects the reporter is
+// weaker than a label that stops them typing it, and both are cheaper than a defect on a certified
+// page.
+//
+// Every template token was checked against the last word of the literal preceding it. The result:
+//
+//   DOUBLES, stripped here:
+//     cert.charges              after "That $"
+//     reporter.csrNumber        after "Texas CSR "
+//
+//   LATENT -- would double if a reporter typed the label, clean today, deliberately NOT stripped:
+//     caption.causeNumber              after "NO.: "
+//     reporter.firmRegistrationNumber  after "Firm Registration No. "
+//   Stripping these would be guessing at values that do not exist yet, and a strip nobody needs is
+//   a way to damage a value nobody typed wrong. If one ever doubles, the fix is one line and this
+//   comment says where.
+//
+//   CONSIDERED AND EXCLUDED -- prose, not labels. A value beginning with the word reads correctly:
+//     cert.chargesResponsibleParty     after "charges to the "   ("the Brazos Ridge Defense Group")
+//     cert.custodialAttorney           after "delivered to "
+//     reporter.csrExpirationDate       after "Expiration Date: "
+//   Recorded so a later reader knows they were examined rather than missed.
+//
 // One leading $, with any space after it, and nothing else. A value of "$1,240.00" becomes
 // "1,240.00"; "1,240.00" is untouched; "$$5" becomes "$5" rather than "5", because a reporter who
 // typed two meant something this cannot guess at and a certified page should not silently invent

@@ -51,3 +51,28 @@ test("the print site strips, and the template still writes the label", () => {
   assert.match(SOURCE, /csrNumber: stripLeadingCsrLabel\(/, "the credential must be stripped where it is printed");
   assert.match(TEMPLATE, /Texas CSR \^reporter\.csrNumber\^/, "the template owns the label; if it stops, the strip becomes wrong");
 });
+
+// The labels are the durable half of the fix. A strip that silently corrects the reporter is
+// weaker than a form that does not invite the mistake, and this pins both: the field must say who
+// writes the prefix, and the rule governing the whole class must stay written down where the next
+// person to add a prefixed token will look.
+test("the form says who writes the prefix, so the reporter is not invited to double it", () => {
+  const modal = fs.readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const certScreen = fs.readFileSync(new URL("../app/InsertionPagesScreen.tsx", import.meta.url), "utf8");
+  assert.match(modal, /Digits only; the certificate prints/, "the licence field must say the template writes 'Texas CSR'");
+  assert.ok(!/placeholder="CSR or license number"/.test(modal), "a placeholder reading 'CSR ...' invites the value that doubles");
+  assert.match(certScreen, /Deposition officer's charges \(amount only\)/, "the charges field must say the template writes the dollar sign");
+});
+
+test("the rule and the excluded cases stay recorded beside the strippers", () => {
+  const source = fs.readFileSync(new URL("../server/insertion-pages/assemble.mjs", import.meta.url), "utf8");
+  assert.match(source, /A template that writes a label must not accept a value containing it/);
+  // Scoped to the comment block, not the whole file. Several of these names also appear as real
+  // token mappings further down, so a file-wide includes() passes whether or not the enumeration
+  // still names them -- which is exactly what a mutation deleting a line from it proved.
+  const block = source.slice(source.indexOf("THE RULE"), source.indexOf("One leading $"));
+  assert.ok(block.length > 400, "the enumeration block must still be there to search");
+  for (const token of ["caption.causeNumber", "reporter.firmRegistrationNumber", "cert.chargesResponsibleParty", "cert.custodialAttorney", "reporter.csrExpirationDate"]) {
+    assert.ok(block.includes(token), `${token} must stay named in the enumeration`);
+  }
+});

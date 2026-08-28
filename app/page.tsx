@@ -380,7 +380,7 @@ export default function Home() {
             <form onSubmit={createReporter}>
               <div className="form-row"><label>Full name<input name="name" required placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
               <div className="form-row"><label>Email address<input name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
-              <div className="form-row"><label>License number<input name="licenseNumber" placeholder="CSR or license number" /></label><label>CSR expiration<input name="csrExpiration" type="date" /></label></div>
+              <div className="form-row"><label>License number <small>Digits only; the certificate prints &quot;Texas CSR&quot; before it.</small><input name="licenseNumber" placeholder="9174" /></label><label>CSR expiration<input name="csrExpiration" type="date" /></label></div>
               <div className="form-row"><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
               {/* Both of these are required by a certified page and had no input at all. Every
                   reviewed Texas certificate prints the CSR expiration, and validateInsertionInput

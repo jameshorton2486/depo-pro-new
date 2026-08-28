@@ -29,7 +29,7 @@ const DISPOSITIONS = [
 // produces them yet. Asking a reporter to type one would record a guess as a derivation.
 const CERTIFICATE_FIELDS = [
   { key: "custodialAttorney", label: "Custodial attorney", clause: "The original deposition was delivered to ___", requestedOnly: false },
-  { key: "officerCharges", label: "Deposition officer's charges", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
+  { key: "officerCharges", label: "Deposition officer's charges (amount only)", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
   { key: "chargesResponsibleParty", label: "Charges billed to", clause: "charges to the ___ for preparing the original transcript", requestedOnly: false },
   { key: "certificationDate", label: "Certification date", clause: "Certified to by me this ___ (certificate page)", requestedOnly: false },
   { key: "returnedDate", label: "Transcript returned on", clause: "returned to the deposition officer on ___", requestedOnly: true },
