@@ -1,8 +1,20 @@
+import { counselSidePhrase } from "../../app/manual-intake.mjs";
 import { UFM_FREELANCE_LAYOUT_PROFILE } from "./layout-profile.mjs";
 import { selectInsertionVariant } from "./variants.mjs";
 
 export function canonicalValue(value) {
   return value && typeof value === "object" && "value" in value ? value.value : value;
+}
+
+// The words that follow FOR on an appearance page, and the same words the certificate names.
+// Null where the side was never recorded -- validateInsertionInput blocks on that, so nothing
+// downstream has to decide what an unrecorded side should say.
+//
+// Read from the phrase map for a named side and from the reporter's own wording for OTHER. Never
+// from : that holds party names, and printing them here is the defect this replaced.
+export function appearancePhrase(attorney) {
+  if (attorney.side === "OTHER") return attorney.sideOther || null;
+  return counselSidePhrase(attorney.side);
 }
 
 function attorneyFromCanonical(attorney) {
@@ -15,6 +27,8 @@ function attorneyFromCanonical(attorney) {
     email: canonicalValue(attorney.email),
     barNumber: canonicalValue(attorney.barNumber),
     representing: canonicalValue(attorney.represents) ?? [],
+    side: canonicalValue(attorney.side) ?? null,
+    sideOther: canonicalValue(attorney.sideOther) ?? null,
     actualAppearance: canonicalValue(attorney.actualAppearance),
     participation: {
       method: canonicalValue(attorney.participation?.method) ?? null,

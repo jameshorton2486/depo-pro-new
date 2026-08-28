@@ -76,7 +76,7 @@ async function assembled(parties) {
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
     depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
     parties,
-    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
+    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
     reporterProfile: {
       name: "Miah Bardot", licenseNumber: "12129", csrExpiration: "2027-06-30",
       address: "7234 Hovingham, San Antonio, Texas 78257", phone: "469 740-9603",

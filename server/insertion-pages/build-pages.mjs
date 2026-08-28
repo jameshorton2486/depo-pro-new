@@ -1,4 +1,4 @@
-import { captionParties } from "./assemble.mjs";
+import { appearancePhrase, captionParties } from "./assemble.mjs";
 import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../texas-freelance-deposition-profile.mjs";
@@ -25,7 +25,7 @@ function captionValues(input) {
 function appearanceLines(input) {
   const lines = [];
   for (const attorney of input.appearances) {
-    lines.push(`FOR ${Array.isArray(attorney.representing) ? attorney.representing.join(", ") : attorney.representing}:`);
+    lines.push(`FOR ${appearancePhrase(attorney)}:`);
     lines.push(`${attorney.name}${methodLabel(attorney.participation.method, attorney.participation.detail)}`);
     // Omitted, not blanked. The specimens carry no empty lines where a field is absent -- Nunez
     // prints with no phone and no email at all, rather than with labels holding nothing.
@@ -66,7 +66,9 @@ function indexLines(input) {
 function certificationValues(input) {
   return {
     "cert.timeUsedLines": (input.timeUsed?.parties ?? []).map((party) => `${party.name} - ${String(Math.floor((party.minutes ?? 0) / 60)).padStart(2, "0")} HOURS:${String((party.minutes ?? 0) % 60).padStart(2, "0")} MINUTES`).join("; "),
-    "cert.counselLines": input.appearances.map((attorney) => `${attorney.name}, Attorney for ${(attorney.representing ?? []).join(", ")}`),
+    // The same phrase the appearance page prints. Two notions of what counsel represents in one
+    // certified document -- one structured, one free text -- is a divergence reconciled wrongly later.
+    "cert.counselLines": input.appearances.map((attorney) => `${attorney.name}, Attorney for ${appearancePhrase(attorney)}`),
   };
 }
 
