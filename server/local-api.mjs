@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {allowedApiOrigins,localApiPort} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, readAudioAuditIfPresent, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
 import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
@@ -107,16 +107,22 @@ function contentBlock(file) {
   throw new Error("Claude extraction currently accepts PDF or plain-text notices. Convert Word files to PDF first.");
 }
 
-async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivativeOperationId, expectedAudioSha256, audioFile, request, keyterms, operationId }) {
+// `audit` is null for live-captured audio, which never passed through intake. Nothing on the
+// success path needs it: runTranscriptionJob resolves the file from the deposition record and
+// re-hashes it against the frozen sha256 before every job, so the identity check is unaffected.
+// Only the media-rejection fallback needs an audit, because the derivative it builds is written
+// into the intake directory -- and it refuses out loud rather than inventing one.
+async function transcribeAudioWithCompatibility({ apiKey, audit, uploadId, source, derivativeOperationId, expectedAudioSha256, audioFile, request, keyterms, operationId }) {
   const requestedPath = audioFile;
   try {
-    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, request, keyterms, uploadId:audit.uploadId, operationId });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, request, keyterms, uploadId, operationId });
     result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "deposition-workspace", converted: false, reason: "Deepgram accepted the frozen deposition audio directly." };result.delivery={source:"deposition-workspace",sha256:expectedAudioSha256,bytes:fs.statSync(requestedPath).size,converted:false};return result;
   } catch (error) {
     if (!isDeepgramMediaError(error)) throw error;
+    if (!audit) throw new Error(`Deepgram could not decode ${path.basename(audioFile)}, and Depo-Pro builds its compatibility copy inside the audio intake record this audio does not have. It was captured locally rather than uploaded. The recording itself is unaffected and still verifies against its recorded SHA-256.`);
     const fallback = await createDeepgramCompatibilityDerivative(root, audit, source,derivativeOperationId);
     if(fallback.derivative.sourceSha256!==expectedAudioSha256)throw new Error("The compatibility derivative was not created from the frozen deposition audio.");
-    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, request, keyterms, uploadId:audit.uploadId, operationId });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, request, keyterms, uploadId, operationId });
     result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 };result.delivery={source:"compatibility-wav",sha256:fallback.derivative.sha256,sourceSha256:fallback.derivative.sourceSha256,bytes:fallback.derivative.bytes,converted:true,derivativeKey:fallback.derivative.key};result.transportAttempts=[{status:error.status,code:error.code,rawResponseBytes:error.rawResponseBytes||null,headers:error.responseHeaders||{},outcome:"media_rejected"}];return result;
   }
 }
@@ -279,8 +285,8 @@ const server = http.createServer(async (req,res) => {
       return sendMedia(req,res,file,{"content-type":mediaContentType(file,"audio/wav"),"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/transcribe" && req.method === "POST") {
-      const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);
-      const result=await runTranscriptionJob(root,{depositionId:input.depositionId,uploadId:input.uploadId,keytermOverrideReason:input.keytermOverrideReason||"",storageRoot:depositionStorageRoot,submit:({audio,audioFile,request,keyterms,operationId})=>transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source:audio.source,derivativeOperationId:audio.operationId,expectedAudioSha256:audio.sha256,audioFile,request,keyterms,operationId})});
+      const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAuditIfPresent(root,input.uploadId);
+      const result=await runTranscriptionJob(root,{depositionId:input.depositionId,uploadId:input.uploadId,keytermOverrideReason:input.keytermOverrideReason||"",storageRoot:depositionStorageRoot,submit:({audio,audioFile,request,keyterms,operationId})=>transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,uploadId:input.uploadId,source:audio.source,derivativeOperationId:audio.operationId,expectedAudioSha256:audio.sha256,audioFile,request,keyterms,operationId})});
       return json(res,200,{cached:result.cached,job:result.job,evidence:result.evidence,workingTranscript:result.workingTranscript,transcript:result.normalized||null},origin);
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}

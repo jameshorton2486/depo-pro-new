@@ -79,6 +79,20 @@ export function readAudioAudit(root, uploadId) {
   if (!fs.existsSync(target)) throw new Error("Audio intake record was not found.");
   return validateAudit(JSON.parse(fs.readFileSync(target, "utf8")));
 }
+// Audio that never passed through intake has no audit, and that is not an error.
+//
+// A live-captured channel is registered on the deposition record with its own uploadId, sha256
+// and path, hashed by the capture session at the moment recording stopped. It has no
+// data/audio-intake directory because it was never uploaded, and manufacturing one would put an
+// intake record on the evidentiary path describing an intake that did not happen.
+//
+// Callers that genuinely need the audit -- the RX tools, the source selector, the Deepgram
+// media-rejection fallback -- must handle null and say what is missing. Callers that only wanted
+// it for a label or an id must not refuse the work over it.
+export function readAudioAuditIfPresent(root, uploadId) {
+  assertUploadId(uploadId);
+  return fs.existsSync(auditFile(root, uploadId)) ? readAudioAudit(root, uploadId) : null;
+}
 export function writeAudioAudit(root, audit) { validateAudit(audit); assertUploadId(audit.uploadId); atomicWrite(auditFile(root, audit.uploadId), audit); }
 export async function mutateAudioAudit(root,uploadId,mutator){assertUploadId(uploadId);return withAuditLock(uploadId,async()=>{const audit=readAudioAudit(root,uploadId),result=await mutator(audit);writeAudioAudit(root,audit);return result??publicAudit(audit)})}
 
