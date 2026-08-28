@@ -159,6 +159,30 @@ export function writeDepositionParties(root, { depositionId, parties, storageRoo
  * removes would be reconciling against someone who is no longer in the record, and
  * reconcileSpeakerMap already refuses an identity the canonical record does not contain.
  */
+/**
+ * The counsel roster, for a caller that needs to name one of them by canonical id.
+ *
+ * A complete-transcript assembly stores `operator.examiningCounselId` and never a typed name, so a
+ * screen offering that choice has to be handed the same ids the record holds. Speaker candidates
+ * will not do: that list merges counsel with the witness, the reporter, interpreters and
+ * videographers, and once `appearanceRole` is unset -- which it is for manually entered counsel --
+ * nothing in it distinguishes an attorney from anyone else.
+ */
+export function readDepositionCounsel(root, { depositionId, storageRoot } = {}) {
+  const file = path.join(depositionDirectory(root, depositionId, { storageRoot }), "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const value = field => field && typeof field === "object" && "value" in field ? field.value : field;
+  return {
+    depositionId,
+    counsel: (record.counsel ?? []).map(entry => ({
+      id: entry.id,
+      name: String(value(entry.fullName) ?? "").trim(),
+      firm: String(value(entry.firm) ?? "").trim(),
+    })),
+  };
+}
+
 export function writeDepositionCounsel(root, { depositionId, counsel, storageRoot } = {}) {
   if (!Array.isArray(counsel)) throw new Error("Counsel must be an array.");
   const entries = counsel.map((attorney, index) => {

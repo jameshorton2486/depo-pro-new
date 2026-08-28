@@ -10,12 +10,15 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { DISPOSITIONS, JURISDICTIONS } from "../app/complete-transcript-options.mjs";
 import { depositionDirectory } from "./deposition-store.mjs";
 
 export const ASSEMBLY_SCHEMA_VERSION = "1.1.0";
 const ASSEMBLY_FILE = path.join("intake", "complete-transcript-assembly.json");
-const JURISDICTIONS = Object.freeze(["texas-state", "federal"]);
-const DISPOSITIONS = Object.freeze(["requested", "waived"]);
+// Re-exported from the shared module so existing importers keep working. Declared there rather
+// than here because the screen offering these choices cannot import this file: doing so pulls the
+// server graph into the browser bundle and the application fails to load.
+export { DISPOSITIONS, JURISDICTIONS } from "../app/complete-transcript-options.mjs";
 
 // Reporter-facing prose alongside the machine code, both from the server.
 //

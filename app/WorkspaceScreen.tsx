@@ -4,6 +4,7 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
+import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
@@ -79,7 +80,7 @@ type Operation = Record<string,unknown>;
 type Bucket = { key:string; jobIdentity:string; deepgramSpeaker:number; words:number; sample:string };
 type Audit = { uploadId:string; originalName:string; selectedSource:string };
 type Job = { jobId:string; uploadId:string; startedAt?:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
-export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[] };
+export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
 const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
 function clock(seconds:number|null){ if(seconds===null||!Number.isFinite(seconds))return "--:--"; const total=Math.floor(seconds); return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`; }
@@ -509,6 +510,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           )}
         </section>
       )}
+
+      {/* The way out of the blocked state the banner above reports. Not gated on printModel: the
+          preparation is administrative authority and a reporter can record it before there is a
+          transcript to assemble. preparedBy is passed as the record holds it and is not defaulted --
+          a deposition with no reporter name is refused by the server, which is the honest answer. */}
+      <PrepareCompleteTranscript depositionId={depositionId} preparedBy={deposition.courtReporterName ?? ""} />
 
       {notice && <p className="analysis-note" role="status">{notice}</p>}
 

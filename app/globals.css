@@ -151,6 +151,26 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .manual-intake [aria-invalid="true"] { border-color:#b42318; background:#fffafa; }
 .manual-intake [aria-invalid="true"]:focus { border-color:#b42318; box-shadow:0 0 0 3px #fee4e2; }
 .manual-intake-actions { display:flex; justify-content:flex-end; gap:10px; }
+/* Scoped the same way .modal, .intake-fields, .admin-card and .manual-intake are. A wrapping-label
+   container with no rule of its own renders its labels inline and runs each one into its value --
+   the defect c79008a fixed on the intake panel. */
+.prepare-complete { display:grid; gap:15px; padding:18px; border:1px solid #dbe3f0; border-radius:14px; background:#f8fafc; margin:18px 0; }
+.prepare-complete h3 { margin:0; font-size:16px; }
+.prepare-complete header p { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+.prepare-complete label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.prepare-complete input,.prepare-complete select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:11px 12px; color:var(--ink); outline:0; }
+.prepare-complete input:focus,.prepare-complete select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.prepare-complete .form-row { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+.prepare-complete-findings { margin:0; padding-left:20px; display:grid; gap:5px; color:#b42318; font-size:12px; line-height:1.45; }
+.prepare-complete-conflict { margin:0; padding:10px 12px; border:1px solid #b42318; border-radius:10px; background:#fffafa; color:#b42318; font-size:12px; }
+.prepare-complete-empty { margin:0; color:var(--muted); font-size:11px; }
+.prepare-complete-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.prepare-complete-actions .primary-button,.prepare-complete-actions .secondary-button { margin-left:0; }
+.prepare-complete-ready { color:#1c7c4a; font-size:12px; font-weight:800; }
+.prepare-complete-blocked { color:#8a4b14; font-size:12px; font-weight:800; }
+.prepare-complete-notice { color:var(--muted); font-size:11px; }
+.prepare-complete-actions .primary-button { margin-left:auto; }
+
 .audio-add { min-height:82px; border:1.5px dashed #cbd5e4; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:var(--blue); font-weight:750; font-size:13px; }
 .audio-list { list-style:none; margin:16px 0 0; padding:0; display:grid; gap:8px; }
 .audio-list li { display:flex; align-items:center; gap:12px; border:1px solid #e1e6ef; border-radius:11px; padding:10px 12px; background:#fafbfd; }
