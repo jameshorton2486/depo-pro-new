@@ -46,6 +46,15 @@ const asList = value => Array.isArray(value)
  * Texas practice is routinely more than two sides -- intervenors in subrogation and probate,
  * third-party defendants in construction defect, ad litem appointments for minors and missing
  * heirs, and petitioner/respondent in family, probate and appellate matters.
+ *
+ * SPECIMEN SUPPORT. Two of these eleven appear in the certified transcripts on hand: PLAINTIFF and
+ * DEFENDANT, in singular and plural. Searching all eleven extracted transcripts for intervenor, ad
+ * litem, third-party, guardian, petitioner, respondent, cross-defendant, counter-defendant and
+ * non-party returns zero occurrences.
+ *
+ * The other nine come from James's account of Texas practice, not from a file. They are authorized
+ * and unverified: no certified page here shows how one of them prints, which is why their
+ * appearance line is the heading alone rather than a composed designation.
  */
 export const COUNSEL_SIDES = Object.freeze([
   "PLAINTIFF", "DEFENDANT", "INTERVENOR", "THIRD_PARTY_DEFENDANT", "CROSS_DEFENDANT",

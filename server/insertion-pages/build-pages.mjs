@@ -38,10 +38,39 @@ function printedPhrase(attorney) {
   return phrase;
 }
 
+// What follows the colon, and a deliberate divergence from the specimens.
+//
+// The certified transcripts carry THREE shapes for this line, all accepted by the courts that
+// received them:
+//
+//   FOR THE PLAINTIFF, DEAVEN BABERS:        Chun Yean   -- designation inside the heading
+//   FOR THE PLAINTIFF:   DELIA GARZA         Heath Thomas -- designation after the colon
+//   FOR THE PLAINTIFFS:                      Goodwin     -- heading alone, no party named
+//
+// There is no single correct shape to derive, so this is a choice. The Thomas shape is used: it
+// keeps the side and the parties as the two separate facts the record now holds separately, where
+// putting the designation inside the heading would make the code compose a string it has no
+// authority over. Do not "correct" this back toward Chun Yean.
+//
+// Two further divergences from Thomas, taken deliberately. Thomas prints the designation uppercase
+// and joins two defendants with " AND "; this prints the caption's own joined string, as stored and
+// comma-joined. Matching Thomas literally would make the appearance line disagree with OUR caption
+// block on the same page -- the specimen has no such problem because its caption carries the
+// identical string. captionParties is read here for that reason: one source, per the note above
+// captionValues.
+//
+// A side with no parties recorded in that role prints the heading alone, which is the Goodwin shape.
+function appearanceDesignation(attorney, input) {
+  if (attorney.side !== "PLAINTIFF" && attorney.side !== "DEFENDANT") return "";
+  const { plaintiffs, defendants } = captionParties(input.record);
+  const parties = attorney.side === "PLAINTIFF" ? plaintiffs : defendants;
+  return parties.length ? ` ${parties.join(", ")}` : "";
+}
+
 function appearanceLines(input) {
   const lines = [];
   for (const attorney of input.appearances) {
-    lines.push(`FOR ${printedPhrase(attorney)}:`);
+    lines.push(`FOR ${printedPhrase(attorney)}:${appearanceDesignation(attorney, input)}`);
     lines.push(`${attorney.name}${methodLabel(attorney.participation.method, attorney.participation.detail)}`);
     // Omitted, not blanked. The specimens carry no empty lines where a field is absent -- Nunez
     // prints with no phone and no email at all, rather than with labels holding nothing.

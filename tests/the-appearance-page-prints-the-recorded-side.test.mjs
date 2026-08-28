@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
-import { assembleInsertionInput } from "../server/insertion-pages/assemble.mjs";
+import { assembleInsertionInput, captionParties } from "../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-pages.mjs";
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
@@ -12,11 +12,11 @@ import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 //
 // These generate the page and read the produced line, rather than calling appearancePhrase. A test
 // of the helper would pass with the print site still joining party names.
-async function generated(attorneys) {
+async function generated(attorneys, parties = [{ name: "Alex Plaintiff", role: "Plaintiff" }, { name: "Delta Company", role: "Defendant" }]) {
   const record = createCanonicalDepositionRecord({
     court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS", causeNumber: "2026-CI-10001",
     witness: "Jordan Example", depositionDate: "2026-08-01", remote: true, remotePlatform: "Zoom",
-    parties: [{ name: "Alex Plaintiff", role: "Plaintiff" }, { name: "Delta Company", role: "Defendant" }],
+    parties,
     attorneys,
     reporterProfile: { name: "Riley Reporter", licenseNumber: "1234", csrExpiration: "2027-12-31", company: "Reporter Firm", firmRegistrationNumber: "5678", address: "300 Main, San Antonio, Texas", phone: "210-555-0103" },
   });
@@ -68,7 +68,6 @@ test("counsel with a missing side refuses generation, naming the counsel", async
 
 test("the certificate's counsel lines use the same phrase as the appearance page", async () => {
   const { pages } = await generated([{ ...PAT, side:"PLAINTIFF" }]);
-  assert.ok(textOf(pages).includes("FOR THE PLAINTIFF:"));
   // The certificate names the same phrase, on the rendered page rather than in a field value:
   // two notions of what counsel represents in one document is the divergence this removes.
   assert.ok(textOf(pages).includes("Pat Counsel, Attorney for THE PLAINTIFF"),
@@ -88,4 +87,37 @@ test("the print site refuses a side nobody recorded, even unvalidated", async ()
     () => buildTexasInsertionPageSet(input, { setId:"s", depositionId:"DEP-20260827-SIDE1", generatedAt:"2026-08-27T00:00:00.000Z" }),
     /APPEARANCE_SIDE_MISSING: Dana Counsel has no side recorded/,
   );
+});
+
+// The certified transcripts carry three shapes for this line, all accepted:
+//
+//   FOR THE PLAINTIFF, DEAVEN BABERS:      Chun Yean    -- designation inside the heading
+//   FOR THE PLAINTIFF:   DELIA GARZA       Heath Thomas -- designation after the colon
+//   FOR THE PLAINTIFFS:                    Goodwin      -- heading alone
+//
+// Thomas was chosen deliberately. These pin that choice so a later session does not reconcile it
+// back toward Chun Yean on the grounds that a specimen shows it.
+test("the appearance line puts the designation after the colon, not inside the heading", async () => {
+  const { pages } = await generated([{ ...PAT, side:"PLAINTIFF" }]);
+  const forLines = textOf(pages).filter(line => line.startsWith("FOR "));
+  assert.ok(forLines.includes("FOR THE PLAINTIFF: Alex Plaintiff"), `got ${forLines.join(" | ")}`);
+  assert.ok(!forLines.some(line => /^FOR THE PLAINTIFF, /.test(line)), "the designation moved inside the heading");
+});
+
+test("a side with no specimen support prints its heading alone", async () => {
+  // Nine of the eleven values appear in no certified transcript on hand, so nothing composes a
+  // designation for them. The heading comes from the phrase map; after the colon is nothing.
+  const { pages } = await generated([{ ...PAT, side:"INTERVENOR" }]);
+  const forLines = textOf(pages).filter(line => line.startsWith("FOR "));
+  assert.deepEqual(forLines, ["FOR THE INTERVENOR:"]);
+});
+
+test("the designation after the colon is the caption's own, not a second join", async () => {
+  // One source: a caption line and an appearance line must not disagree about who the parties are.
+  // Two plaintiffs, so the join is visible: with one party any join looks the same.
+  const { input, pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
+    [{ name:"Alex Plaintiff", role:"Plaintiff" }, { name:"Marisol Vantongeren", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
+  const { plaintiffs } = captionParties(input.record);
+  assert.equal(plaintiffs.length, 2, "the fixture must have two parties for the join to mean anything");
+  assert.ok(textOf(pages).includes(`FOR THE PLAINTIFF: ${plaintiffs.join(", ")}`));
 });
