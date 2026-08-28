@@ -499,7 +499,7 @@ export default function IntakeScreen({
                 ? `Analyzing documents… ${analysisElapsed}s`
                 : analysis
                   ? "Analyze again"
-                  : "Analyze documents with Claude"}
+                  : "Analyze documents"}
             </button>
           </div>
 
