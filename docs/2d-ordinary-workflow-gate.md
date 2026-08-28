@@ -167,6 +167,40 @@ Missing.
 after `navigate`; `scroll_to` keeps working because it is not an input event, and only a fresh tab
 recovers input. Two silent no-op clicks were discarded rather than read as results.
 
+## Open question: what the participant checkbox asserts
+
+Not filed as a defect. The two checkboxes on Opening Procedures gate differently, and the
+difference may be correct.
+
+A field checkbox is disabled when its field is `MISSING` -- verifying a field is a statement about
+that field's value, so there is nothing to verify. The participant checkbox has no such gate
+(`disabled={busy}`), and was enabled for both counsel on `DEP-20260827-LL0D2` while their Role and
+Actual appearance read Missing. That is defensible on its own terms: verifying a participant
+plausibly asserts "this person is correctly identified", which is answerable while their
+attendance is still unrecorded.
+
+What makes it worth deciding is the appearance-page rule, which is pinned by
+`tests/insertion-pages/appearance-filter.test.mjs`: counsel print unless `actualAppearance` is
+`false`, and *counsel whose attendance was never recorded is not dropped*. So an attorney whose
+appearance was never recorded prints on the appearance page as though present. A reporter who
+ticked Verified against that participant may reasonably believe they confirmed the appearance the
+page then asserts.
+
+This is a question about what the control means, not about whether the code is correct. Settle what
+the participant checkbox asserts, then gate it or do not, to match. Revisit after the gate.
+
+## Withdrawn: a false attestation defect that does not exist
+
+Recorded because it was nearly filed as a release blocker. Pre-Record Verification was reported as
+allowing a reporter to tick Verified against a `MISSING` field. It does not: the control is
+`disabled={busy||item.state==="MISSING"}`, confirmed on the running screen across seven MISSING
+fields -- Court, County, Scheduled start, Actual start, Location, Remote proceeding, Remote
+platform -- every one of them disabled, and every present field enabled.
+
+The claim came from reading the word "Missing" rendered beside a checkbox and not checking the
+attribute. A blocker list is only useful if every row is real; a phantom beside the certification
+index and the examiner placeholder makes the real rows harder to trust.
+
 ## Not claimed
 
 - Steps 10–13. No transcript exists on this deposition.
