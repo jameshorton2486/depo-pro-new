@@ -8,6 +8,23 @@ const methodLabel = (method, detail) => !method || method === "in-person" ? "" :
 
 // The joined strings are the printed form of the same two lists assemble put in fieldValues, so a
 // caption line and the guard that clears it cannot disagree about who the parties are.
+//
+// COMPOSED, NOT VERBATIM -- a deliberate divergence from docket fidelity.
+//
+// Case styles carry irregular joins from the pleadings: "&", plain "and", slash boundaries, or no
+// separator at all. Composing from the party array cannot reproduce them, so a petition reading
+// "A & B" prints here as "A AND B". Preserving the docket exactly would mean the caption became
+// reporter-typed free text, and then nothing would check that the text names the parties the record
+// holds: a case style could omit a defendant while the appearance page still printed a block for
+// them. The replacement guard would be fuzzy matching free text against party names on certified
+// output, which is worse than the problem it solves.
+//
+// So the caption is provable rather than faithful, and the pluralisation guard, the blank guard and
+// the rule above all keep their meaning. Note that the appearance page is unaffected either way --
+// it reads captionParties directly, never this string.
+//
+// TRIGGER TO REOPEN: a real matter whose docket style the composed caption cannot express. Design
+// the replacement guard first; this is not a field swap.
 // Party names print in capitals. They are stored as the reporter typed them -- flattening O'Neill
 // or DeLaGarza into the record would destroy a spelling nothing downstream can recover -- and
 // capitalised here, where the page is what has to conform.

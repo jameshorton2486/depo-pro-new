@@ -110,6 +110,12 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const volumeCount = operator.volumeCount ?? (volumes.length || 1);
   const court = canonicalValue(record.case?.court);
   const causeNumber = canonicalValue(record.case?.causeNumber);
+  // Captured and deliberately NOT rendered. No template references ^caption.caseStyle^, and that is
+  // the ruling rather than an oversight: the caption block composes its parties from the party array
+  // so that it is provably the recorded parties, which reporter-typed text could not be. This holds
+  // the reporter's record of what the docket actually says, and it is the input if that is ever
+  // reopened -- see the note above captionValues in build-pages.mjs. Do not wire it up, and do not
+  // delete it as unused.
   const caseStyle = canonicalValue(record.case?.caseStyle);
   const depositionDate = canonicalValue(record.deposition?.depositionDate);
   const witness = canonicalValue(record.deposition?.witness);
