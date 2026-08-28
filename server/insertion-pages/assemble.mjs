@@ -47,6 +47,15 @@ const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, 
 // Absent is null rather than "". `[].join(", ")` answers "this case has no plaintiffs", which the
 // record does not say; what it says is that no party carries the role. Only the caller composing a
 // line turns that into text.
+// One leading $, with any space after it, and nothing else. A value of "$1,240.00" becomes
+// "1,240.00"; "1,240.00" is untouched; "$$5" becomes "$5" rather than "5", because a reporter who
+// typed two meant something this cannot guess at and a certified page should not silently invent
+// the answer. null stays null so an unrecorded amount keeps blocking.
+export function stripLeadingCurrency(value) {
+  if (value === null || value === undefined) return value;
+  return String(value).replace(/^\s*\$\s?/, "");
+}
+
 export function captionParties(record) {
   const parties = record?.parties ?? [];
   const inRole = pattern => parties
@@ -174,7 +183,11 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.returnDeadline": operator.certification?.returnDeadline ?? null,
       "cert.returnStatus": operator.certification?.returnStatus ?? canonicalValue(record.signature?.returnedDate) ?? null,
       "cert.custodialAttorney": operator.certification?.custodialAttorney ?? canonicalValue(record.certification?.custodialAttorney) ?? null,
-      "cert.charges": operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null,
+      // The template writes the dollar sign -- "That $^cert.charges^ is the deposition officer's" --
+      // so a reporter who types the natural thing, $1,240.00, put $$1,240.00 on a certified page.
+      // Stripped here, at the print site, and deliberately not at the write boundary: the record
+      // keeps what the reporter typed, and the page prints what the sentence needs.
+      "cert.charges": stripLeadingCurrency(operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null),
       "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? canonicalValue(record.certification?.chargesResponsibleParty) ?? null,
       "cert.serviceDate": operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,
