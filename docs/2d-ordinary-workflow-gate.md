@@ -167,6 +167,48 @@ Missing.
 after `navigate`; `scroll_to` keeps working because it is not an input event, and only a fresh tab
 recovers input. Two silent no-op clicks were discarded rather than read as results.
 
+## Finding: three defects of one shape, none of them test-detectable
+
+The suite was green at 998 / 987 / 11 / 0 throughout. Every one of these was found by a person
+looking at a screen, and none of them could have failed a test in this repository, because in each
+case the code was correct and the screen was lying about the record.
+
+| screen | what it showed | what it did |
+|---|---|---|
+| Certification pages | blank, while four values were stored | Preview posted the blanks and erased them |
+| Court and method | grey example text that was not a value | Save wrote nothing |
+| Workspace | *ready · revision 3* above a blocked banner | two readiness notions, contradicting |
+
+The first is the serious one. `InsertionPagesScreen` initialised to `EMPTY_CERTIFICATE` and never
+read; `runPreview` posts the whole certificate and the route rewrites every field it owns. So the
+ordinary action the screen invites destroyed certification values already on the record, silently,
+on certified content. Worse than the `?? 2` defect this branch removed: that printed a wrong value
+where this erases a right one and leaves nothing behind to notice. Fixed in `a2b69e6`; the route
+was deliberately left alone, and a mutation making it merge-only fails a test that pins why -- a
+value entered by mistake could then never be cleared.
+
+The second cost three consecutive save attempts by the reporter. Two failed for environmental
+reasons -- measured: no POST reached any Depo Pro instance on the machine, and the record was
+untouched. The third landed partially: `deposition.remote` saved from a radio click while `court`
+and `remotePlatform` stayed MISSING, because the placeholders were complete realistic entries
+rendered grey inside empty boxes and read as data already present. Fixed in `fc21973`.
+
+**What this says about where the remaining defects are.** This branch has argued that the gap in
+Depo-Pro is usability rather than depth. The run demonstrated it rather than asserting it: with
+987 passing tests, the defects that stopped a reporter completing a deposition were all in the
+layer no test observes -- what the screen claims about the record. That is the case for a manual
+gate, and it is a better one than anything written before this checkpoint started.
+
+## Limitation: the index is examiner-only, not Q./A.
+
+Recorded so a later reader does not mistake step 11 for more than it is. The speaker map is
+unreconciled -- 15 paragraphs, no speakers assigned -- so the transcript body renders entirely as
+colloquy. That does not block generation and does not affect the index: the examination entry
+resolves from the assembly through `examiningCounselId`, not from the speaker map, so the
+examiner's name and page range print regardless. What step 11 will therefore confirm is that the
+index names a real examiner over a real range. It will not have confirmed that the examiner's
+questions are marked `Q.`, because with no speaker map there are none.
+
 ## Open question: what the participant checkbox asserts
 
 Not filed as a defect. The two checkboxes on Opening Procedures gate differently, and the
