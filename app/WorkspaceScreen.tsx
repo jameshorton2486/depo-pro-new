@@ -517,6 +517,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           preparation is administrative authority and a reporter can record it before there is a
           transcript to assemble. preparedBy is passed as the record holds it and is not defaulted --
           a deposition with no reporter name is refused by the server, which is the honest answer. */}
+      {/* In the main column, not the tools rail. It was mounted beside the counsel editor, which
+          put a four-field form in a 262px column that scrolls independently of the page -- present
+          in the DOM, and not reachable in practice. Three save attempts were lost to that. It sits
+          with the preparation panel now because they are the same kind of thing: filled once per
+          deposition, before generation, and never touched again. */}
+      <ProceedingEditor depositionId={depositionId} onSaved={reload} />
       <PrepareCompleteTranscript depositionId={depositionId} preparedBy={deposition.courtReporterName ?? ""} />
 
       {notice && <p className="analysis-note" role="status">{notice}</p>}
@@ -670,8 +676,6 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} />
-
-          <ProceedingEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" onClick={()=>setShowSpeakers(value=>!value)} aria-expanded={showSpeakers} aria-controls="workspace-speakers">

@@ -187,10 +187,9 @@ dd { margin:0; font-size:13px; font-weight:650; }
    reporter typed sat on a background indistinguishable from the page. Same treatment as the
    counsel editor above, because it is the same kind of form on the same screen and should not
    look like it came from a different application. */
-.proceeding-editor { margin:12px 0 20px; }
-.proceeding-editor[open] { display:grid; gap:14px; }
-.proceeding-editor>summary { cursor:pointer; color:#4b5870; font-size:12px; font-weight:800; letter-spacing:.04em; padding:6px 0; }
-.proceeding-editor>section { display:grid; gap:14px; }
+.proceeding-editor { display:grid; gap:14px; margin:0 0 18px; padding:20px 22px; border:1px solid #d9e2ef; border-radius:14px; background:#fff; }
+.proceeding-editor h2 { margin:0; font-size:16px; }
+.proceeding-editor .form-row { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
 .proceeding-editor label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
 .proceeding-editor input { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:10px 12px; color:var(--ink); outline:0; }
 .proceeding-editor input:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }

@@ -81,13 +81,11 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
   }
 
   return (
-    // Collapsed by default. This is filled once per deposition and then never again, and it was
-    // mounted above the transcript tools in a 262px rail that scrolls -- so it pushed controls a
-    // reporter uses continuously out of view behind controls they use once. A disclosure gives the
-    // rail its length back and still leaves the panel where it belongs, beside the counsel editor.
-    <details className="proceeding-editor">
-      <summary>Court and method</summary>
-      <section aria-label="Court and deposition method">
+    // Open, not a disclosure. Collapsing it was the right answer while it lived in the tools rail
+    // and was crowding daily controls; in the main column there is nothing to crowd, and a panel
+    // the reporter must find and fill should not also require them to discover it first.
+    <section className="proceeding-editor" aria-label="Court and deposition method">
+      <h2>Court and method</h2>
       <p className="counsel-editor-note">
         The court and how the deposition was taken. Both print on the certified pages, and
         generation is refused rather than guessing while either is unrecorded.
@@ -132,7 +130,6 @@ export default function ProceedingEditor({ depositionId, onSaved }:{ depositionI
           {busy ? "Saving…" : "Save court and method"}
         </button>
       </div>
-      </section>
-    </details>
+    </section>
   );
 }
