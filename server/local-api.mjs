@@ -40,7 +40,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, readDepositionCertification, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -385,6 +385,11 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/deposition/proceeding"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionProceeding(root,{depositionId:input.depositionId,proceeding:input.proceeding,storageRoot:depositionStorageRoot}),origin);
+    }
+    // The screen must be able to see what it is about to overwrite.
+    if(req.url?.startsWith("/api/deposition/certification?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionCertification(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url==="/api/deposition/certification"&&req.method==="POST"){
       const input=await body(req,16*1024);

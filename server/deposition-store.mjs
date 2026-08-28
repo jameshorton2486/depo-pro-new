@@ -235,6 +235,30 @@ export function writeDepositionCounsel(root, { depositionId, counsel, storageRoo
  */
 const CERTIFICATION_FIELDS = Object.freeze(["custodialAttorney", "officerCharges", "chargesResponsibleParty", "certificationDate", "furtherCertificationDate"]);
 
+/**
+ * The stored certificate, as the strings a form has to show.
+ *
+ * writeDepositionCertification rewrites every field it owns, setting anything absent to MISSING --
+ * correct for a form that shows everything, and a data-loss path for one that shows nothing.
+ * InsertionPagesScreen initialised to EMPTY_CERTIFICATE and never read, so Preview on a screen
+ * that always looked blank erased values already on the record. The route is not the defect; a
+ * merge-only route would mean a reporter could never clear a value entered by mistake, turning a
+ * display bug into a permanent one. The screen has to load first, and this is what it loads.
+ *
+ * MISSING reads back as "" because that is what an empty control holds, and "" written back
+ * becomes MISSING again -- so a form the reporter never touches round-trips to exactly the record
+ * it started from.
+ */
+export function readDepositionCertification(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const text = (envelope) => (envelope && envelope.value !== null && envelope.value !== undefined ? String(envelope.value) : "");
+  const certification = Object.fromEntries(CERTIFICATION_FIELDS.map((key) => [key, text(record.certification?.[key])]));
+  return { depositionId, certification: { ...certification, returnedDate: text(record.signature?.returnedDate) } };
+}
+
 export function writeDepositionCertification(root, { depositionId, certification = {}, storageRoot } = {}) {
   if (!certification || typeof certification !== "object" || Array.isArray(certification)) throw new Error("Certification must be an object.");
   const unknown = Object.keys(certification).filter((key) => key !== "returnedDate" && !CERTIFICATION_FIELDS.includes(key));
