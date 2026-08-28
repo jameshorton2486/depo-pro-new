@@ -109,6 +109,64 @@ gate re-run from 2′. The same trap recurred later — a server file edited 65 
 the newest commit touching `server/`. Stopping the harness task is not enough; it kills the npm
 wrapper while the children keep the ports, and the restart then dies with `EADDRINUSE`.
 
+## Resumed run, 2026-08-28: real audio through the ordinary path
+
+The run resumed with a genuine 8m51s local capture rather than a fixture. Two blockers were found
+and fixed, and generation is refused on a third that no screen can clear.
+
+**Two blockers, stacked.** `ac50582`: OpeningProceduresScreen built its own origin,
+`http://127.0.0.1:4317`, while this worktree runs 4331 -- so the live path was unreachable here at
+all. Behind it, `558aa5b`: `POST /api/audio/transcribe` opened with `readAudioAudit`, which throws
+when no intake record exists, and live capture never writes one by either attach path. No
+live-captured audio could be transcribed by any route. Both were found by running the ordinary
+workflow with real audio; neither was visible to the suite.
+
+**Capture through transcription, verified end to end.**
+
+```
+capture      LIVE-20260828175501-ECA52D, FINALIZED, 531.0s, 44.1 kHz / 2ch / 24-bit
+levels       mean -25.8 dB, peak -5.6 dB, both channels alive -- speech, not a dead microphone
+sha256       0dcdf33a239f82c7492eadf8f2719bddcd63a2ffafcaf339c9e3b0a91834b1d4
+attach       ASSIGNED_TO_DEPOSITION; sha256 and byte count IDENTICAL either side of the move
+transcribe   completed first attempt, converted:false, 113 segments of real speech
+```
+
+The hash was recorded before the attach and recomputed off the moved file afterwards. The attach
+links evidence; it does not rewrite it. That is step 13's core question, answered early.
+
+**Step 10 is refused, and the refusal is the result.** Generation named six blank fields
+individually rather than printing a sentence with nothing after it:
+
+```
+DEPOSITION_METHOD_MISSING:deposition.remote
+UNEXPECTED_BLANK:caption.court
+UNEXPECTED_BLANK:cert.custodialAttorney
+UNEXPECTED_BLANK:cert.charges
+UNEXPECTED_BLANK:cert.chargesResponsibleParty
+UNEXPECTED_BLANK:cert.certificationDate
+```
+
+This is `7c5f17f` holding in the deliverable, at the point where `?? 2` and `?? ""` would have
+reached paper -- and naming each field separately, the property step 6 confirmed for the intake
+form. It is a pass of the guard, not a failure of the run.
+
+**Why it cannot be cleared.** `caption.court` and `deposition.remote` are set only by
+`buildCanonicalRecord` at intake. Manual intake collects five fields -- case style, witness, cause
+number, deposition date, deponent type -- and neither is among them. Nothing writes them
+afterwards: the canonical record's only write routes are certification, counsel and honorific, and
+OpeningProceduresScreen has no input of any kind. So a deposition created through the manual route
+cannot produce a complete transcript at any point in its life. Same shape as the transcribe join:
+built on both sides, no path between.
+
+**Verification checkboxes, measured.** Every `MISSING` field on Pre-Record Verification renders its
+checkbox `disabled` -- a reporter cannot attest to a blank. The participant checkbox on Appearances
+has no such gate, and was enabled for both counsel while their Role and Actual appearance read
+Missing.
+
+**Instrument note.** Browser clicks stop dispatching after `window.location.reload()`, the same as
+after `navigate`; `scroll_to` keeps working because it is not an input event, and only a fresh tab
+recovers input. Two silent no-op clicks were discarded rather than read as results.
+
 ## Not claimed
 
 - Steps 10–13. No transcript exists on this deposition.
