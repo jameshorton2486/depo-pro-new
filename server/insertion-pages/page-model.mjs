@@ -41,6 +41,17 @@ export function pageOverflowFindings(pages, profile = UFM_FREELANCE_LAYOUT_PROFI
   }] : []);
 }
 
+export function horizontalOverflowFindings(pages, profile) {
+  if (!Number.isInteger(profile?.charactersPerLine)) throw new Error("HORIZONTAL_OVERFLOW_PROFILE_REQUIRED");
+  return pages.flatMap((page) => page.lines.flatMap((line, index) => String(line.text ?? line.content ?? "").length > profile.charactersPerLine ? [{
+    code: "HORIZONTAL_LINE_OVERFLOW",
+    target: `pages.${page.pageNumber}.lines.${index + 1}`,
+    severity: "blocking",
+    message: `Page ${page.pageNumber} (${page.role}) line ${index + 1} occupies ${String(line.text ?? line.content ?? "").length} characters; the profile permits ${profile.charactersPerLine}.`,
+    path: `pages.${page.pageNumber}.lines.${index + 1}`,
+  }] : []));
+}
+
 export function createInsertionPageSet(input, { profile = UFM_FREELANCE_LAYOUT_PROFILE } = {}) {
   const unsigned = {
     schemaVersion: INSERTION_PAGE_SET_VERSION,

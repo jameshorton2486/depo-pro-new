@@ -12,9 +12,10 @@
 //
 // Pure: no filesystem, no fetch. The caller reads and writes the file.
 
-export const OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "label", "replace", "delete", "insert", "flag", "unflag"]);
-export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[] });
+export const OVERLAY_SCHEMA_VERSION = "2.0.0";
+export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
+export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review"]);
+export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[], transactionSizes:[], redoTransactions:[] });
 
 const text = value => String(value ?? "");
 const trimmed = value => text(value).trim();
@@ -38,6 +39,10 @@ export function validateOperation(input) {
   if (op === "split") {
     if (!trimmed(input.beforeWordId)) return { ok:false, message:"split requires beforeWordId." };
     return { ok:true, operation:{ op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId) } };
+  }
+  if (op === "join") {
+    if (!trimmed(input.leadingWordId) || !trimmed(input.trailingWordId)) return { ok:false, message:"join requires leadingWordId and trailingWordId." };
+    return { ok:true, operation:{ op, leadingWordId:trimmed(input.leadingWordId), trailingWordId:trimmed(input.trailingWordId), leadingFirstWordId:trimmed(input.leadingFirstWordId)||trimmed(input.leadingWordId), trailingLastWordId:trimmed(input.trailingLastWordId)||trimmed(input.trailingWordId) } };
   }
   if (op === "label") {
     if (!trimmed(input.segmentId) && !trimmed(input.wordId)) return { ok:false, message:"label requires segmentId or wordId." };
@@ -75,15 +80,31 @@ export function validateOperation(input) {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
   }
-  if (!trimmed(input.afterWordId)) return { ok:false, message:"insert requires afterWordId." };
+  if (op === "review") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"review requires wordId." };
+    const disposition=trimmed(input.disposition).toUpperCase();
+    if (!['APPROVED','CORRECTED'].includes(disposition)) return { ok:false, message:"review disposition must be APPROVED or CORRECTED." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId), disposition, at:trimmed(input.at)||null, actor:trimmed(input.actor)||null } };
+  }
+  if (!trimmed(input.afterWordId) && !trimmed(input.beforeWordId)) return { ok:false, message:"insert requires afterWordId or beforeWordId." };
+  if (trimmed(input.afterWordId) && trimmed(input.beforeWordId)) return { ok:false, message:"insert accepts one anchor, not both." };
   if (!trimmed(input.text)) return { ok:false, message:"insert requires text." };
-  return { ok:true, operation:{ op, afterWordId:trimmed(input.afterWordId), text:text(input.text) } };
+  return { ok:true, operation:{ op, afterWordId:trimmed(input.afterWordId) || null, beforeWordId:trimmed(input.beforeWordId) || null, text:text(input.text) } };
 }
 
 export function validateOverlay(value, depositionId) {
   if (!value) return emptyOverlay(depositionId);
-  if (value.schemaVersion !== OVERLAY_SCHEMA_VERSION || !Array.isArray(value.operations)) throw new Error("The reporter overlay record is invalid or unsupported.");
-  return { ...emptyOverlay(depositionId), ...value, operations:value.operations.map(item => { const result = validateOperation(item); if (!result.ok) throw new Error(result.message); return result.operation; }) };
+  if (![OVERLAY_SCHEMA_VERSION, LEGACY_OVERLAY_SCHEMA_VERSION].includes(value.schemaVersion) || !Array.isArray(value.operations)) throw new Error("The reporter overlay record is invalid or unsupported.");
+  const operations=value.operations.map(item => { const result = validateOperation(item); if (!result.ok) throw new Error(result.message); return result.operation; });
+  const transactionSizes=value.schemaVersion===LEGACY_OVERLAY_SCHEMA_VERSION
+    ? operations.map(()=>1)
+    : Array.isArray(value.transactionSizes) ? value.transactionSizes.map(Number) : [];
+  if(transactionSizes.some(size=>!Number.isInteger(size)||size<1)||transactionSizes.reduce((sum,size)=>sum+size,0)!==operations.length)throw new Error("The reporter overlay transaction boundaries are invalid.");
+  const redoTransactions=Array.isArray(value.redoTransactions)?value.redoTransactions.map(transaction=>{
+    if(!Array.isArray(transaction)||!transaction.length)throw new Error("The reporter overlay redo history is invalid.");
+    return transaction.map(item=>{const result=validateOperation(item);if(!result.ok)throw new Error(result.message);return result.operation});
+  }):[];
+  return { ...emptyOverlay(depositionId), ...value, schemaVersion:OVERLAY_SCHEMA_VERSION, operations, transactionSizes, redoTransactions };
 }
 
 const segmentHolding = (segments, wordId) => segments.findIndex(segment => (segment.asrWordIds || []).includes(wordId));
@@ -107,6 +128,17 @@ function splitSegments(segments, segmentId, beforeWordId) {
   return { ok:true, segments:[...segments.slice(0, index), head, tail, ...segments.slice(index + 1)] };
 }
 
+function joinSegments(segments, operation) {
+  const left=segmentHolding(segments,operation.leadingFirstWordId),boundaryLeft=segmentHolding(segments,operation.leadingWordId),boundaryRight=segmentHolding(segments,operation.trailingWordId),right=segmentHolding(segments,operation.trailingLastWordId);
+  if([left,boundaryLeft,boundaryRight,right].some(index=>index<0))return{ok:false,reason:"WORD_NOT_FOUND"};
+  if(boundaryRight!==boundaryLeft+1||left>boundaryLeft||boundaryRight>right)return{ok:false,reason:"PARAGRAPHS_NOT_ADJACENT"};
+  const joined=segments.slice(left,right+1),leading=joined[0],trailing=joined.at(-1);
+  if(joined.some(item=>item.sourceJobIdentity!==leading.sourceJobIdentity||item.sourceUploadId!==leading.sourceUploadId))return{ok:false,reason:"SOURCE_BOUNDARY"};
+  const merged={...leading,forceParagraphBoundaryBefore:true,asrWordIds:joined.flatMap(item=>item.asrWordIds||[]),end:trailing.end??leading.end};
+  const following=segments[right+1]?{...segments[right+1],forceParagraphBoundaryBefore:true}:null;
+  return{ok:true,segments:[...segments.slice(0,left),merged,...(following?[following]:[]),...segments.slice(right+2)]};
+}
+
 /**
  * Applies the overlay to the projection's segments.
  *
@@ -120,10 +152,10 @@ function splitSegments(segments, segmentId, beforeWordId) {
 export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWordIds = null } = {}) {
   let current = segments.map(segment => ({ ...segment, asrWordIds:[...(segment.asrWordIds || [])] }));
   const orphaned = [];
-  const replaced = new Map(), deleted = new Set(), inserted = new Map();
+  const replaced = new Map(), deleted = new Set(), inserted = new Map(), insertedBefore = new Map(), authoredIds = new Set();
   // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
   // rather than stacking two, and an unflag has one thing to address.
-  const flags = new Map();
+  const flags = new Map(), reviews = new Map();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
@@ -132,6 +164,12 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       const result = splitSegments(current, operation.segmentId, operation.beforeWordId);
       if (!result.ok) return orphan(result.reason);
       current = result.segments;
+      return;
+    }
+    if(operation.op==="join"){
+      const result=joinSegments(current,operation);
+      if(!result.ok)return orphan(result.reason);
+      current=result.segments;
       return;
     }
     if (operation.op === "label") {
@@ -143,12 +181,12 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       return;
     }
     if (operation.op === "replace") {
-      if (!anchorExists(operation.wordId)) return orphan("WORD_NOT_FOUND");
+      if (!anchorExists(operation.wordId) && !authoredIds.has(operation.wordId)) return orphan("WORD_NOT_FOUND");
       replaced.set(operation.wordId, operation.text);
       return;
     }
     if (operation.op === "delete") {
-      if (!anchorExists(operation.wordId)) return orphan("WORD_NOT_FOUND");
+      if (!anchorExists(operation.wordId) && !authoredIds.has(operation.wordId)) return orphan("WORD_NOT_FOUND");
       deleted.add(operation.wordId);
       return;
     }
@@ -168,13 +206,23 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       if (!flags.delete(operation.fromWordId)) return orphan("FLAG_NOT_FOUND");
       return;
     }
-    if (!anchorExists(operation.afterWordId)) return orphan("WORD_NOT_FOUND");
-    const list = inserted.get(operation.afterWordId) ?? [];
+    if(operation.op==="review"){
+      if(!anchorExists(operation.wordId))return orphan("WORD_NOT_FOUND");
+      reviews.set(operation.wordId,{disposition:operation.disposition,at:operation.at,actor:operation.actor});
+      return;
+    }
+    const anchor=operation.afterWordId??operation.beforeWordId;
+    if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
+    const target=operation.beforeWordId?insertedBefore:inserted;
+    const list = target.get(anchor) ?? [];
     // The id is positional, so the same overlay against the same projection produces the same
     // ids every time -- I4. It carries no evidence anchor, which is the point: reporter-authored
     // text must stay distinguishable from anything the microphone produced.
-    list.push({ id:`overlay:${operation.afterWordId}:${list.length + 1}`, text:operation.text, authored:true });
-    inserted.set(operation.afterWordId, list);
+    // Preserve the established after-anchor identity exactly; Phase 5 adds a namespaced form
+    // only for the newly supported before-anchor case, so existing overlays do not drift.
+    const authored={ id:operation.beforeWordId?`overlay:${anchor}:before:${list.length + 1}`:`overlay:${anchor}:${list.length + 1}`, text:operation.text, authored:true };
+    list.push(authored);authoredIds.add(authored.id);
+    target.set(anchor, list);
   });
 
   // Expanded to every word the passage covers, each carrying the flag it belongs to so a click
@@ -189,7 +237,7 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   }
   // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
   // reader reads, and a caller that only asks for the text gets the text.
-  return { segments:current, replaced, deleted, inserted, flagged, orphaned };
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */
@@ -207,4 +255,33 @@ export function appendOperations(overlay, inputs) {
     operations.push(result.operation);
   }
   return { ...emptyOverlay(overlay?.depositionId), ...overlay, operations };
+}
+
+/** Appends one user action, which may contain several low-level operations. */
+export function appendTransaction(overlay, inputs) {
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const batch=[];
+  for(const input of Array.isArray(inputs)?inputs:[inputs]){
+    const result=validateOperation(input);
+    if(!result.ok)throw new Error(result.message);
+    batch.push(result.operation);
+  }
+  if(!batch.length)throw new Error("A reporter transaction requires at least one operation.");
+  return {...current,operations:[...current.operations,...batch],transactionSizes:[...current.transactionSizes,batch.length],redoTransactions:[]};
+}
+
+/** Removes the last complete user action, not merely its final implementation operation. */
+export function undoLastTransaction(overlay){
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const size=current.transactionSizes.at(-1)??0;
+  if(!size)return{overlay:current,removed:null};
+  const removed=current.operations.slice(-size);
+  return{overlay:{...current,operations:current.operations.slice(0,-size),transactionSizes:current.transactionSizes.slice(0,-1),redoTransactions:[...current.redoTransactions,removed]},removed};
+}
+
+export function redoLastTransaction(overlay){
+  const current=validateOverlay(overlay,overlay?.depositionId);
+  const restored=current.redoTransactions.at(-1)??null;
+  if(!restored)return{overlay:current,restored:null};
+  return{overlay:{...current,operations:[...current.operations,...restored],transactionSizes:[...current.transactionSizes,restored.length],redoTransactions:current.redoTransactions.slice(0,-1)},restored};
 }

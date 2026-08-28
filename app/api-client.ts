@@ -1,4 +1,5 @@
-export const LOCAL_API_BASE_URL = "http://127.0.0.1:4317";
+const configuredOrigin = (import.meta as ImportMeta & { env?:Record<string,string|undefined> }).env?.VITE_LOCAL_API_ORIGIN?.trim();
+export const LOCAL_API_BASE_URL = configuredOrigin || "http://127.0.0.1:4317";
 
 export class LocalApiError extends Error {
   status: number;

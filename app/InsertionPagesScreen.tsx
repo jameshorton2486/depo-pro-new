@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 
@@ -29,7 +29,7 @@ const DISPOSITIONS = [
 // produces them yet. Asking a reporter to type one would record a guess as a derivation.
 const CERTIFICATE_FIELDS = [
   { key: "custodialAttorney", label: "Custodial attorney", clause: "The original deposition was delivered to ___", requestedOnly: false },
-  { key: "officerCharges", label: "Deposition officer's charges", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
+  { key: "officerCharges", label: "Deposition officer's charges (amount only)", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
   { key: "chargesResponsibleParty", label: "Charges billed to", clause: "charges to the ___ for preparing the original transcript", requestedOnly: false },
   { key: "certificationDate", label: "Certification date", clause: "Certified to by me this ___ (certificate page)", requestedOnly: false },
   { key: "returnedDate", label: "Transcript returned on", clause: "returned to the deposition officer on ___", requestedOnly: true },
@@ -48,6 +48,26 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [busy, setBusy] = useState(false);
   const [certificate, setCertificate] = useState<Record<CertificateKey, string>>(EMPTY_CERTIFICATE);
+  // What is already on the record, before the reporter can overwrite it.
+  //
+  // This screen used to start at EMPTY_CERTIFICATE and never read. runPreview posts the whole
+  // certificate, and the route rewrites every field it owns -- so Preview on a form that always
+  // looked blank erased certificate values already stored, silently, on certified content. The
+  // route is right: a merge-only save would mean a value entered by mistake could never be
+  // cleared. The screen was wrong to overwrite what it had never shown.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${API}/api/deposition/certification?depositionId=${encodeURIComponent(deposition.id)}`);
+        if (!response.ok) return;
+        const body = (await response.json()) as { certification?: Partial<Record<CertificateKey, string>> };
+        if (cancelled || !body.certification) return;
+        setCertificate((current) => ({ ...current, ...body.certification }));
+      } catch { /* an unreachable API leaves the form as it was; Preview still refuses on its own findings */ }
+    })();
+    return () => { cancelled = true; };
+  }, [deposition.id]);
   const [message, setMessage] = useState("Choose the jurisdiction and signature disposition to preview the certification pages.");
 
   const findings = artifact?.findings ?? preview?.findings ?? [];
@@ -84,7 +104,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   }
 
   async function generate() {
-    setBusy(true); setMessage("Rendering the Word document…");
+    setBusy(true); setMessage("Rendering the certification pages…");
     try {
       const body = (await post("/api/insertion-pages/docx")) as Artifact;
       setArtifact(body);
@@ -160,7 +180,12 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
 
         <div className="insertion-actions">
           <button type="button" className="primary-button" disabled={!ready || busy} onClick={runPreview}>{busy && !artifact ? "Working…" : "Preview certification pages"}</button>
-          <button type="button" className="audio-save-button" disabled={!preview || blocking.length > 0 || busy} onClick={generate}>Generate Word document</button>
+          <button type="button" className="audio-save-button" disabled={!preview || blocking.length > 0 || busy} onClick={generate}>Generate certification pages</button>
+          {/* This screen has no transcript behind it and therefore no authoritative pagination, so
+              what it produces carries no index. The full document is generated in the Workspace,
+              from the complete-transcript model that owns the page numbers -- this hands the
+              reporter there rather than rendering a second, thinner document that looks like one. */}
+          <button type="button" className="secondary-button" onClick={onBack} title="The full transcript is generated in the Workspace, where the page numbering is authoritative.">Full transcript: generate in the Workspace</button>
         </div>
         <p className="insertion-message">{message}</p>
       </section>

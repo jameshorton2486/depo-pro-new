@@ -17,8 +17,8 @@ async function thomasFixture() {
     remote: true,
     remotePlatform: "Zoom",
     attorneys: [
-      { name: "Mr. Nunez", firm: "Nunez Law", address: "San Antonio Texas", represents: ["Plaintiffs"] },
-      { name: "Ms. Alvarado", firm: "Defense Firm", address: "San Antonio Texas", represents: ["Defendants"] },
+      { name: "Mr. Nunez", firm: "Nunez Law", address: "San Antonio Texas", represents: ["Plaintiffs"], side: "PLAINTIFF" },
+      { name: "Ms. Alvarado", firm: "Defense Firm", address: "San Antonio Texas", represents: ["Defendants"], side: "DEFENDANT" },
     ],
     reporterProfile: {
       name: "Test Reporter", licenseNumber: "1234", csrExpiration: "2027-01-01", company: "Test Reporting",

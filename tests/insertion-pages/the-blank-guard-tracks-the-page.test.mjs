@@ -76,7 +76,7 @@ async function assembled(parties) {
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
     depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
     parties,
-    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
+    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
     reporterProfile: {
       name: "Miah Bardot", licenseNumber: "12129", csrExpiration: "2027-06-30",
       address: "7234 Hovingham, San Antonio, Texas 78257", phone: "469 740-9603",
@@ -116,13 +116,13 @@ test("with the parties recorded the render clears and their names are on the pag
   const input = await assembled(PARTIES);
   assert.deepEqual(blockers(input), []);
   // Across the boundary: the guard cleared, so the names have to actually be there.
-  const pages = buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP-20260824-CAP01", generatedAt: "2026-08-24T00:00:00.000Z" });
+  const pages = buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP-20260824-CAP01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true });
   const caption = pages.pages.filter(({ role }) => ["title", "certification1"].includes(role));
   assert.equal(caption.length, 2);
   for (const page of caption) {
     const text = page.lines.map(({ text: line }) => line).join("\n");
-    assert.match(text, /Ruben Vasquez/, `${page.role} prints the plaintiff`);
-    assert.match(text, /Central Texas Logistics, LLC/, `${page.role} prints the defendant`);
+    assert.match(text, /RUBEN VASQUEZ/, `${page.role} prints the plaintiff`);
+    assert.match(text, /CENTRAL TEXAS LOGISTICS, LLC/, `${page.role} prints the defendant`);
   }
 });
 

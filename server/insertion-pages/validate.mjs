@@ -1,3 +1,4 @@
+import { appearancePhrase } from "./assemble.mjs";
 import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
 import { captionJurisdiction } from "./variants.mjs";
@@ -96,6 +97,18 @@ function validateDepositionMethod(input, findings) {
 }
 
 function validateCounsel(input, findings) {
+  // A side nobody recorded blocks the page rather than being omitted or guessed.
+  //
+  // Omitting the line would ship an appearance page missing an attorney who was present -- a
+  // defective certified document that looks complete, which nobody reviewing it would know to
+  // question. Falling back to `represents` would reinstate the party-name coupling this replaced.
+  const unsided = input.appearances.filter((attorney) => !appearancePhrase(attorney)).map((attorney) => attorney.name);
+  if (unsided.length) {
+    findings.push(blocking("APPEARANCE_SIDE_MISSING", "appearances.side",
+      `Record which side each attorney appears for before generating; missing for: ${unsided.join(", ")}.`,
+      { details: { missingNames: unsided } }));
+  }
+
   const appearing = new Set(input.appearances.map((attorney) => normalizedName(attorney.name)));
   const missing = input.counselReconciliation.expectedNames.filter((name) => !appearing.has(normalizedName(name)));
   if (missing.length && !input.counselReconciliation.appearingCounselPhrasingDecision?.reason) {

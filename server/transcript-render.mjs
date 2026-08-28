@@ -15,6 +15,10 @@ import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
+// Product threshold is deliberately configurable and provisional. It is a review aid, not a
+// claim about legal accuracy; Deepgram's measured value remains untouched on every word.
+export const LOW_CONFIDENCE_REVIEW_THRESHOLD = Number(process.env.DEPO_LOW_CONFIDENCE_THRESHOLD ?? 0.8);
+
 /**
  * Indexes ASR word evidence by word id. Evidence arrives per job -- a deposition with three
  * audio files has three evidence documents -- and word ids are namespaced by job identity, so
@@ -71,10 +75,11 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   const withText = segments.map(segment => {
     const parts = [];
     for (const id of segment.asrWordIds) {
-      if (applied.deleted.has(id)) { for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text); continue; }
+      for (const extra of applied.insertedBefore.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
+      if (applied.deleted.has(id)) { for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text); continue; }
       const word = words.get(id);
       parts.push(applied.replaced.get(id) ?? word?.punctuatedWord ?? word?.word ?? "");
-      for (const extra of applied.inserted.get(id) ?? []) parts.push(extra.text);
+      for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
     }
     const rebuilt = parts.filter(Boolean).join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
     return { ...segment, text:rebuilt || segment.text };
@@ -91,10 +96,14 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       if (!word) { findings.push({ code:"WORD_NOT_IN_EVIDENCE", wordId:id, paragraphIndex:index, message:`Segment word ${id} has no matching ASR evidence.` }); continue; }
       if (seen.has(id)) { findings.push({ code:"WORD_RENDERED_TWICE", wordId:id, paragraphIndex:index, message:`Word ${id} is claimed by more than one segment.` }); continue; }
       seen.add(id);
+      for (const extra of applied.insertedBefore.get(id) ?? []) if(!applied.deleted.has(extra.id)) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:applied.replaced.get(extra.id) ?? extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true, ...(applied.replaced.has(extra.id)?{edited:true,originalText:extra.text}:{}) });
       const original = word.punctuatedWord ?? word.word ?? "";
       const override = applied.replaced.get(id);
+      const review=applied.reviews.get(id)??null;
+      const reviewDisposition=review?.disposition??(override!==undefined||applied.deleted.has(id)?"CORRECTED":null);
       resolved.push({
-        id:word.id, text:override ?? original, start:word.start, end:word.end,
+        id:word.id, tokenId:word.id, tokenKind:"evidence", sourceWordId:word.id,
+        text:override ?? original, start:word.start, end:word.end,
         confidence:word.confidence, deepgramSpeaker:word.deepgramSpeaker,
         // A deleted word keeps its id and its original text. It is struck from the reading, not
         // removed from the record -- I1 -- so the evidence chain survives the edit.
@@ -103,10 +112,12 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
         // The word reads exactly as it did unflagged. `flaggedFrom` names the passage it belongs
         // to so a click anywhere inside one can clear all of it.
         ...(applied.flagged.has(id) ? { flagged:true, flaggedFrom:applied.flagged.get(id) } : {}),
+        reviewDisposition, reviewAt:review?.at??null, reviewActor:review?.actor??null,
+        lowConfidence:Number.isFinite(word.confidence)&&word.confidence<LOW_CONFIDENCE_REVIEW_THRESHOLD&&!reviewDisposition,
       });
       // Reporter-authored text carries no Deepgram anchor, which is what keeps audio-derived and
       // human-added words distinguishable at a glance.
-      for (const extra of applied.inserted.get(id) ?? []) resolved.push({ id:extra.id, text:extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true });
+      for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) resolved.push({ id:extra.id, tokenId:extra.id, tokenKind:"authored", sourceWordId:null, text:applied.replaced.get(extra.id) ?? extra.text, start:null, end:null, confidence:null, deepgramSpeaker:null, authored:true, ...(applied.replaced.has(extra.id)?{edited:true,originalText:extra.text}:{}) });
     }
     // `start` is what a click seeks to. It prefers the first resolved word's own timestamp over
     // the segment's, because the segment boundary is derived and the word time is measured --
@@ -116,7 +127,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     const start = resolved.find(word => Number.isFinite(word.start))?.start ?? paragraph.start ?? null;
     const end = [...resolved].reverse().find(word => Number.isFinite(word.end))?.end ?? paragraph.end ?? null;
     return {
-      id:`paragraph:${index + 1}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
+      // The first evidence anchor is stable across unrelated edits and reloads. Render order is
+      // presentation, not identity: inserting or splitting an earlier paragraph must not rename
+      // everything after it.
+      id:`paragraph:${paragraph.asrWordIds?.[0] ?? paragraph.segmentIds?.[0] ?? `empty:${index + 1}`}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
       // Carried, not parsed. speakerBuckets keys the speaker map by (job, speaker) and had to
@@ -194,10 +208,11 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     derivedFrom:working?.derivedFrom ?? [],
     speakerMap:working?.speakerMap ?? null, labels, examinerIdentity,
     counts:{ segments:segments.length, projectedSegments:projected.length, paragraphs:paragraphs.length, words:seen.size, evidenceWords:words.size,
-      operations:overlay?.operations?.length ?? 0, orphaned:applied.orphaned.length,
+      operations:overlay?.operations?.length ?? 0, redoTransactions:overlay?.redoTransactions?.length ?? 0, orphaned:applied.orphaned.length,
       // Passages, not words. "31 flagged" would mean nothing to a scopist working through them;
       // the number they care about is how many places still need another listen.
-      flags:new Set(applied.flagged.values()).size },
+      flags:new Set(applied.flagged.values()).size,
+      lowConfidenceUnresolved:paragraphs.flatMap(paragraph=>paragraph.words).filter(word=>word.lowConfidence).length },
     diarized, paragraphs, findings,
   };
 }

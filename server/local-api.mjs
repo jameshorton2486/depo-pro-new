@@ -3,13 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
-import {allowedApiOrigins} from "./api-origins.mjs";
+import {allowedApiOrigins,localApiPort} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
-import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
+import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, readAudioAuditIfPresent, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
-import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
+import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
+import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
@@ -38,7 +40,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionCertification, writeDepositionCounsel, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, readDepositionCertification, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -46,6 +48,14 @@ import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
+import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
+import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
+
+// What a rendered document actually is, decided from the model that was actually rendered.
+// COMPLETE_RECORD_TYPE is imported rather than restated so the browser's idea of "complete" and
+// this one cannot drift apart. document-status.mjs is pure -- no DOM, no fs -- which is what
+// makes it safe to read from both sides.
+const documentKindOf = model => model?.recordType === COMPLETE_RECORD_TYPE ? "complete-transcript" : "testimony-only";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironment = path.join(root, ".env.local");
@@ -53,7 +63,7 @@ if (fs.existsSync(localEnvironment)) process.loadEnvFile(localEnvironment);
 const depositionStorageRoot = configuredDepositionStorageRoot();
 const terminologyPrompt = fs.readFileSync(path.join(root, "prompts", "extraction", "case_terms", "v2.md"), "utf8");
 const secretFile = path.join(root, "data", "secrets.dat");
-const port = 4317;
+const port = localApiPort();
 const allowedOrigins = allowedApiOrigins();
 
 function dpapi(mode, value) {
@@ -97,16 +107,22 @@ function contentBlock(file) {
   throw new Error("Claude extraction currently accepts PDF or plain-text notices. Convert Word files to PDF first.");
 }
 
-async function transcribeAudioWithCompatibility({ apiKey, audit, source, derivativeOperationId, expectedAudioSha256, audioFile, request, keyterms, operationId }) {
+// `audit` is null for live-captured audio, which never passed through intake. Nothing on the
+// success path needs it: runTranscriptionJob resolves the file from the deposition record and
+// re-hashes it against the frozen sha256 before every job, so the identity check is unaffected.
+// Only the media-rejection fallback needs an audit, because the derivative it builds is written
+// into the intake directory -- and it refuses out loud rather than inventing one.
+async function transcribeAudioWithCompatibility({ apiKey, audit, uploadId, source, derivativeOperationId, expectedAudioSha256, audioFile, request, keyterms, operationId }) {
   const requestedPath = audioFile;
   try {
-    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, request, keyterms, uploadId:audit.uploadId, operationId });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: requestedPath, request, keyterms, uploadId, operationId });
     result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "deposition-workspace", converted: false, reason: "Deepgram accepted the frozen deposition audio directly." };result.delivery={source:"deposition-workspace",sha256:expectedAudioSha256,bytes:fs.statSync(requestedPath).size,converted:false};return result;
   } catch (error) {
     if (!isDeepgramMediaError(error)) throw error;
+    if (!audit) throw new Error(`Deepgram could not decode ${path.basename(audioFile)}, and Depo-Pro builds its compatibility copy inside the audio intake record this audio does not have. It was captured locally rather than uploaded. The recording itself is unaffected and still verifies against its recorded SHA-256.`);
     const fallback = await createDeepgramCompatibilityDerivative(root, audit, source,derivativeOperationId);
     if(fallback.derivative.sourceSha256!==expectedAudioSha256)throw new Error("The compatibility derivative was not created from the frozen deposition audio.");
-    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, request, keyterms, uploadId:audit.uploadId, operationId });
+    const result = await transcribeWithDeepgram({ apiKey, filePath: fallback.path, request, keyterms, uploadId, operationId });
     result.normalized.audioDelivery={ requestedSource: source, deliveredSource: "compatibility-wav", converted: true, reason: "Deepgram could not decode the selected file, so Depo-Pro automatically retried with a lossless PCM WAV derivative.", derivativeKey: fallback.derivative.key, derivativeSha256: fallback.derivative.sha256, sourceSha256: fallback.derivative.sourceSha256 };result.delivery={source:"compatibility-wav",sha256:fallback.derivative.sha256,sourceSha256:fallback.derivative.sourceSha256,bytes:fallback.derivative.bytes,converted:true,derivativeKey:fallback.derivative.key};result.transportAttempts=[{status:error.status,code:error.code,rawResponseBytes:error.rawResponseBytes||null,headers:error.responseHeaders||{},outcome:"media_rejected"}];return result;
   }
 }
@@ -269,8 +285,8 @@ const server = http.createServer(async (req,res) => {
       return sendMedia(req,res,file,{"content-type":mediaContentType(file,"audio/wav"),"access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"});
     }
     if (req.url === "/api/audio/transcribe" && req.method === "POST") {
-      const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAudit(root,input.uploadId);
-      const result=await runTranscriptionJob(root,{depositionId:input.depositionId,uploadId:input.uploadId,keytermOverrideReason:input.keytermOverrideReason||"",storageRoot:depositionStorageRoot,submit:({audio,audioFile,request,keyterms,operationId})=>transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,source:audio.source,derivativeOperationId:audio.operationId,expectedAudioSha256:audio.sha256,audioFile,request,keyterms,operationId})});
+      const input=await body(req,64*1024),config=loadSecrets(),audit=readAudioAuditIfPresent(root,input.uploadId);
+      const result=await runTranscriptionJob(root,{depositionId:input.depositionId,uploadId:input.uploadId,keytermOverrideReason:input.keytermOverrideReason||"",storageRoot:depositionStorageRoot,submit:({audio,audioFile,request,keyterms,operationId})=>transcribeAudioWithCompatibility({apiKey:config?.deepgramApiKey,audit,uploadId:input.uploadId,source:audio.source,derivativeOperationId:audio.operationId,expectedAudioSha256:audio.sha256,audioFile,request,keyterms,operationId})});
       return json(res,200,{cached:result.cached,job:result.job,evidence:result.evidence,workingTranscript:result.workingTranscript,transcript:result.normalized||null},origin);
     }
     if(req.url?.startsWith("/api/transcription/jobs?")&&req.method==="GET"){const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId"),jobId=url.searchParams.get("jobId");return json(res,200,jobId?getTranscriptionJob(root,{depositionId,jobId,storageRoot:depositionStorageRoot}):{jobs:listTranscriptionJobs(root,{depositionId,storageRoot:depositionStorageRoot})},origin)}
@@ -303,12 +319,48 @@ const server = http.createServer(async (req,res) => {
       const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
       return json(res,200,getTranscriptPrintModel(root,{ depositionId, storageRoot:depositionStorageRoot, examinerIdentity:url.searchParams.get("examinerIdentity")||null }),origin);
     }
+    // One resource, GET and POST, rather than a field-per-endpoint surface. The readiness
+    // projection is computed server-side and returned with it: the browser displays readiness,
+    // it does not decide it.
+    if(req.url?.startsWith("/api/transcript/assembly?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,assemblyReadiness(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/transcript/assembly"&&req.method==="POST"){
+      const input=await body(req,256*1024);
+      try{
+        const written=writeAssembly(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,assembly:input.assembly,expectedRevision:input.expectedRevision,actor:input.actor});
+        return json(res,200,{...written,...assemblyReadiness(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot})},origin);
+      }catch(error){
+        // Both registers, from the server. 409 for a conflict because the caller's next move is
+        // to reload and retry -- a different instruction from "fix these fields".
+        if(error instanceof AssemblyConflictError)return json(res,409,{error:error.message,code:error.code,expectedRevision:error.expected,actualRevision:error.actual},origin);
+        if(error instanceof AssemblyRefusedError)return json(res,400,{error:error.message,code:error.code,findings:error.findings},origin);
+        throw error;
+      }
+    }
+    if(req.url?.startsWith("/api/transcript/complete-document-model?")&&req.method==="GET"){
+      const url=new URL(req.url,"http://localhost"),depositionId=url.searchParams.get("depositionId");
+      return json(res,200,await getCompleteTranscriptModel(root,{depositionId,storageRoot:depositionStorageRoot,examinerIdentity:url.searchParams.get("examinerIdentity")||null}),origin);
+    }
+    // documentKind is reported by whichever endpoint actually ran, read off the model that was
+    // actually rendered. The Workspace used to name its output from its own cached record type,
+    // which can be stale by the time the answer arrives -- the silent-fallback defect one layer
+    // up. What the reporter is told a document is now comes from the side that made it.
+    if(req.url==="/api/transcript/complete-document-docx"&&req.method==="POST"){
+      const input=await body(req,64*1024),model=await getCompleteTranscriptModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
+      return json(res,200,{...createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel:model,storageRoot:depositionStorageRoot}),documentKind:documentKindOf(model)},origin);
+    }
+    if(req.url==="/api/transcript/final-document-docx"&&req.method==="POST"){
+      const input=await body(req,64*1024),printModel=getTranscriptPrintModel(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,examinerIdentity:input.examinerIdentity||null});
+      return json(res,200,{...createTranscriptDocxArtifact(root,{depositionId:input.depositionId,printModel,storageRoot:depositionStorageRoot}),documentKind:documentKindOf(printModel)},origin);
+    }
     // The only two write paths for reporter edits. Deliberately not an editable operation list:
     // append and undo are enough to work, and every additional verb is another way for the
     // record of what a reporter did to stop matching what they did.
     if(req.url==="/api/transcript/overlay"&&req.method==="POST"){
       const input=await body(req,1024*1024);
-      const overlay=appendReporterOperations(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,operations:input.operations??input.operation});
+      const overlay=appendReporterOperations(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,operations:input.operations??input.operation,expectedReviewStateHash:input.expectedReviewStateHash??null});
       return json(res,200,{overlay},origin);
     }
     if(req.url==="/api/transcript/overlay/undo"&&req.method==="POST"){
@@ -316,15 +368,38 @@ const server = http.createServer(async (req,res) => {
       const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
       return json(res,200,{overlay,removed},origin);
     }
+    if(req.url==="/api/transcript/overlay/redo"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const {overlay,restored}=redoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      return json(res,200,{overlay,restored},origin);
+    }
     // Counsel only. The one write the canonical record has outside intake, and it stays narrow
     // on purpose: without it the Label panel offers no attorneys on any deposition whose Notice
     // extraction missed them, and the alternative is editing the record by hand.
     // The certificate facts only a reporter can supply. They go to the canonical record rather
     // than into the render request, so they arrive carrying REPORTER_ENTERED provenance instead of
     // as bare values on an operator payload nothing validates.
+    // The court and the deposition method, which nothing could set after intake. The route is
+    // deliberately as narrow as the certification one beside it: a closed field list, refused by
+    // name, so it cannot become a general canonical-record patch endpoint by accident.
+    if(req.url==="/api/deposition/proceeding"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionProceeding(root,{depositionId:input.depositionId,proceeding:input.proceeding,storageRoot:depositionStorageRoot}),origin);
+    }
+    // The screen must be able to see what it is about to overwrite.
+    if(req.url?.startsWith("/api/deposition/certification?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionCertification(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url==="/api/deposition/certification"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionCertification(root,{depositionId:input.depositionId,certification:input.certification,storageRoot:depositionStorageRoot}),origin);
+    }
+    // GET beside the POST: the screen that chooses an examining attorney needs the same canonical
+    // ids the assembly stores, and there was no way to ask for them.
+    if(req.url?.startsWith("/api/deposition/counsel?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionCounsel(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url==="/api/deposition/counsel"&&req.method==="POST"){
       const input=await body(req,64*1024);
@@ -332,6 +407,10 @@ const server = http.createServer(async (req,res) => {
       // The candidate list is returned with it so the caller never has to guess whether the
       // roster it is about to label against reflects what was just saved.
       return json(res,200,{...written,candidates:getSpeakerCandidates(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}).candidates},origin);
+    }
+    if(req.url==="/api/deposition/honorific"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeParticipantHonorific(root,{depositionId:input.depositionId,participantId:input.participantId,honorific:input.honorific??null,who:input.who||"Workspace reporter",storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url?.startsWith("/api/transcript/speaker-candidates?")&&req.method==="GET"){const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");return json(res,200,getSpeakerCandidates(root,{depositionId,storageRoot:depositionStorageRoot}),origin)}
     if(req.url==="/api/transcript/speaker-map"&&req.method==="POST"){const input=await body(req,256*1024);return json(res,200,reconcileDepositionSpeakers(root,{depositionId:input.depositionId,assignments:input.assignments,storageRoot:depositionStorageRoot}),origin)}
@@ -410,4 +489,17 @@ const server = http.createServer(async (req,res) => {
     }    return json(res,404,{error:"Not found."},origin);
   } catch(error) {if(error?.code==="WORKING_TRANSCRIPT_NOT_CREATED")return json(res,404,{error:error.message,code:error.code},origin);const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
-server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));
+// Binding a port is a side effect of RUNNING this file, not of reading a value out of it.
+//
+// Until this guard existed, `import`ing this module started a listener. That is why every test
+// that needed to know something about these routes read the file as TEXT with readFileSync and
+// asserted on source strings -- eight of them do, and one says so in a comment. Source pinning is
+// a poor instrument: it proves a literal is present, not that the route behaves. Checkpoint 2
+// adds the assembly write path here, and the write path for document-assembly authority is the
+// last thing that should be checked by grepping for its own name.
+//
+// `export`s above are now safe to import. The server starts only when this file is the process
+// entry point, which is how scripts/dev.mjs spawns it.
+export { server };
+const isEntryPoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntryPoint) server.listen(port,"127.0.0.1",()=>console.log(`Depo Pro local API ready at http://127.0.0.1:${port}`));

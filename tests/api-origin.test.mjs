@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { allowedApiOrigins } from "../server/api-origins.mjs";
+import { allowedApiOrigins, localApiPort } from "../server/api-origins.mjs";
 
 test("the allowed origins follow the port this tree serves on", () => {
   assert.deepEqual([...allowedApiOrigins({ PORT: "3005" })],
@@ -37,6 +37,12 @@ test("an unreadable PORT throws rather than quietly trusting 3000", () => {
   // failure the per-tree ports exist to prevent, done silently.
   for (const raw of ["abc", "99999", "0", "-1", "30 00"])
     assert.throws(() => allowedApiOrigins({ PORT: raw }), /not a port number/, `PORT=${raw}`);
+});
+
+test("the local API keeps 4317 by default and accepts an isolated override", () => {
+  assert.equal(localApiPort({}), 4317);
+  assert.equal(localApiPort({ LOCAL_API_PORT:"4331" }), 4331);
+  assert.throws(() => localApiPort({ LOCAL_API_PORT:"wrong" }), /not a port number/);
 });
 
 test("the API asks for the allowlist rather than carrying one", () => {

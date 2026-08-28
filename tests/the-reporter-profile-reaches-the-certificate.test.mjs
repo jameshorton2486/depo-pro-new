@@ -46,7 +46,7 @@ function render(reporterProfile) {
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
     parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
     depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
-    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
+    attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
     reporterProfile,
   });
   const assembled = assembleInsertionInput({
@@ -62,7 +62,7 @@ function render(reporterProfile) {
     template,
   });
   const blocking = validateInsertionInput(assembled).filter(finding => finding.severity === "blocking");
-  return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z" }) };
+  return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true }) };
 }
 
 test("the store keeps both fields now, and still drops a firm registration number", t => {

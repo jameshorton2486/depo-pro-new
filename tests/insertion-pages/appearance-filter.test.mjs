@@ -22,7 +22,7 @@ import { assembleInsertionInput } from "../../server/insertion-pages/assemble.mj
 const appearanceText = pages =>
   (pages.pages.find(page => page.role === "appearances")?.lines ?? []).map(line => line.text.trim());
 
-const attorney = (name, firm, represents, actualAppearance) => ({ id:name, fullName:name, firm, represents, actualAppearance });
+const attorney = (name, firm, represents, actualAppearance) => ({ id:name, fullName:name, firm, represents, actualAppearance, side:"PLAINTIFF" });
 const assemble = (counsel, participants) => assembleInsertionInput({
   record:{ counsel, parties:[], participants }, intake:{}, operator:{}, pagination:{}, template:{},
 });
@@ -69,7 +69,7 @@ async function renderedPages(counsel, participants) {
     record:{ counsel, parties:[], participants, case:{}, deposition:{} }, intake:{}, template, pagination:{},
     operator:{ jurisdiction:"texas-state", signatureDisposition:"requested", signatureDispositionBasis:"Stated on the record" },
   });
-  return buildTexasInsertionPageSet(assembled, { setId:"s", depositionId:"d", generatedAt:"2026-08-19T00:00:00Z" });
+  return buildTexasInsertionPageSet(assembled, { setId:"s", depositionId:"d", generatedAt:"2026-08-19T00:00:00Z", certificateOnly: true });
 }
 
 test("ALSO PRESENT prints even when nobody was", async () => {
@@ -86,7 +86,7 @@ test("ALSO PRESENT prints even when nobody was", async () => {
 
 test("an absent field is omitted, not rendered as a blank line", async () => {
   // Nunez prints on the Thomas page with no phone and no email at all.
-  const base = { id:"a", fullName:"Steven A. Nunez", represents:["Delia Garza"], actualAppearance:true };
+  const base = { id:"a", fullName:"Steven A. Nunez", represents:["Delia Garza"], actualAppearance:true, side:"PLAINTIFF" };
   const without = appearanceText(await renderedPages([base], { videographers:[], otherAttendees:[] }));
   const withFirm = appearanceText(await renderedPages([{ ...base, firm:"Brain and Spine Personal" }], { videographers:[], otherAttendees:[] }));
 

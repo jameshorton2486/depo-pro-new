@@ -19,6 +19,7 @@ function joinText(left, right) {
 }
 
 function canMerge(paragraph, segment) {
+  if (segment.forceParagraphBoundaryBefore) return false;
   if (!sameSpeaker(paragraph, segment)) return false;
   if (!Number.isFinite(paragraph.end) || !Number.isFinite(segment.start)) return false;
   const gap = segment.start - paragraph.end;

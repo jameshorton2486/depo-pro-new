@@ -8,7 +8,9 @@
 // XPS print image plus the DOCX), not taken from a specification. Where the specimen was
 // internally inconsistent, the plurality form is used and the reason is recorded on the rule.
 
-export const LINE_WIDTH = 62; // measured: right edge at 7.45in, 10 cpi, col 0 at 1.25in
+import { TEXAS_FREELANCE_DEPOSITION_V1 } from "./texas-freelance-deposition-profile.mjs";
+
+export const LINE_WIDTH = TEXAS_FREELANCE_DEPOSITION_V1.charactersPerLine;
 
 export const ELEMENT = Object.freeze({
   QUESTION: "QUESTION", ANSWER: "ANSWER", COLLOQUY: "COLLOQUY", NEW_PARAGRAPH: "NEW_PARAGRAPH",
@@ -110,9 +112,9 @@ export const LAYOUT = Object.freeze({
 // The page the specimen is set on, read from its sectPr. Present so the centre stop can be
 // derived rather than asserted: a margin change must move the stop, not silently invalidate it.
 export const PAGE = Object.freeze({
-  widthTwips: 12240,   // 8.5in
-  heightTwips: 15840,  // 11in
-  marginTwips: Object.freeze({ left:1800, right:1440, top:1440, bottom:1440 }),
+  widthTwips: TEXAS_FREELANCE_DEPOSITION_V1.page.widthTwips,
+  heightTwips: TEXAS_FREELANCE_DEPOSITION_V1.page.heightTwips,
+  marginTwips: Object.freeze({ left:TEXAS_FREELANCE_DEPOSITION_V1.text.leftMarginTwips, right:TEXAS_FREELANCE_DEPOSITION_V1.text.rightMarginTwips, top:TEXAS_FREELANCE_DEPOSITION_V1.text.topMarginTwips, bottom:TEXAS_FREELANCE_DEPOSITION_V1.text.bottomMarginTwips }),
 });
 
 // Tab positions are measured from the left margin, so the centre of the paper is half the page
@@ -120,7 +122,7 @@ export const PAGE = Object.freeze({
 const PAGE_CENTRE_FROM_MARGIN = PAGE.widthTwips / 2 - PAGE.marginTwips.left;
 
 export const TAB_STOPS = Object.freeze({
-  leftInches: Object.freeze([0.5, 1.0, 1.5]),
+  leftInches: TEXAS_FREELANCE_DEPOSITION_V1.tabs.inches,
   centreInches: PAGE_CENTRE_FROM_MARGIN / 1440,
   twips: Object.freeze({ left:Object.freeze([720, 1440, 2160]), centre:PAGE_CENTRE_FROM_MARGIN }),
 });
@@ -178,10 +180,13 @@ export function buildSpeakerLabels(candidates = []) {
     if (FIXED_LABELS[role]) { labels[id] = FIXED_LABELS[role]; continue; }
     const name = String(candidate?.label ?? candidate?.fullName ?? "").trim();
     const surname = name.split(/\s+/).filter(Boolean).at(-1) ?? "";
-    const honorific = String(candidate?.honorific ?? "").trim().replace(/\.?$/, ".");
+    const rawHonorific=String(candidate?.honorific??"").trim().toUpperCase();
+    const honorific = rawHonorific==="NONE"?"":rawHonorific.replace(/\.?$/, ".");
     if (!candidate?.honorific) {
       findings.push({ code:"HONORIFIC_MISSING", speakerIdentity:id, name, message:`No honorific recorded for ${name || id}. The label reads "${surname.toUpperCase()}" until one is set; Depo-Pro will not guess between MR., MS., and DR.` });
       labels[id] = surname.toUpperCase();
+    } else if(rawHonorific==="NONE") {
+      labels[id]=surname.toUpperCase();
     } else {
       labels[id] = `${honorific} ${surname}`.toUpperCase();
     }
@@ -202,7 +207,13 @@ export function buildSpeakerLabels(candidates = []) {
  */
 export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null } = {}) {
   let examiner = examinerIdentity;
-  let previous = null;
+  // Attorney colloquy can interrupt a question without closing its Q/A relationship. Keep that
+  // semantic state separately from the immediately preceding rendered element so an objection
+  // does not turn the responsive testimony into generic witness colloquy.
+  let pendingQuestion = false;
+  // A resumption marker survives the responsive answer: the next question is still the
+  // examiner's return from the intervening attorney colloquy.
+  let resumptionByLinePending = false;
   return paragraphs.map(paragraph => {
     const role = String(paragraph?.transcriptRole ?? "").toUpperCase();
     const identity = paragraph?.speakerIdentity ?? null;
@@ -210,26 +221,34 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
 
     // The witness answering a question is "A."; the witness speaking when no question is open
     // -- asking to see an exhibit, responding to the reporter -- is "THE WITNESS:". The
-    // specimen uses both, 2 of the latter. The distinction is the preceding element, and it is
-    // a judgement the reporter can override from the Workspace when it is wrong.
+    // specimen uses both, 2 of the latter. The distinction is whether a question remains open;
+    // attorney colloquy can intervene without closing it. The reporter can still override this
+    // judgement from the Workspace when the record establishes otherwise.
     if (role === "WITNESS") {
-      if (previous === ELEMENT.QUESTION) return emit(ELEMENT.ANSWER, "A.", null);
+      if (pendingQuestion) return emit(ELEMENT.ANSWER, "A.", null, false);
       return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS.WITNESS}:`, null);
     }
     if (identity && examiner && identity === examiner) {
-      const byLine = previous !== null && previous !== ELEMENT.QUESTION && previous !== ELEMENT.ANSWER && label ? `(BY ${label})` : null;
-      return emit(ELEMENT.QUESTION, "Q.", byLine);
+      const byLine = resumptionByLinePending && label ? `(BY ${label})` : null;
+      resumptionByLinePending = false;
+      return emit(ELEMENT.QUESTION, "Q.", byLine, true);
     }
     if (!examiner && ATTORNEY_ROLES.has(role) && role === "QUESTIONING_ATTORNEY" && identity) {
       // First questioning attorney seen becomes the examiner, so a transcript with no examiner
       // set still renders as questions and answers rather than as undifferentiated colloquy.
       examiner = identity;
-      return emit(ELEMENT.QUESTION, "Q.", null);
+      resumptionByLinePending = false;
+      return emit(ELEMENT.QUESTION, "Q.", null, true);
     }
-    return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null);
+    if(ATTORNEY_ROLES.has(role)){
+      if(pendingQuestion)resumptionByLinePending = true;
+      return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
+    }
+    resumptionByLinePending = false;
+    return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, false);
 
-    function emit(elementType, token, byLine) {
-      previous = elementType;
+    function emit(elementType, token, byLine, nextPendingQuestion = false) {
+      pendingQuestion = nextPendingQuestion;
       return { ...paragraph, elementType, label:token, byLine, layout:LAYOUT[elementType], unlabeledSpeaker:!label && elementType === ELEMENT.COLLOQUY };
     }
   });

@@ -44,7 +44,7 @@ function scratch(t) {
       // caption.plaintiffs and caption.defendants are guarded now, so a record with no parties
       // in either role cannot render a caption at all.
       parties: [{ name: "Maria Elena Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
-      attorneys: [{ name: "Pat Counsel", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
+      attorneys: [{ name: "Pat Counsel", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
       reporterProfile: {
         name: "Miah Bardot", licenseNumber: "12129", csrState: "Texas", csrExpiration: "2027-06-30",
         address: "7234 Hovingham, San Antonio, Texas 78257", phone: "469 740-9603",

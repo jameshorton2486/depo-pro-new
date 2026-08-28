@@ -159,6 +159,41 @@ export function writeDepositionParties(root, { depositionId, parties, storageRoo
  * removes would be reconciling against someone who is no longer in the record, and
  * reconcileSpeakerMap already refuses an identity the canonical record does not contain.
  */
+/**
+ * The counsel roster, for a caller that needs to name one of them by canonical id.
+ *
+ * A complete-transcript assembly stores `operator.examiningCounselId` and never a typed name, so a
+ * screen offering that choice has to be handed the same ids the record holds. Speaker candidates
+ * will not do: that list merges counsel with the witness, the reporter, interpreters and
+ * videographers, and once `appearanceRole` is unset -- which it is for manually entered counsel --
+ * nothing in it distinguishes an attorney from anyone else.
+ */
+export function readDepositionCounsel(root, { depositionId, storageRoot } = {}) {
+  const file = path.join(depositionDirectory(root, depositionId, { storageRoot }), "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const value = field => field && typeof field === "object" && "value" in field ? field.value : field;
+  return {
+    depositionId,
+    counsel: (record.counsel ?? []).map(entry => ({
+      // Every editable field, so a screen amending one attorney can send the rest back unchanged
+      // rather than reconstructing them. Chief among them the id: counselEntry falls back to
+      // `attorney-${index + 1}` when none is supplied, so an editor that dropped it would renumber
+      // counsel by position and leave the examiner reference and every speaker mapping pointing at
+      // an id that no longer exists -- while the save looked entirely successful.
+      id: entry.id,
+      name: String(value(entry.fullName) ?? "").trim(),
+      honorific: value(entry.honorific) ?? "",
+      firm: String(value(entry.firm) ?? "").trim(),
+      represents: value(entry.represents) ?? [],
+      appearanceRole: value(entry.appearanceRole) ?? "",
+      side: value(entry.side) ?? "",
+      sideOther: value(entry.sideOther) ?? "",
+      actualAppearance: value(entry.actualAppearance),
+    })),
+  };
+}
+
 export function writeDepositionCounsel(root, { depositionId, counsel, storageRoot } = {}) {
   if (!Array.isArray(counsel)) throw new Error("Counsel must be an array.");
   const entries = counsel.map((attorney, index) => {
@@ -200,6 +235,30 @@ export function writeDepositionCounsel(root, { depositionId, counsel, storageRoo
  */
 const CERTIFICATION_FIELDS = Object.freeze(["custodialAttorney", "officerCharges", "chargesResponsibleParty", "certificationDate", "furtherCertificationDate"]);
 
+/**
+ * The stored certificate, as the strings a form has to show.
+ *
+ * writeDepositionCertification rewrites every field it owns, setting anything absent to MISSING --
+ * correct for a form that shows everything, and a data-loss path for one that shows nothing.
+ * InsertionPagesScreen initialised to EMPTY_CERTIFICATE and never read, so Preview on a screen
+ * that always looked blank erased values already on the record. The route is not the defect; a
+ * merge-only route would mean a reporter could never clear a value entered by mistake, turning a
+ * display bug into a permanent one. The screen has to load first, and this is what it loads.
+ *
+ * MISSING reads back as "" because that is what an empty control holds, and "" written back
+ * becomes MISSING again -- so a form the reporter never touches round-trips to exactly the record
+ * it started from.
+ */
+export function readDepositionCertification(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const text = (envelope) => (envelope && envelope.value !== null && envelope.value !== undefined ? String(envelope.value) : "");
+  const certification = Object.fromEntries(CERTIFICATION_FIELDS.map((key) => [key, text(record.certification?.[key])]));
+  return { depositionId, certification: { ...certification, returnedDate: text(record.signature?.returnedDate) } };
+}
+
 export function writeDepositionCertification(root, { depositionId, certification = {}, storageRoot } = {}) {
   if (!certification || typeof certification !== "object" || Array.isArray(certification)) throw new Error("Certification must be an object.");
   const unknown = Object.keys(certification).filter((key) => key !== "returnedDate" && !CERTIFICATION_FIELDS.includes(key));
@@ -223,6 +282,63 @@ export function writeDepositionCertification(root, { depositionId, certification
 
   atomicJson(file, { ...record, certification: certified, signature });
   return { depositionId, certification: certified, signature: { returnedDate: signature.returnedDate } };
+}
+
+/**
+ * Where the deposition was taken, and in what court.
+ *
+ * These four have slots in the canonical record and a place on the certified page, and until now
+ * no screen could set any of them. They are written only by buildCanonicalRecord at intake, from a
+ * Notice the manual route does not have -- so a deposition created by the manual route could never
+ * produce a complete transcript, at any point in its life. This is the missing writer.
+ *
+ * `remote` is three-state and stays that way. A boolean defaulting to false records "taken in
+ * person" when nobody said so, which is the defect the note at the top of
+ * canonical-deposition-record.mjs already names: an unticked checkbox becoming a finding of the
+ * source document. Undefined means unrecorded and keeps blocking, which is correct -- validate.mjs
+ * refuses rather than guessing, because "a certificate that guesses is worse than one that is
+ * refused".
+ *
+ * An untouched text control writes null with state MISSING, never "". isBlank collapses the two,
+ * so an empty string would render a dropped clause with a clean bill of health -- exactly what
+ * UNEXPECTED_BLANK exists to catch. Same rule as writeDepositionCertification above, for the same
+ * reason.
+ */
+const PROCEEDING_TEXT_FIELDS = Object.freeze(["court", "location", "remotePlatform"]);
+
+export function writeDepositionProceeding(root, { depositionId, proceeding = {}, storageRoot } = {}) {
+  if (!proceeding || typeof proceeding !== "object" || Array.isArray(proceeding)) throw new Error("Proceeding must be an object.");
+  const unknown = Object.keys(proceeding).filter((key) => key !== "remote" && !PROCEEDING_TEXT_FIELDS.includes(key));
+  if (unknown.length) throw new Error(`Unsupported proceeding field: ${unknown.join(", ")}`);
+  if (proceeding.remote !== undefined && proceeding.remote !== null && typeof proceeding.remote !== "boolean") {
+    throw new Error("Whether the deposition was remote must be true, false, or null for unrecorded.");
+  }
+
+  const entry = (value) => {
+    const text = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+    return text ? field(text, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }) : field(null, { source: "REPORTER_ENTERED", state: "MISSING" });
+  };
+  // Not entry(). entry() reads false as blank and would erase an answer of "in person" into
+  // MISSING, which is the same field saying the reporter never answered.
+  const method = (value) => typeof value === "boolean"
+    ? field(value, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" })
+    : field(null, { source: "REPORTER_ENTERED", state: "MISSING" });
+
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+
+  const nextCase = { ...record.case, court: entry(proceeding.court) };
+  const nextDeposition = {
+    ...record.deposition,
+    remote: method(proceeding.remote),
+    location: entry(proceeding.location),
+    remotePlatform: entry(proceeding.remotePlatform),
+  };
+
+  atomicJson(file, { ...record, case: nextCase, deposition: nextDeposition });
+  return { depositionId, court: nextCase.court, remote: nextDeposition.remote, location: nextDeposition.location, remotePlatform: nextDeposition.remotePlatform };
 }
 
 export function readDepositionRecord(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"deposition.json");if(!fs.existsSync(file))throw new Error("Deposition record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
@@ -270,6 +386,21 @@ export function appendDepositionCorrections(root, { depositionId, corrections, w
 export function readDepositionCorrections(root, id, options = {}) {
   const file = path.join(depositionDirectory(root, id, options), "intake", "canonical-corrections.jsonl");
   return fs.existsSync(file) ? parseCorrectionLog(fs.readFileSync(file, "utf8")) : [];
+}
+
+/** Resolves one generated transcript designation through the existing canonical correction log. */
+export function writeParticipantHonorific(root,{depositionId,participantId,honorific,who="Workspace reporter",storageRoot}={}){
+  const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
+  if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
+  const record=JSON.parse(fs.readFileSync(file,"utf8")),index=(record.counsel||[]).findIndex(item=>item.id===participantId);
+  if(index<0)throw new Error("Honorific resolution currently requires a canonical counsel participant.");
+  const current=record.counsel[index]?.honorific?.value??null,next=honorific===null?"NONE":String(honorific??"").trim().toUpperCase().replace(/\.?$/,".");
+  if(next!=="NONE"&&!/^[A-Z][A-Z .'-]{0,19}\.$/.test(next))throw new Error("Enter a short honorific containing letters, spaces, apostrophes, or hyphens.");
+  // Records created before counsel honorifics entered the canonical schema legitimately lack the
+  // envelope. Add only that declared field, as MISSING, before using the ordinary append-only
+  // correction path. This is not an inferred title and does not touch testimony or evidence.
+  if(!record.counsel[index].honorific){record.counsel[index]={...record.counsel[index],honorific:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
+  return appendDepositionCorrections(root,{depositionId,storageRoot,who,corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
 }
 
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}

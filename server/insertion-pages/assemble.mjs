@@ -1,8 +1,20 @@
+import { counselSidePhrase } from "../../app/manual-intake.mjs";
 import { UFM_FREELANCE_LAYOUT_PROFILE } from "./layout-profile.mjs";
 import { selectInsertionVariant } from "./variants.mjs";
 
 export function canonicalValue(value) {
   return value && typeof value === "object" && "value" in value ? value.value : value;
+}
+
+// The words that follow FOR on an appearance page, and the same words the certificate names.
+// Null where the side was never recorded -- validateInsertionInput blocks on that, so nothing
+// downstream has to decide what an unrecorded side should say.
+//
+// Read from the phrase map for a named side and from the reporter's own wording for OTHER. Never
+// from : that holds party names, and printing them here is the defect this replaced.
+export function appearancePhrase(attorney) {
+  if (attorney.side === "OTHER") return attorney.sideOther || null;
+  return counselSidePhrase(attorney.side);
 }
 
 function attorneyFromCanonical(attorney) {
@@ -15,6 +27,8 @@ function attorneyFromCanonical(attorney) {
     email: canonicalValue(attorney.email),
     barNumber: canonicalValue(attorney.barNumber),
     representing: canonicalValue(attorney.represents) ?? [],
+    side: canonicalValue(attorney.side) ?? null,
+    sideOther: canonicalValue(attorney.sideOther) ?? null,
     actualAppearance: canonicalValue(attorney.actualAppearance),
     participation: {
       method: canonicalValue(attorney.participation?.method) ?? null,
@@ -33,6 +47,61 @@ const waiverFrom = reason => (String(reason ?? "").trim() ? { applicable:false, 
 // Absent is null rather than "". `[].join(", ")` answers "this case has no plaintiffs", which the
 // record does not say; what it says is that no party carries the role. Only the caller composing a
 // line turns that into text.
+// THE RULE, and the whole class it governs.
+//
+// A template that writes a label must not accept a value containing it. Two templates do, and both
+// reached certified pages before anyone noticed: "That $^cert.charges^" printed $1,240.00, and
+// "Texas CSR ^reporter.csrNumber^" printed CSR CSR 9174. In both cases the form field invited
+// exactly the thing that doubled -- a field called "Deposition officer's charges" asks for a sum of
+// money, and money has a dollar sign on it.
+//
+// The strip below is the cheap correct fix. The durable one is the form label, which now says who
+// writes the prefix ("Digits only; the certificate prints \"Texas CSR\" before it", and
+// "Deposition officer's charges (amount only)"). A strip that silently corrects the reporter is
+// weaker than a label that stops them typing it, and both are cheaper than a defect on a certified
+// page.
+//
+// Every template token was checked against the last word of the literal preceding it. The result:
+//
+//   DOUBLES, stripped here:
+//     cert.charges              after "That $"
+//     reporter.csrNumber        after "Texas CSR "
+//
+//   LATENT -- would double if a reporter typed the label, clean today, deliberately NOT stripped:
+//     caption.causeNumber              after "NO.: "
+//     reporter.firmRegistrationNumber  after "Firm Registration No. "
+//   Stripping these would be guessing at values that do not exist yet, and a strip nobody needs is
+//   a way to damage a value nobody typed wrong. If one ever doubles, the fix is one line and this
+//   comment says where.
+//
+//   CONSIDERED AND EXCLUDED -- prose, not labels. A value beginning with the word reads correctly:
+//     cert.chargesResponsibleParty     after "charges to the "   ("the Brazos Ridge Defense Group")
+//     cert.custodialAttorney           after "delivered to "
+//     reporter.csrExpirationDate       after "Expiration Date: "
+//   Recorded so a later reader knows they were examined rather than missed.
+//
+// One leading $, with any space after it, and nothing else. A value of "$1,240.00" becomes
+// "1,240.00"; "1,240.00" is untouched; "$$5" becomes "$5" rather than "5", because a reporter who
+// typed two meant something this cannot guess at and a certified page should not silently invent
+// the answer. null stays null so an unrecorded amount keeps blocking.
+export function stripLeadingCurrency(value) {
+  if (value === null || value === undefined) return value;
+  return String(value).replace(/^\s*\$\s?/, "");
+}
+
+// The certificate reads "^reporter.name^, Texas CSR ^reporter.csrNumber^", and the reporter modal
+// labels the field "CSR number" -- so "CSR 9174" is the natural thing to type and printed
+// "Texas CSR CSR 9174". Same defect as the doubled dollar sign, one token over: the template writes
+// a label the field also accepts.
+//
+// Stripped here rather than at the write boundary, for the same reason: the reporter profile keeps
+// what was entered, and the page prints what its own sentence needs. One leading CSR only, so
+// "CSR CSR 9174" prints "CSR 9174" and stays visibly odd rather than being silently made right.
+export function stripLeadingCsrLabel(value) {
+  if (value === null || value === undefined) return value;
+  return String(value).replace(/^\s*CSR\b\s*(?:(?:NO|NUMBER)\b\.?\s*)?[.:-]?\s*/i, "");
+}
+
 export function captionParties(record) {
   const parties = record?.parties ?? [];
   const inRole = pattern => parties
@@ -63,7 +132,7 @@ export function captionParties(record) {
 function reporterFromCanonical(reporter = {}, override = {}) {
   return {
     name: override.name ?? canonicalValue(reporter.fullName),
-    csrNumber: override.csrNumber ?? canonicalValue(reporter.csrNumber),
+    csrNumber: stripLeadingCsrLabel(override.csrNumber ?? canonicalValue(reporter.csrNumber)),
     csrExpirationDate: override.csrExpirationDate ?? canonicalValue(reporter.csrExpiration),
     address: override.address ?? canonicalValue(reporter.address),
     phone: override.phone ?? canonicalValue(reporter.phone),
@@ -96,6 +165,12 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const volumeCount = operator.volumeCount ?? (volumes.length || 1);
   const court = canonicalValue(record.case?.court);
   const causeNumber = canonicalValue(record.case?.causeNumber);
+  // Captured and deliberately NOT rendered. No template references ^caption.caseStyle^, and that is
+  // the ruling rather than an oversight: the caption block composes its parties from the party array
+  // so that it is provably the recorded parties, which reporter-typed text could not be. This holds
+  // the reporter's record of what the docket actually says, and it is the input if that is ever
+  // reopened -- see the note above captionValues in build-pages.mjs. Do not wire it up, and do not
+  // delete it as unused.
   const caseStyle = canonicalValue(record.case?.caseStyle);
   const depositionDate = canonicalValue(record.deposition?.depositionDate);
   const witness = canonicalValue(record.deposition?.witness);
@@ -154,7 +229,11 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.returnDeadline": operator.certification?.returnDeadline ?? null,
       "cert.returnStatus": operator.certification?.returnStatus ?? canonicalValue(record.signature?.returnedDate) ?? null,
       "cert.custodialAttorney": operator.certification?.custodialAttorney ?? canonicalValue(record.certification?.custodialAttorney) ?? null,
-      "cert.charges": operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null,
+      // The template writes the dollar sign -- "That $^cert.charges^ is the deposition officer's" --
+      // so a reporter who types the natural thing, $1,240.00, put $$1,240.00 on a certified page.
+      // Stripped here, at the print site, and deliberately not at the write boundary: the record
+      // keeps what the reporter typed, and the page prints what the sentence needs.
+      "cert.charges": stripLeadingCurrency(operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null),
       "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? canonicalValue(record.certification?.chargesResponsibleParty) ?? null,
       "cert.serviceDate": operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,

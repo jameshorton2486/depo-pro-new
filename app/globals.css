@@ -131,6 +131,80 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .intake-fields label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
 .intake-fields input,.intake-fields textarea { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fafbfd; padding:12px 13px; color:var(--ink); outline:0; resize:vertical; font:inherit; }
 .intake-fields input:focus,.intake-fields textarea:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+/* The manual intake panel was written to the same wrapping-label convention as .modal and
+   .intake-fields -- <label>Text<input/></label> -- but no rule ever scoped it, so its labels fell
+   back to display:inline and the text ran into the control ("WitnessThaddeus Bellweather"). These
+   values are the existing convention, not a fourth one. */
+.manual-intake { display:grid; gap:17px; }
+.manual-intake h3 { margin:0; font-size:17px; }
+.manual-intake-note { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.manual-intake label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.manual-intake input,.manual-intake select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fafbfd; padding:12px 13px; color:var(--ink); outline:0; }
+.manual-intake input:focus,.manual-intake select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+/* One grid for every row -- two fields where there are two, three where there are three -- so the
+   counsel and party rows keep the same column and gap rhythm instead of each inventing spacing. */
+.manual-intake .form-row { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+.manual-intake-rows { display:grid; gap:13px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; }
+.manual-intake-rows legend { padding:0 6px; color:#4b5870; font-size:12px; font-weight:750; }
+/* aria-invalid was set on every required field and had no treatment anywhere in this sheet, so the
+   refusal named the fields at the foot of the form and nothing marked which input it meant. */
+.manual-intake [aria-invalid="true"] { border-color:#b42318; background:#fffafa; }
+.manual-intake [aria-invalid="true"]:focus { border-color:#b42318; box-shadow:0 0 0 3px #fee4e2; }
+.manual-intake-actions { display:flex; justify-content:flex-end; gap:10px; }
+/* Scoped the same way .modal, .intake-fields, .admin-card and .manual-intake are. A wrapping-label
+   container with no rule of its own renders its labels inline and runs each one into its value --
+   the defect c79008a fixed on the intake panel. */
+.prepare-complete { display:grid; gap:15px; padding:18px; border:1px solid #dbe3f0; border-radius:14px; background:#f8fafc; margin:18px 0; }
+.prepare-complete h3 { margin:0; font-size:16px; }
+.prepare-complete header p { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+.prepare-complete label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.prepare-complete input,.prepare-complete select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:11px 12px; color:var(--ink); outline:0; }
+.prepare-complete input:focus,.prepare-complete select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.prepare-complete .form-row { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+.prepare-complete-findings { margin:0; padding-left:20px; display:grid; gap:5px; color:#b42318; font-size:12px; line-height:1.45; }
+.prepare-complete-conflict { margin:0; padding:10px 12px; border:1px solid #b42318; border-radius:10px; background:#fffafa; color:#b42318; font-size:12px; }
+.prepare-complete-empty { margin:0; color:var(--muted); font-size:11px; }
+.prepare-complete-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.prepare-complete-actions .primary-button,.prepare-complete-actions .secondary-button { margin-left:0; }
+.prepare-complete-ready { color:#1c7c4a; font-size:12px; font-weight:800; }
+.prepare-complete-blocked { color:#8a4b14; font-size:12px; font-weight:800; }
+.prepare-complete-notice { color:var(--muted); font-size:11px; }
+.prepare-complete-actions .primary-button { margin-left:auto; }
+/* Scoped like .modal, .intake-fields, .admin-card, .manual-intake and .prepare-complete. A
+   wrapping-label container with no rule of its own renders labels inline against their values. */
+.counsel-editor { display:grid; gap:14px; margin:12px 0 20px; }
+.counsel-editor-note { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.counsel-editor-row { display:grid; gap:12px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; background:#fafbfd; }
+.counsel-editor-row legend { padding:0 6px; color:#8995a8; font-size:10px; font-weight:800; letter-spacing:.08em; }
+.counsel-editor label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.counsel-editor input,.counsel-editor select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:10px 12px; color:var(--ink); outline:0; }
+.counsel-editor input:focus,.counsel-editor select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.counsel-editor .form-row { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.counsel-editor-appeared { display:flex; align-items:center; gap:8px; font-weight:750; }
+.counsel-editor-appeared input { width:auto; }
+/* The proceeding editor shipped with no rules of its own, so its inputs fell back to a 195px
+   transparent box 24px tall with no border: the label text ran into the field, and what the
+   reporter typed sat on a background indistinguishable from the page. Same treatment as the
+   counsel editor above, because it is the same kind of form on the same screen and should not
+   look like it came from a different application. */
+.proceeding-editor { display:grid; gap:14px; margin:0 0 18px; padding:20px 22px; border:1px solid #d9e2ef; border-radius:14px; background:#fff; }
+.proceeding-editor h2 { margin:0; font-size:16px; }
+.proceeding-editor .form-row { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+.proceeding-editor label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.proceeding-editor input { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:10px 12px; color:var(--ink); outline:0; }
+.proceeding-editor input:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.proceeding-method { display:grid; gap:8px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; background:#fafbfd; }
+.proceeding-method legend { padding:0 6px; color:#8995a8; font-size:10px; font-weight:800; letter-spacing:.08em; }
+/* Radio rows read across, not down, and a radio must keep its own size rather than stretching to
+   the full width the text fields want. */
+.proceeding-method label { display:flex; align-items:center; gap:8px; font-weight:750; }
+.proceeding-method input { width:auto; }
+.counsel-editor-error { margin:0; padding:10px 12px; border:1px solid #b42318; border-radius:10px; background:#fffafa; color:#b42318; font-size:12px; }
+.counsel-editor-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.counsel-editor-actions .primary-button { margin-left:auto; }
+.counsel-editor-message { color:var(--muted); font-size:11px; }
+
+
 .audio-add { min-height:82px; border:1.5px dashed #cbd5e4; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:var(--blue); font-weight:750; font-size:13px; }
 .audio-list { list-style:none; margin:16px 0 0; padding:0; display:grid; gap:8px; }
 .audio-list li { display:flex; align-items:center; gap:12px; border:1px solid #e1e6ef; border-radius:11px; padding:10px 12px; background:#fafbfd; }
@@ -182,6 +256,8 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .config-status { justify-self:start; margin-left:7px; padding:3px 7px; border-radius:99px; background:#f1f3f7; color:#7b8698; font-size:9px; }
 .config-status.ready { background:#e6f7ef; color:#27805c; }
 .admin-message { padding:11px; background:#f4f7fc; border-radius:9px; color:#4d5d75; font-size:12px; }
+/* A refused save must not read like a saved one. Same box, different answer. */
+.admin-message-failed { background:#fffafa; border:1px solid #b42318; color:#b42318; font-weight:750; }
 .preflight { margin:0 0 28px; padding:18px; border:1px solid #dce3ed; border-radius:12px; background:#fafbfd; }
 .preflight h2 { margin:0 0 5px; font-size:17px; }.preflight>p { color:#8b5a22; font-size:11px; }.preflight>p.ready { color:#247653; }
 .preflight ul { list-style:none; margin:15px 0 0; padding:0; display:grid; gap:7px; }.preflight li { display:grid; grid-template-columns:24px 125px 1fr; align-items:center; gap:8px; font-size:11px; }.preflight li>span { width:20px; height:20px; display:grid; place-items:center; border-radius:50%; }.preflight li>span.ready { background:#def4e9; color:#187653; }.preflight li>span.missing { background:#fff0df; color:#a55d1a; }.preflight li small { color:#758197; overflow-wrap:anywhere; }
@@ -427,8 +503,11 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-top audio { height:36px; flex:1 1 320px; min-width:240px; }
 .workspace-counts { font-size:12px; color:var(--muted); }
 .workspace-findings { margin:0; padding:10px 14px 10px 30px; background:#fdf3f3; border-bottom:1px solid #e5b4b4; color:#8a2b2b; font-size:13px; line-height:1.5; }
-.workspace-body { flex:1; display:flex; min-height:0; }
+.workspace-body { flex:1; display:flex; min-height:0; position:relative; }
+.workspace-tools-toggle{align-self:flex-start;margin:10px 8px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--navy);font-size:11px;white-space:nowrap}.workspace-body.tools-collapsed .workspace-document{max-width:none}.workspace-body.tools-collapsed .workspace-tools-toggle{position:absolute;right:8px;top:0;z-index:4;box-shadow:0 2px 8px rgba(25,43,78,.12)}
 .workspace-transcript { flex:1; overflow:auto; padding:24px 28px; font-family:"Courier New", Courier, monospace; font-size:14px; line-height:2; }
+.workspace-document{flex:1;min-width:0;display:flex;flex-direction:column;background:#dfe5ee}.workspace-page-nav{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:3}.workspace-page-nav input{width:58px;padding:5px}.workspace-page-nav button{padding:6px 9px}.workspace-geometry-note{margin-left:auto;color:var(--muted);font-size:10px}.workspace-page-flow{flex:1;overflow:auto;padding:28px;display:grid;justify-items:center;gap:28px;scroll-behavior:smooth}.workspace-paper{position:relative;width:816px;height:1056px;box-sizing:border-box;background:#fff;color:#111;box-shadow:0 10px 28px rgba(25,43,78,.16);scroll-margin-top:14px;content-visibility:auto;contain-intrinsic-size:816px 1056px}.workspace-format-box{position:absolute;left:var(--box-left);top:var(--box-top);width:var(--box-width);height:var(--box-height);box-sizing:border-box;border:var(--box-border) solid #000;pointer-events:none}.workspace-paper ol{position:absolute;left:var(--text-left);top:var(--text-top);width:calc(8.5in - var(--text-left) - var(--page-number-right) - .1in);height:calc(25 * var(--line-height));display:grid;grid-template-rows:repeat(25,var(--line-height));margin:0;padding:0;list-style:none}.workspace-paper li{position:relative;display:block;min-height:var(--line-height);font:var(--page-font-size)/var(--line-height) var(--page-font),"Courier New",monospace}.workspace-paper li.selected{background:#eef4ff;box-shadow:inset 3px 0 #225bd8}.workspace-line-number{position:absolute;right:calc(100% + var(--line-number-gap));color:#111;text-align:right;user-select:none}.workspace-paper code{color:inherit;font:inherit;white-space:pre}.workspace-paper footer{position:absolute;top:.5in;right:var(--page-number-right);font:var(--page-font-size) var(--page-font),"Courier New",monospace}.workspace-page-token{border:0;background:transparent;color:inherit;font:inherit;padding:0;white-space:pre;cursor:pointer}.workspace-page-token:hover{background:#dfe9fb}.workspace-page-token.picked{background:#225bd8;color:#fff}.workspace-page-token.authored{background:#e8f6ec;font-style:italic}.workspace-generated{white-space:pre}.workspace-selection-context{display:grid;gap:7px;padding:10px;border:1px solid #cbd7ea;border-radius:8px;background:#f8faff}.workspace-selection-context dl{display:grid;gap:4px;margin:0}.workspace-selection-context dl div{display:flex;justify-content:space-between;gap:8px}.workspace-selection-context dt{color:var(--muted);font-size:10px}.workspace-selection-context dd{margin:0;text-align:right;font-size:10px;font-weight:700}
+.workspace-paper li.direct-editing{position:relative;z-index:2;background:#fff8df;box-shadow:inset 3px 0 #c68700}.workspace-direct-editor{position:absolute;left:30px;top:-4px;width:calc(100% - 30px);min-height:108px;resize:none;box-sizing:border-box;padding:4px 6px;border:1px solid #225bd8;border-radius:3px;background:#fff;color:#111;font:12px/1.5 "Courier New",Courier,monospace;white-space:pre-wrap;overflow:auto;box-shadow:0 6px 16px rgba(25,43,78,.14)}.workspace-edit-status{margin-left:auto;font-size:10px;font-weight:700;color:#405475}.workspace-edit-status.saving{color:#946200}.workspace-edit-status.saved{color:#287442}.workspace-edit-status.conflict,.workspace-edit-status.failed{color:#a82d2d}.workspace-edit-status+.workspace-geometry-note{margin-left:0}
 .wp { display:grid; grid-template-columns:56px 132px 1fr; gap:10px; align-items:baseline; padding:2px 0; }
 .wp.selected { background:#f2f6ff; }
 .wp-time { border:0; background:transparent; color:var(--blue); font:inherit; font-size:11px; cursor:pointer; padding:0; text-align:left; }
@@ -463,6 +542,7 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-bucket select { padding:6px 7px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; }
 .workspace-sample { color:var(--muted); font-size:11px; }
 @media (max-width:900px){ .workspace-body{flex-direction:column} .workspace-menu{width:auto;flex:0 0 auto;border-left:0;border-top:1px solid var(--line)} }
+@media(max-width:900px){.workspace-page-flow{padding:16px 8px}.workspace-paper{height:auto;min-height:860px;padding:35px 16px}.workspace-paper ol{height:780px}.workspace-paper li{font-size:10px;grid-template-columns:25px minmax(0,1fr)}.workspace-geometry-note{display:none}}
 
 /* The transcribe step, in the Workspace. Above the transcript because that is its order: without
    a transcript there is nothing else on this screen, and with one there is still a preserved
@@ -480,6 +560,16 @@ dd { margin:0; font-size:13px; font-weight:650; }
    identifier a reporter may need to read character by character or copy into a filing. */
 .workspace-flag { color:#a3283a; }
 .workspace-marked { color:#c0392b; font-weight:600; }
+.workspace-page-token.low-confidence { background:#fff0b8; text-decoration:underline wavy #b36b00; text-underline-offset:2px; }
+.workspace-page-token.playing { background:#bfe3ff; color:#08264d; box-shadow:0 0 0 1px #3d8fd1; }
+.workspace-review-tools { display:grid; gap:6px; padding:9px; border:1px solid #e2cf91; border-radius:8px; background:#fffaf0; }
+.workspace-review-tools > div { display:flex; gap:6px; }
+.workspace-review-tools label { font-size:12px; }
+.workspace-review-tools input[type="text"],.workspace-review-tools label>input:not([type]) { width:100%; box-sizing:border-box; margin-top:3px; padding:6px; border:1px solid var(--line); border-radius:5px; }
+.workspace-match-list { max-height:220px; overflow:auto; display:grid; gap:4px; padding:5px; border:1px solid var(--line); background:#fff; }
+.workspace-match-list label { display:grid; grid-template-columns:auto 1fr; gap:5px; align-items:start; font-family:"Courier New",monospace; font-size:10px; }
+.workspace-honorific { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.workspace-honorific strong { width:100%; font-size:11px; }
 .workspace-mark { border-color:#c0392b; color:#c0392b; }
 .workspace-hash { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78em; color:#5b6880; }
 
@@ -499,7 +589,7 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .print-preview-findings { display:grid; gap:8px; }.print-preview-findings article { padding:10px; border-radius:8px; background:#fff8e6; color:#6b551d; }.print-preview-findings article.blocking,.print-preview-findings article.transcript { background:#fdf3f3; color:#8a2b2b; }.print-preview-findings strong { font-size:9px; }.print-preview-findings p { margin:4px 0; font-size:10px; line-height:1.45; }.print-preview-findings button { border:0; padding:0; background:transparent; color:inherit; font-size:10px; text-decoration:underline; }
 .print-preview-clear { margin:0; padding:10px; border-radius:8px; background:#e8f6ec; color:#285f45; font-size:11px; }.print-preview-note { margin:0; padding-top:13px; border-top:1px solid var(--line); color:var(--muted); font-size:10px; line-height:1.5; }
 .print-preview-content { min-width:0; }.print-continuous { padding:24px 28px; border:1px solid var(--line); border-radius:14px; background:#fff; }
-.print-continuous article { padding:15px 0; border-top:1px solid #edf1f6; }.print-continuous article:first-child { border-top:0; }.print-continuous article>div { display:grid; grid-template-columns:52px 132px minmax(0,1fr); gap:10px; font-family:"Courier New",Courier,monospace; line-height:1.75; }.print-continuous time { color:var(--blue); font-size:11px; }.print-continuous strong { color:var(--navy); font-size:13px; }.print-continuous p { margin:0; }.print-byline { margin:0 0 5px 62px!important; color:var(--muted); font-style:italic; font-family:"Courier New",Courier,monospace; }
+.print-continuous article { padding:15px 0; border-top:1px solid #edf1f6; }.print-continuous article:first-child { border-top:0; }.print-continuous article>div { display:grid; grid-template-columns:52px 132px minmax(0,1fr); gap:10px; font-family:"Courier New",Courier,monospace; line-height:1.75; }.print-continuous time { color:var(--blue); font-size:11px; }.print-continuous strong { color:var(--navy); font-size:13px; }.print-continuous p { margin:0; }.print-byline { color:var(--muted); font-style:italic; font-family:"Courier New",Courier,monospace; }
 .print-pages { display:grid; justify-items:center; gap:28px; }.print-paper { width:min(100%,816px); min-height:1056px; padding:70px 58px 44px; background:#fff; color:#111; box-shadow:0 10px 30px rgba(25,43,78,.14); }
 .print-paper ol { min-height:900px; display:grid; grid-template-rows:repeat(25,1fr); margin:0; padding:0; list-style:none; }.print-paper li { display:grid; grid-template-columns:30px minmax(0,1fr); min-height:36px; align-items:start; font:12px/1.5 "Courier New",Courier,monospace; }.print-paper li>span { padding-right:10px; color:#7d7d7d; text-align:right; user-select:none; }.print-paper code { color:inherit; font:inherit; white-space:pre; }.print-paper footer { text-align:center; font:12px "Courier New",Courier,monospace; }
 @media(max-width:900px){.print-preview{padding:20px 12px}.print-preview-header{align-items:stretch;flex-direction:column}.print-preview-actions{justify-content:flex-start}.print-preview-layout{grid-template-columns:1fr}.print-preview-status{position:static}.print-continuous article>div{grid-template-columns:46px 100px minmax(0,1fr)}.print-paper{min-height:auto;padding:35px 16px}.print-paper ol{min-height:760px}.print-paper li{font-size:10px;grid-template-columns:25px minmax(0,1fr)}}
@@ -571,3 +661,11 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .live-recoverable li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 12px; border: 1px solid #b9c7dd; border-radius: 8px; }
 .live-recoverable span { font-size: 13px; }
+
+/* Document status. The reporter must be able to tell a certified transcript from its bare body
+   without reading the filename, so blocked is coloured as a stop and ready is not. */
+.workspace-document-status { margin:0; padding:10px 14px; border-bottom:1px solid; font-size:13px; line-height:1.5; }
+.workspace-document-status strong { display:block; font-size:14px; }
+.workspace-document-status p { margin:4px 0 0; }
+.workspace-document-status.blocked { background:#fdf3f3; border-color:#e5b4b4; color:#8a2b2b; }
+.workspace-document-status.ready { background:#f2f8f3; border-color:#b7d7bd; color:#1f5b2c; }

@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendReporterOperations, readReporterOverlay, undoReporterOperation, writeReporterOverlay } from "../server/transcription-jobs.mjs";
+import { appendReporterOperations, readReporterOverlay, redoReporterOperation, STALE_REPORTER_TRANSACTION, undoReporterOperation, writeReporterOverlay } from "../server/transcription-jobs.mjs";
+import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 
 // A throwaway deposition workspace. The overlay is the only thing written here, which is the
 // property under test: no path added by Step 5 may touch working.json or asr-evidence.json.
@@ -52,12 +53,31 @@ test("operations accumulate in order and survive a reread",t=>{
   assert.deepEqual(overlay.operations.map(operation => operation.op),["delete","replace"]);
 });
 
-test("undo pops the last operation from disk",t=>{
+test("undo removes the last atomic reporter transaction from disk",t=>{
   const w = workspace(t);
   appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"delete", wordId:"job1:word:1" },{ op:"delete", wordId:"job1:word:2" }] });
   const { removed } = undoReporterOperation(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot });
-  assert.equal(removed.wordId,"job1:word:2");
-  assert.equal(readReporterOverlay(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot }).operations.length,1);
+  assert.deepEqual(removed.map(operation=>operation.wordId),["job1:word:1","job1:word:2"]);
+  assert.equal(readReporterOverlay(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot }).operations.length,0);
+});
+
+test("atomic undo and redo survive save and reopen",t=>{
+  const w=workspace(t);
+  appendReporterOperations(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,operations:[{op:"split",beforeWordId:"job1:word:2"},{op:"label",wordId:"job1:word:2",speakerIdentity:"witness",transcriptRole:"WITNESS"}]});
+  assert.deepEqual(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).transactionSizes,[2]);
+  undoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot});
+  assert.equal(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).operations.length,0);
+  redoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot});
+  assert.deepEqual(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).operations.map(item=>item.op),["split","label"]);
+});
+
+test("a stale expected review state refuses the entire transaction",t=>{
+  const w=workspace(t);
+  const transcript=JSON.parse(fs.readFileSync(w.workingFile,"utf8"));
+  const expected=computeReviewStateHash({transcript,overlay:readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot})});
+  appendReporterOperations(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,operations:{op:"delete",wordId:"job1:word:1"},expectedReviewStateHash:expected});
+  assert.throws(()=>appendReporterOperations(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,operations:{op:"delete",wordId:"job1:word:2"},expectedReviewStateHash:expected}),error=>error.code===STALE_REPORTER_TRANSACTION);
+  assert.deepEqual(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).operations.map(item=>item.wordId),["job1:word:1"]);
 });
 
 test("an invalid operation is refused and nothing is written",t=>{

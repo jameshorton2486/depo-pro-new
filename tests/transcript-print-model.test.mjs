@@ -26,7 +26,8 @@ test("Print Model consumes canonical paragraphs and exposes a 25-position body g
   assert.equal(printed.paragraphs.some(paragraph=>Object.hasOwn(paragraph,"words")),false,"Print Model retains references, not copied evidence word objects");
   assert.equal(printed.pages.every(page=>page.lines.length===25),true);
   assert.equal(printed.pages.every(page=>page.lines.every((line,index)=>line.position===index+1)),true);
-  assert.ok(printed.findings.print.some(finding=>finding.code==="PRINT_LAYOUT_PROFILE_UNVERIFIED"));
+  assert.equal(printed.layoutProfile.id,"TEXAS_FREELANCE_DEPOSITION_V1");
+  assert.equal(printed.findings.print.some(finding=>finding.code==="PRINT_LAYOUT_PROFILE_UNVERIFIED"),false);
   const traced=printed.pages.flatMap(page=>page.lines).find(line=>line.occupied&&line.trace?.sourceWordIds.length);
   assert.ok(traced.trace.sourceSegmentIds.length);
   assert.ok(traced.trace.sourceWordIds.length);

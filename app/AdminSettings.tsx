@@ -42,6 +42,7 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
     [preflight, setPreflight] = useState<Preflight | null>(null),
     [message, setMessage] = useState(""),
     [saving, setSaving] = useState(false),
+    [failed, setFailed] = useState(false),
     [saved, setSaved] = useState(false),
     [showKeys, setShowKeys] = useState(false),
     [rx, setRx] = useState<RxStatus | null>(null),
@@ -88,16 +89,18 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       setMessage("Settings saved securely for this Windows user.");
+      setFailed(false);
       setSaved(true);
-      setStatus({
-        initialized: true,
-        anthropicConfigured:
-          !!data.get("anthropicApiKey") || !!status?.anthropicConfigured,
-        deepgramConfigured:
-          !!data.get("deepgramApiKey") || !!status?.deepgramConfigured,
-      });
+      // Read back what the server actually holds rather than asserting what the form sent. The
+      // previous version computed the new status from the field values, so the chips could report
+      // "Configured" for a key the store had not kept -- the screen agreeing with itself.
+      setStatus(await apiJson<Status>("/api/admin/status", { cache: "no-store" }));
       form.reset();
     } catch (error) {
+      // A refusal has to look like one. This message used to render in the same neutral grey as a
+      // confirmation, so "Create an administrator access code with at least 8 characters." read as
+      // a note rather than as the reason nothing was saved.
+      setFailed(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to save settings.",
       );
@@ -106,6 +109,7 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
     }
   }
   async function testKeys() {
+    setFailed(false);
     setTesting(true);
     setKeyTest(null);
     try {
@@ -257,7 +261,7 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
             </small>
           </label>
           {message && (
-            <p className="admin-message" role="status">
+            <p className={failed ? "admin-message admin-message-failed" : "admin-message"} role={failed ? "alert" : "status"}>
               {message}
             </p>
           )}

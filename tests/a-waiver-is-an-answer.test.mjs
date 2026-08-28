@@ -50,7 +50,7 @@ function scratch(t, { reporter = {}, court = "In the 285th Judicial District Cou
         location: "7234 Hovingham, San Antonio, Texas 78257",
         remote: true,
         remotePlatform: "Zoom",
-        attorneys: [{ name: "Ann Counsel", firm: "Counsel LLP", represents: "Plaintiff", appeared: true, participation: { method: "remote-video" } }],
+        attorneys: [{ name: "Ann Counsel", firm: "Counsel LLP", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
         reporterProfile: {
           name: "Miah Bardot", licenseNumber: "12129", csrState: "Texas", csrExpiration: "2027-06-30",
           address: "7234 Hovingham, San Antonio, Texas 78257", phone: "469 740-9603",
