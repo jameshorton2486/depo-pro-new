@@ -170,6 +170,23 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .prepare-complete-blocked { color:#8a4b14; font-size:12px; font-weight:800; }
 .prepare-complete-notice { color:var(--muted); font-size:11px; }
 .prepare-complete-actions .primary-button { margin-left:auto; }
+/* Scoped like .modal, .intake-fields, .admin-card, .manual-intake and .prepare-complete. A
+   wrapping-label container with no rule of its own renders labels inline against their values. */
+.counsel-editor { display:grid; gap:14px; margin:12px 0 20px; }
+.counsel-editor-note { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.counsel-editor-row { display:grid; gap:12px; margin:0; padding:14px 16px; border:1px solid #e1e6ef; border-radius:12px; background:#fafbfd; }
+.counsel-editor-row legend { padding:0 6px; color:#8995a8; font-size:10px; font-weight:800; letter-spacing:.08em; }
+.counsel-editor label { display:grid; gap:7px; color:#4b5870; font-size:12px; font-weight:750; }
+.counsel-editor input,.counsel-editor select { width:100%; border:1px solid #d8dfeb; border-radius:10px; background:#fff; padding:10px 12px; color:var(--ink); outline:0; }
+.counsel-editor input:focus,.counsel-editor select:focus { border-color:#6c8fdc; box-shadow:0 0 0 3px #edf3ff; }
+.counsel-editor .form-row { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.counsel-editor-appeared { display:flex; align-items:center; gap:8px; font-weight:750; }
+.counsel-editor-appeared input { width:auto; }
+.counsel-editor-error { margin:0; padding:10px 12px; border:1px solid #b42318; border-radius:10px; background:#fffafa; color:#b42318; font-size:12px; }
+.counsel-editor-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.counsel-editor-actions .primary-button { margin-left:auto; }
+.counsel-editor-message { color:var(--muted); font-size:11px; }
+
 
 .audio-add { min-height:82px; border:1.5px dashed #cbd5e4; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:var(--blue); font-weight:750; font-size:13px; }
 .audio-list { list-style:none; margin:16px 0 0; padding:0; display:grid; gap:8px; }

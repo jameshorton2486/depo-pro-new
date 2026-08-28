@@ -4,6 +4,7 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
+import CounselEditor from "./CounselEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
@@ -662,6 +663,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               <button type="button" disabled={busy} onClick={()=>{ const id=selected.wordId; setSelected(null); void append([{ op:"delete", wordId:id }]); }}>Strike the word</button>
             </>
           )}
+
+          {/* Beside the speaker work, because that is where a reporter is already deciding who was
+              in the room. Correcting a name here and mapping a voice to it are the same task seen
+              from two sides, and the examining attorney is chosen from this roster. */}
+          <h2>Counsel</h2>
+          <CounselEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" onClick={()=>setShowSpeakers(value=>!value)} aria-expanded={showSpeakers} aria-controls="workspace-speakers">

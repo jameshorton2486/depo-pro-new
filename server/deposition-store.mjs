@@ -176,9 +176,20 @@ export function readDepositionCounsel(root, { depositionId, storageRoot } = {}) 
   return {
     depositionId,
     counsel: (record.counsel ?? []).map(entry => ({
+      // Every editable field, so a screen amending one attorney can send the rest back unchanged
+      // rather than reconstructing them. Chief among them the id: counselEntry falls back to
+      // `attorney-${index + 1}` when none is supplied, so an editor that dropped it would renumber
+      // counsel by position and leave the examiner reference and every speaker mapping pointing at
+      // an id that no longer exists -- while the save looked entirely successful.
       id: entry.id,
       name: String(value(entry.fullName) ?? "").trim(),
+      honorific: value(entry.honorific) ?? "",
       firm: String(value(entry.firm) ?? "").trim(),
+      represents: value(entry.represents) ?? [],
+      appearanceRole: value(entry.appearanceRole) ?? "",
+      side: value(entry.side) ?? "",
+      sideOther: value(entry.sideOther) ?? "",
+      actualAppearance: value(entry.actualAppearance),
     })),
   };
 }

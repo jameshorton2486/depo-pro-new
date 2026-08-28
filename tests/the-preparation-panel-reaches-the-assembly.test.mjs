@@ -75,7 +75,11 @@ test("the counsel roster hands back the canonical ids a preparation must referen
   }, { storageRoot });
 
   const roster = readDepositionCounsel(root, { depositionId:"DEP-20260828-ROST1", storageRoot });
-  assert.deepEqual(roster.counsel, [
+  // The ids and names the preparation must reference. Asserted by field rather than by whole-object
+  // equality: the roster also carries the editable fields the counsel editor round-trips, and a
+  // test that pinned the exact key set would fail whenever an editable field was added without
+  // anything being wrong.
+  assert.deepEqual(roster.counsel.map(entry => ({ id:entry.id, name:entry.name, firm:entry.firm })), [
     { id:"attorney-1", name:"Marisol Vantongeren-Okafor", firm:"Vantongeren & Okafor LLP" },
     { id:"attorney-2", name:"Rufus Q. Pemberton-Stack", firm:"Brazos Ridge Defense Group" },
   ]);
