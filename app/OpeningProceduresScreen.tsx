@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-const API="http://127.0.0.1:4317";
+// The origin every other screen already uses. This file hard-coded 4317 -- the default the API
+// falls back to when LOCAL_API_PORT is unset -- so on any machine that sets a port, Opening
+// Procedures fetched a closed socket and rendered "Failed to fetch" while the rest of the
+// application worked. Nothing else in app/ builds an origin of its own.
+import { LOCAL_API_BASE_URL as API } from "./api-client";
 type Envelope={value:unknown;source:string;state:string};
 type Field=Envelope&{path:string;label:string;verified:boolean};
 type Participant={id:string;type:string;name:Envelope;role?:Envelope;firm?:Envelope;represents?:Envelope;actualAppearance?:Envelope;remoteAppearance?:Envelope;verified:boolean};
