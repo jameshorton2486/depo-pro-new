@@ -17,7 +17,7 @@ currency line exists to prevent. It is restated below against what was actually 
 |---|---|
 | (a), 1′–9 | **Not re-run.** No commit since `6f3101e` touches intake or setup. Checked, not assumed. |
 | 11, 12, 13 | **Partially re-run 2026-08-29 at `f68ab85`** — see *Partial re-run* below. |
-| 10 | **Not re-run.** Requires desktop Word and a real capture. |
+| 10 | **Not re-run, and see the reconciliation note in the step 10 passage.** Its authoritative artefact is the 18:05:13 reporter-completed document recorded under *The reporter-completed document*, not the 16:20:18 document the Word round trip used. |
 
 **The original run is not reproducible.** Steps 10, 11 and 13 ran against `DEP-20260827-LL0D2` with
 a real 8m51s capture. That deposition was a work file and is deleted. Separately, the synthetic
@@ -230,6 +230,32 @@ it confirms the 3 + 7 + 2 decomposition independently.
 The round-trip artifact is not committed -- it is 38 kB of binary reproducible by repeating the
 round trip. Its sha256 is
 `392c8198246257e32a97c8bf5f39666009c9d7c56fe0376691812110c96aeb09`.
+
+**Reconciliation, 2026-08-29: the round trip and step 10's result are different documents.**
+
+Three documents exist for this deposition, and step 10's evidence is split across two of them:
+
+| Generated | Certification values | Size | Paragraphs | What it carries |
+|---|---|---|---|---|
+| 16:20:18 | builder-typed | 43,944 | 300 | **the Word round trip above** |
+| 18:05:13 | reporter-entered | 43,929 | 299 | **step 10's result** — see *The reporter-completed document* |
+| 18:43:25 | reporter-entered, post-CSR-fix | 43,928 | — | the only one still on disk |
+
+The Word round trip was performed on the first. Step 10's verdict stands on the second, per
+`3842058`, which is the document produced end to end from a deposition a reporter created. **The
+round trip has never been run against the document step 10 turns on.**
+
+That is a smaller gap than it sounds and it is not nothing. What differs between the two is four
+certification field values and one trailing blank line the renderer drops when content runs longer.
+Nothing there plausibly changes how Word parses a container. But the round trip's own decisive
+figures -- 300 paragraphs both, text byte-identical across all 300, `docProps/app.xml` reporting
+Pages 12 -- are assertions about a 300-paragraph file, and the authoritative document has 299. They
+do not transfer by inspection.
+
+**What would close it.** Open the 18:43:25 document -- the one on disk -- in desktop Word, save,
+close, reopen, and compare as above. It differs from the 18:05:13 document only by the CSR label
+strip. That is one round trip against a file that already exists, and it needs no new capture and
+no new deposition. It is the cheapest remaining item on this gate.
 
 **The caveat that governs all three.** This document carries certification values entered by the
 builder, not by the reporter: custodial attorney, officer's charges, charges billed to and
