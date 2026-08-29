@@ -14,6 +14,15 @@ const eslintConfig = defineConfig([
     "out/**",
     ".verify-*/**",
     "next-env.d.ts",
+    // A local measurement harness, not shipping code. It is excluded from the repository via
+    // .git/info/exclude, so CI clones a tree that has never contained it and lints clean --
+    // which is why this failed only in the one working tree that holds the directory, and only
+    // once that tree was reattached to main.
+    //
+    // The rule and the file are both correct and cannot be reconciled: render_workspace_proof.cjs
+    // is CommonJS, so require() is the only import form available to it. Ignoring is the fix;
+    // rewriting a .cjs to use ESM imports is not.
+    "geometry-proof/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
