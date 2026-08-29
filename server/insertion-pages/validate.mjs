@@ -39,6 +39,27 @@ const warning = (code, target, message, extra = {}) => ({ code, target, severity
 const normalizedName = (name) => String(name ?? "").toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
 const isBlank = (value) => value == null || value === "" || (Array.isArray(value) && value.length === 0);
 
+// Both Texas certification templates state, as a literal, that the witness "was duly sworn by the
+// officer". When the record carries an attestation that the witness did not swear, that sentence is
+// false and it goes out under the reporter's name and CSR number. Refuse rather than print it.
+//
+// Only an explicit false refuses. null is MISSING -- nobody has attested -- and still generates.
+// That is a scoping decision, not an oversight: MISSING is the common state and an unattested
+// certificate is a gap in the record rather than a false statement, which is what this application
+// has always produced. Refusing on MISSING is phase 2 and is gated on the existing library being
+// attested first. See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
+//
+// There is no approved affirmation certificate wording to substitute -- no Texas authority
+// publishes one and no certified specimen contains one -- so refusal is the whole remedy.
+// Do not "fix" this by authoring that sentence.
+function validateOathBasis(input, findings) {
+  if (input.deposition?.witnessSworn !== false) return;
+  findings.push(blocking(
+    "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",
+    "The record attests that this witness was not sworn, and the certification page states the witness was duly sworn by the officer. No approved wording exists for a witness who affirmed, so the page cannot be generated.",
+  ));
+}
+
 function validateVariant(input, findings) {
   if (!input.jurisdiction || !input.signatureDisposition || !input.variant || !input.signatureDispositionBasis) {
     findings.push(blocking("CERT_VARIANT_UNSPECIFIED", "cert.variant", "Jurisdiction, signature disposition, and its source basis must all be explicitly provided."));
@@ -239,6 +260,7 @@ function validateWarnings(input, findings) {
 
 export function validateInsertionInput(input) {
   const findings = [];
+  validateOathBasis(input, findings);
   validateVariant(input, findings);
   validateCredentials(input, findings);
   validateDepositionMethod(input, findings);

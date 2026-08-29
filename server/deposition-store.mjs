@@ -469,6 +469,36 @@ export function writeParticipantHonorific(root,{depositionId,participantId,honor
   return appendDepositionCorrections(root,{depositionId,storageRoot,who,corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
 }
 
+/**
+ * Records the reporter's attestation that the witness was, or was not, put under oath.
+ *
+ * This is deliberately a separate call from saving the Opening screen's `witnessOathSelection`.
+ * That selector is a workflow value: it lives in workflow/opening-procedures.json, carries no who
+ * and no at, and under ADR-0021 it may never influence certified output. This writes an attested
+ * fact to the canonical record through the ordinary correction log, which is the path that is
+ * allowed to reach a certified page precisely because it demands attribution.
+ *
+ * Changing the selector must never call this. Attribution attached to an act the reporter did not
+ * intend as an attestation is worse than no attribution, because it reads as provenance.
+ *
+ * `sworn` is a strict boolean and is not coerced. false is an answer -- "the witness affirmed" --
+ * and is the case the certification page refuses. Absence is a different fact and stays MISSING.
+ */
+export function attestWitnessSworn(root,{depositionId,sworn,who,why,at,storageRoot}={}){
+  if(sworn!==true&&sworn!==false)throw new Error("An oath attestation must be true or false. Absence is not an attestation.");
+  if(!String(who??"").trim())throw new Error("An oath attestation requires who made it.");
+  if(!String(why??"").trim())throw new Error("An oath attestation requires why it was made. A certified record has to say what a value rests on.");
+  const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
+  if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
+  const record=JSON.parse(fs.readFileSync(file,"utf8"));
+  // Records created before witnessSworn entered the canonical schema legitimately lack the
+  // envelope. Add only that declared field, as MISSING, before the append-only correction path --
+  // the same repair writeParticipantHonorific makes, and for the same reason.
+  if(!record.deposition?.witnessSworn){record.deposition={...record.deposition,witnessSworn:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
+  const current=record.deposition?.witnessSworn?.value??null;
+  return appendDepositionCorrections(root,{depositionId,storageRoot,who,...(at?{at}:{}),corrections:[{path:"deposition.witnessSworn",from:current,to:sworn,why}]});
+}
+
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}
 export function resolveDepositionAudio(root,id,index,options={}){const directory=depositionDirectory(root,id,options),record=JSON.parse(fs.readFileSync(path.join(directory,"deposition.json"),"utf8")),item=record.audio?.[Number(index)];if(!item)throw new Error("Deposition audio was not found.");const file=path.resolve(directory,...String(item.path).split("/"));if(!within(file,directory)||!fs.existsSync(file))throw new Error("Deposition audio reference is invalid.");return{file,item}}
 

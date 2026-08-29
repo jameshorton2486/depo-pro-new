@@ -208,7 +208,15 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     signatureDispositionBasis: operator.signatureDispositionBasis ?? null,
     variant,
     caption: { court, causeNumber, caseStyle, label: operator.captionLabel ?? null },
-    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote) },
+    // witnessSworn is the reporter's attestation that an oath was administered, carried on the
+    // canonical record with who/why/at through the correction log. It is lifted from the record and
+    // never from workflow/opening-procedures.json: ADR-0021 permits that file to hold unattributed
+    // values only because they never influence certified output, and whether this page generates is
+    // a certified-output decision. A previous attempt read the workflow value here and was reverted.
+    //
+    // null is MISSING -- nobody has attested -- and is distinct from false, which is an attestation
+    // that the witness did not swear. Only false refuses. See docs/opening-procedures/.
+    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), witnessSworn: canonicalValue(record.deposition?.witnessSworn) },
     reporter,
     appearances: counsel,
     counselReconciliation: {
