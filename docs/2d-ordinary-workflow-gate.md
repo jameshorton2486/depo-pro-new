@@ -1,11 +1,31 @@
 # Checkpoint 2D — ordinary-workflow gate
 
 **Run:** 2026-08-27 into 2026-08-28, against `f91c007` on `integration/release-bridge`.
-**Still current at:** `6f3101e`. Six commits have landed since the run — `31da059`, `e9aa445`,
-`e310912`, `7c5f17f`, `6f3101e` and this one. None of them changed a path these steps exercised:
-they close the examiner placeholder, the Preview messaging, the standalone index and counsel
-editing, all downstream of or beside the nine steps below. The results are not re-run against head,
-and this line exists so a later reader knows that rather than inferring it.
+**Currency, restated 2026-08-29. The previous claim had expired.**
+
+That claim read "still current at `6f3101e`", on the ground that nothing since the run had touched
+a path these steps exercise. `6f3101e` is now twenty commits behind `main`, and **five of those
+commits touch the generation and certificate paths steps 10 through 13 exercise**: `4d6cb1c`
+(what the certificate states comes from the record, not the operator), `3842058` (one CSR label,
+and step 10's real result), `83e3a95`, `27104bc` and `9b6eb2d`. A sixth, `f68ab85`, adds a blocking
+finding to `validateInsertionInput` — the validator both generation paths gate on.
+
+So the claim was true when written and false by the time it was read, which is the failure mode a
+currency line exists to prevent. It is restated below against what was actually re-run.
+
+| Steps | Currency |
+|---|---|
+| (a), 1′–9 | **Not re-run.** No commit since `6f3101e` touches intake or setup. Checked, not assumed. |
+| 11, 12, 13 | **Partially re-run 2026-08-29 at `f68ab85`** — see *Partial re-run* below. |
+| 10 | **Not re-run.** Requires desktop Word and a real capture. |
+
+**The original run is not reproducible.** Steps 10, 11 and 13 ran against `DEP-20260827-LL0D2` with
+a real 8m51s capture. That deposition was a work file and is deleted. Separately, the synthetic
+fixture in `scripts/create-milestone2-browser-fixture.mjs` no longer produces the committed artefact
+in `geometry-proof/output/milestone2-complete-transcript/`: the fixture cloned its evidence eight
+times when that artefact was made and clones it once now, so the committed spec has 15 pages and a
+fresh build has 9. **Byte comparison against the committed artefact is therefore not available**,
+and anyone attempting it should stop rather than treat the difference as a regression.
 **Deposition:** `DEP-20260827-LL0D2`, *Whitaker v. Brazos Ridge Logistics, LLC* — disposable, created
 through the ordinary reporter path. No real matter was used.
 **Storage root:** `.milestone2-corrected-data`.
@@ -412,6 +432,64 @@ platform -- every one of them disabled, and every present field enabled.
 The claim came from reading the word "Missing" rendered beside a checkbox and not checking the
 attribute. A blocker list is only useful if every row is real; a phantom beside the certification
 index and the examiner placeholder makes the real rows harder to trust.
+
+## Partial re-run, 2026-08-29, at `f68ab85`
+
+**Why.** Five commits on `main` plus `f68ab85` touch the generation and certificate paths steps 10
+through 13 exercise. `f68ab85` in particular adds a blocking finding, `CERT_OATH_BASIS_AFFIRMATION`,
+to `validateInsertionInput` — which both `getCompleteTranscriptModel` and
+`prepareInsertionRenderingArtifact` gate on before building a page. A guard that refused a
+gate-shaped deposition would have taken generation offline.
+
+**Against what.** The disposable synthetic fixture `DEP-20260826-M2FIX`, built by
+`scripts/create-milestone2-browser-fixture.mjs` into an isolated scratch root. No specimen and no
+real matter. This is **not** the ordinary reporter path and does not stand in for it.
+
+**Step 13 — nothing mutated.** Full-tree sha256 snapshot before and after building the complete
+transcript model: **0 files changed, 0 added, 0 removed.** The WAV's sha256 was
+`fcf538d4f0302c95114f37f4e2a85ca80bd514e49478bb32fe9dbe4e0784f230` before and after.
+
+*Weaker than the original step 13, and the difference matters.* The original snapshot bracketed the
+**artefact write** and recorded three files added — the docx, the rendering spec, the line map. This
+re-run brackets `getCompleteTranscriptModel`, which returns a model and writes nothing. It shows the
+model build does not mutate evidence. It does **not** re-verify the write path.
+
+**Step 11 — the index still names a real examiner.** Nine pages: title, appearances, index,
+testimony, changes, signature, certification ×3. Index on page 3, reading:
+
+```
+                              INDEX
+Appearances................................ 2
+Dr. Synthetic Witness
+  Examination by MS. Dennis J. Bentley........... 4-4
+Changes and Signature...................... 5
+Reporter's Certificate..................... 7
+```
+
+`EXAMINING ATTORNEY` appears nowhere. Model hash
+`6b652fef0d09b80dcfd7c419f1f96e233da44cf460ea3d1812df38fda9602869`.
+
+The `MS.` on Bentley is the fixture asserting its own honorific override, not a defect. The
+decomposition differs from the original run's 3 + 7 + 2 because signature is requested here and was
+waived there, and because the fixture is one evidence copy rather than eight. Neither is comparable
+to the original and neither is offered as such.
+
+**Step 12 — the property still holds.** Re-checked against current code, not re-run: `app/CounselEditor.tsx`
+offers `Add counsel` and no remove or delete control, and `ASSEMBLY_EXAMINER_MISSING` is still
+enforced at the preparation boundary. The state step 12 describes remains unreachable from any
+screen, so the verdict stays **PASS (property)**.
+
+**The `f68ab85` guard does not fire here.** Blocking assembly findings: none.
+`CERT_OATH_BASIS_AFFIRMATION` absent. A deposition with no Opening state reads `UNRESOLVED`, which
+generates by design — see `docs/opening-procedures/`, the authorization §2 and the F-20 amendment.
+
+**What this re-run does not establish.**
+
+- **Step 10 is not re-run.** The Word round trip needs desktop Word, which was not available to the
+  agent that ran this. Its verdict stands on the 2026-08-28 evidence and is now the oldest claim here.
+- No step was run through the ordinary reporter path. This exercised the model directly.
+- Steps (a) through 9 were not re-run at all.
+- Nothing was verified against a real capture.
 
 ## Not claimed
 
