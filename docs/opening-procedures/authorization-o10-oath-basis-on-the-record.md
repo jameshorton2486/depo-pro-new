@@ -51,6 +51,41 @@ block. **Do not mark O-10 closed when this ships.**
 the existing library to be attested first (O-11), which requires the library count and a disposition
 for depositions reported by another officer. It is a separate authorization.
 
+## 2a. What phase 1 leaves open, stated as a state rather than as a phase
+
+Phase 1 closes exactly one case: **the reporter attested that the witness did not swear.** That is
+the only case in which the record contradicts the certificate.
+
+It leaves open the case where **nobody has said** — `witnessSworn` MISSING — and that is the common
+state, not the rare one. A certificate generated then asserts the witness was duly sworn on no
+recorded basis at all. That is not a false statement, and it is what this application has always
+produced, but it is a gap and phase 1 does not narrow it.
+
+**So F-18 is mitigated, not closed, and not only because affirmation wording is missing.** It is
+also open because the ordinary path still produces an unattested certificate. Both reasons are
+recorded in F-20's amendment, so that the exception is visible where the rule lives rather than only
+in this document's phase split.
+
+## 2b. Two fields now describe the same fact, and only one of them is attributed
+
+`witnessOathSelection` in `workflow/opening-procedures.json` is a workflow value: no `who`, no `at`,
+and under ADR-0021 it may never influence certified output. `deposition.witnessSworn` on the
+canonical record is an attested fact carrying `who`, `why` and `at`. They can disagree, and the
+disagreement is legitimate.
+
+The case worth naming, because it will happen and will look like a bug:
+
+> A reporter sets the Opening selector to **Affirmation** and never attests. The record then holds
+> an unattributed `AFFIRMATION` in the workflow file and a **MISSING** `witnessSworn`. **The
+> certificate generates**, stating the witness was duly sworn.
+
+That is correct under phase 1 and it is not a defect. The workflow value is the reporter's working
+note; the certificate rests only on what was attested. An interface that made the certificate
+respond to the selector would be the reverted design again.
+
+It is also the strongest argument for phase 2, and the reason phase 2 is a separate authorization
+rather than a nice-to-have.
+
 ## 3. The field, and what its three states mean
 
 | `witnessSworn` | Means | Certification page |
@@ -131,9 +166,30 @@ the test name beside the mutation. An aggregate pass count is not evidence a gua
 | correction with empty `why` | refused by the existing validator |
 | correction with stale `from` | refused by the existing validator |
 
+**A second named test, for the constraint in §4 that carries the design.**
+
+*Changing the Opening selector must not write an attestation.* If a dropdown change ever satisfies
+`witnessSworn`, the design reverts to what ADR-0021 forbids — with attribution attached to an act
+the reporter did not intend as an attestation, which is worse than no attribution because it looks
+like provenance. A paragraph in §4 does not survive a refactor. Assert it:
+
+- change `witnessOathSelection` through the ordinary save path
+- assert `deposition.witnessSworn` is still MISSING
+- assert the correction log has gained no entry
+
 **Required, and this is the one that matters most:**
 `tests/verification-never-reaches-a-certified-page.test.mjs` **must pass**, all four cases. It is the
 guard that caught the previous attempt. Report its result explicitly; do not fold it into a total.
+
+**And prove it still catches the crossing.** That test passing proves nothing on its own — it also
+passed for months while nothing crossed. Deliberately reintroduce the violation: add a
+`readOpeningState` call to the render path, show
+`the certified render never opens the workflow file` **fails by name**, then remove it and show it
+passes. Report the mutation beside the test name.
+
+This is the inverse of an ordinary mutation proof. Elsewhere the guard is deleted to show the test
+fails; here the violation is introduced to show the guard fires. The evidence that it will catch the
+next attempt is that it caught a deliberate one.
 
 **Keep a positive control.** Retain a case that changes a field the renderer does read, so that a run
 where every case returns the same result is distinguishable from a dead harness. F-21.

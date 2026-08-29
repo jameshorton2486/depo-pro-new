@@ -459,6 +459,22 @@ refuses unattributed values.
 A later reader must not conclude from this section that the cheap version was sound and the merge
 merely went wrong. It was not sound. Read F-22 before reopening this.
 
+**The exception survives in a narrower and better-founded form.** The replacement design
+(`authorization-o10-oath-basis-on-the-record.md`) routes the oath basis through
+`deposition.witnessSworn` with attribution, which satisfies ADR-0021. Its **phase 1 still generates
+when `witnessSworn` is MISSING**, and MISSING is the common state, so absence still grants permission
+here.
+
+The difference from the withdrawn version is what the exception now rests on. Before, it rested on
+proportionality — affirmations are rare — while the mechanism was invalid regardless. Now the
+mechanism is valid and the exception is a scoping decision with a named successor: **phase 2 refuses
+on MISSING and is gated on O-11**, the library attestation. The gap is bounded, has an owner, and has
+the work that closes it written down.
+
+That is still an exception to this finding's rule and it is recorded here, at the rule, rather than
+only in the phase split of another document — because a reader arriving at F-20 to check whether
+absence may grant permission must be told that in one place it currently does.
+
 ---
 
 ## F-21 — An empty result and a broken instrument are indistinguishable
