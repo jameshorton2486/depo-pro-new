@@ -37,6 +37,9 @@ type Session = {
   state: string;
   sources: Source[];
   events?: SessionEvent[];
+  // Absent on a first part. A continuation carries which recording it belongs to, where it sits in
+  // the order, and how much real time passed with nothing being recorded before it started.
+  partOf?: { recordingId: string; ordinal: number; previousSessionId: string; gapMsBefore: number | null } | null;
 };
 type Recoverable = {
   sessionId: string;
@@ -410,6 +413,26 @@ export default function LiveCaptureScreen({
           await post("/api/live-capture/start", {
             depositionId: captureDepositionId || null,
             sessionId: configured.sessionId,
+            preflightId: preflight?.preflightId,
+          }),
+        );
+      }),
+    // A break in the deposition. The reporter stops, and comes back to the same recording rather
+    // than starting an unrelated one -- so the parts stay linked and the gap between them is
+    // recorded. The devices carry over from the previous part, which is what lets the preflight
+    // that armed the first part arm this one: the device signature is computed over the same
+    // sources, so it still matches.
+    continueRecording = () =>
+      act(async () => {
+        const next = await post("/api/live-capture/continue", {
+          depositionId: captureDepositionId || null,
+          previousSessionId: session?.sessionId,
+        });
+        setHandoff("");
+        setSession(
+          await post("/api/live-capture/start", {
+            depositionId: captureDepositionId || null,
+            sessionId: next.sessionId,
             preflightId: preflight?.preflightId,
           }),
         );
@@ -894,7 +917,10 @@ export default function LiveCaptureScreen({
         </div>
         {session && !recording && (
           <div className="live-finalized">
-            <strong>Local recording {session.state.toLowerCase()}</strong>
+            <strong>
+              Local recording {session.state.toLowerCase()}
+              {session.partOf ? ` — part ${session.partOf.ordinal}` : ""}
+            </strong>
             <label className="rename-recording">
               <span>Name this recording</span>
               <input
@@ -917,6 +943,23 @@ export default function LiveCaptureScreen({
                   : "Not finalized"}
               </p>
             ))}
+            {["FINALIZED", "DEGRADED"].includes(session.state) && (
+              <div className="continue-recording">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void continueRecording()}
+                >
+                  Continue this recording — part {(session.partOf?.ordinal ?? 1) + 1}
+                </button>
+                <small>
+                  Each part is recorded and hashed separately and stays its own file. They are not
+                  joined into one recording: a single file would sound continuous across a break
+                  that really happened, with nothing in it to say so.
+                </small>
+              </div>
+            )}
             <div className="live-handoff">
               {deposition && registeredUploads.length === 0 && <button
                 className="primary-button"

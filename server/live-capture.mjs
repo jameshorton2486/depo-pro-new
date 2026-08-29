@@ -5,7 +5,7 @@ import {spawn,spawnSync} from "node:child_process";
 import {appendDepositionAudio,depositionDirectories,depositionDirectory} from "./deposition-store.mjs";
 import {captureSessionRoot} from "./storage-config.mjs";
 
-export const LIVE_CAPTURE_SCHEMA_VERSION="1.0.0";
+export const LIVE_CAPTURE_SCHEMA_VERSION="1.1.0";
 // Deterministic, so re-registering a channel collides with itself and is refused, and shaped as
 // a UUID because that is what every other uploadId in a deposition record is.
 function uploadIdForChannel(sessionId,channelId){const hex=crypto.createHash("sha256").update(`${sessionId}:${channelId}`).digest("hex");return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`}
@@ -100,7 +100,7 @@ const isSynthetic=session=>(session.sources??[]).some(source=>source.backend==="
  * picking the right recording out of three days of them; once the session is assigned, the
  * deposition supplies the real identity and the label stops mattering.
  */
-export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot,fileSources}={}){
+export function createCaptureSession(root,{depositionId=null,label="",sources,storageRoot,fileSources,partOf=null}={}){
   const startedAt=now();
   const sessionLabel=String(label??"").trim()||`Recording ${startedAt.slice(0,10)} ${startedAt.slice(11,16)}`;
   const sessionId=`LIVE-${new Date().toISOString().replace(/[-:.TZ]/g,"").slice(0,14)}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,paths=sessionPaths(root,depositionId,sessionId,storageRoot);
@@ -109,7 +109,55 @@ export function createCaptureSession(root,{depositionId=null,label="",sources,st
   // the last place to leave litter. Nothing here writes until the sources are known to be good.
   const validated=validateSources(sources,{fileSources}),synthetic=isSynthetic({sources:validated});
   fs.mkdirSync(path.join(paths.directory,"channels"),{recursive:true});
-  const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:synthetic?{channelsSampleAligned:true,interChannelOffsetMeasured:false,reason:"Every channel is read from position zero of a file, so the channels carry the same span of source audio and are aligned in content. This is a property of reading a file and says nothing about microphones: it is the reason a synthetic session cannot stand in for a captured one when the question is timing.",doNotUseFor:"Anything. This session is synthetic. It is not a recording of a proceeding and cannot be attached to a deposition."}:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validated,synthetic,events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
+  const session={schemaVersion:LIVE_CAPTURE_SCHEMA_VERSION,recordType:"LOCAL_MULTICHANNEL_CAPTURE_SESSION",sessionId,depositionId:depositionId??null,label:sessionLabel||null,assignedDepositionId:null,assignedAt:null,state:"CONFIGURED",partOf,authoritativeAudio:"independent-lossless-local-channels",streaming:{enabled:false,provider:null},timeline:synthetic?{channelsSampleAligned:true,interChannelOffsetMeasured:false,reason:"Every channel is read from position zero of a file, so the channels carry the same span of source audio and are aligned in content. This is a property of reading a file and says nothing about microphones: it is the reason a synthetic session cannot stand in for a captured one when the question is timing.",doNotUseFor:"Anything. This session is synthetic. It is not a recording of a proceeding and cannot be attached to a deposition."}:{channelsSampleAligned:false,interChannelOffsetMeasured:false,reason:"Each channel is captured by an independent process. The interval between starting a process and its first sample is not observable from outside it, so the channels begin at different real moments by an amount this session does not know. Measured on one DirectShow device with identical invocations, that interval varied between 28 and 83 milliseconds run to run, so no fixed correction applies.",doNotUseFor:"Attributing speech by comparing signal across channels. The offset is unmeasured, so a comparison that assumes the channels are aligned can attribute a word to the wrong speaker."},clock:{kind:"process.hrtime.bigint",originMonotonicNs:null,originWallClock:null},sources:validated,synthetic,events:[{type:"SESSION_CONFIGURED",at:now()}],createdAt:now(),updatedAt:now()};atomicJson(paths.manifest,session);return publicSession(session)}
+/**
+ * Continues a recording that was stopped, as the next part of the same proceeding.
+ *
+ * A deposition breaks. Counsel steps out, a witness needs a minute, something goes off the record.
+ * The reporter stops, and later needs to be recording again -- and the two runs are one proceeding
+ * even though they are two captures.
+ *
+ * What this does NOT do is concatenate the audio, and that is the whole design. Joining the parts
+ * into one file would destroy the per-part hash and manufacture continuity across a gap where none
+ * existed: a listener would hear one unbroken take of something that had four minutes taken out of
+ * the middle, with nothing in the file to say so. On a record a court may be asked to rely on,
+ * that is a defect and not a convenience.
+ *
+ * So the parts stay separate captures. Each one finalizes, hashes, registers and attaches through
+ * exactly the same path a single-part recording does -- including the verified move in
+ * assignCaptureSession, which is the only place in this application where evidence changes
+ * location and is not somewhere to introduce a new artifact shape. What is stitched is the
+ * timeline: `partOf` names the recording, gives each part its ordinal, and records the gap before
+ * it in milliseconds, measured between the previous part's stop and this part's configuration.
+ *
+ * `recordingId` is the first part's sessionId, so the chain is discoverable from any part without
+ * a separate index that could drift out of step with the sessions it indexes.
+ */
+export function continueCaptureSession(root,{depositionId=null,previousSessionId,storageRoot,label="",fileSources}={}){
+  if(!previousSessionId)throw new Error("Continuing a recording requires the part it continues.");
+  const previousPaths=sessionPaths(root,depositionId,previousSessionId,storageRoot);
+  if(!fs.existsSync(previousPaths.manifest))throw new Error("The recording being continued was not found.");
+  const previous=readManifest(previousPaths);
+  // A part that is still running or was never finalized has no end to measure the gap from, and
+  // continuing it would leave two captures writing at once from the same devices.
+  if(!["FINALIZED","DEGRADED"].includes(previous.state))throw new Error(`Stop and finalize part ${previous.partOf?.ordinal??1} before continuing the recording.`);
+  // Synthetic sources are rebuilt from a `kind:"file"` shape this manifest no longer carries, and
+  // a synthetic session cannot be attached to a deposition anyway, so there is nothing to continue.
+  if(previous.synthetic||isSynthetic(previous))throw new Error("A session recorded from a file cannot be continued.");
+  const recordingId=previous.partOf?.recordingId??previous.sessionId;
+  const ordinal=(previous.partOf?.ordinal??1)+1;
+  const stoppedAt=[...(previous.events??[])].reverse().find(event=>event.type==="LOCAL_RECORDING_STOPPED")?.at??previous.updatedAt??null;
+  const startedAt=now();
+  // The gap is real time in which nothing was recorded. It is written down rather than smoothed
+  // over, because the alternative is a timeline that implies the parts abut.
+  const gapMsBefore=stoppedAt?Math.max(0,Date.parse(startedAt)-Date.parse(stoppedAt)):null;
+  return createCaptureSession(root,{
+    depositionId,storageRoot,fileSources,
+    label:String(label??"").trim()||`${previous.label??recordingId} - part ${ordinal}`,
+    sources:previous.sources.map(source=>({id:source.id,role:source.role,deviceId:source.deviceId,deviceName:source.deviceName})),
+    partOf:{recordingId,ordinal,previousSessionId:previous.sessionId,gapMsBefore,previousStoppedAt:stoppedAt},
+  });
+}
 function recordPath(paths,source){return path.join(paths.directory,"channels",`${String(source.ordinal+1).padStart(2,"0")}-${source.id}.wav`)}
 // astats prints "RMS level dB:" only in its end-of-stream summary, so during a recording that runs
 // for hours it prints nothing at all -- which is why the meters were dead for the whole capture
@@ -376,6 +424,50 @@ export function recoverableCaptureSessions(root,{storageRoot}={}){
   const orphaned=openManifests(root,storageRoot).filter(session=>!running.has(session.sessionId)).map(describe);
   return {recoverable,orphaned};
 }
+/**
+ * The ordered parts of one recording, with the gaps between them.
+ *
+ * This is the "stitch": an ordered timeline over separate captures, never a joined audio file.
+ * Every part keeps its own channels and its own hashes, and `gapMsBefore` says how much real time
+ * passed with nothing being recorded. A consumer that wants one continuous span has to decide what
+ * to do about the gaps; it is not given a file that has already decided for it.
+ *
+ * Parts are found by scanning the directory the session lives in, and grouped by the recordingId
+ * each part carries, so there is no separate index to drift. A part whose manifest will not parse
+ * is omitted rather than guessed at -- and `parts.length` against the highest ordinal is what says
+ * whether anything is missing.
+ */
+export function captureRecordingParts(root,{depositionId=null,sessionId,storageRoot}={}){
+  const paths=sessionPaths(root,depositionId,sessionId,storageRoot),container=path.dirname(paths.directory);
+  const manifests=new Map();
+  for(const entry of fs.readdirSync(container,{withFileTypes:true})){
+    if(!entry.isDirectory())continue;
+    try{const manifest=JSON.parse(fs.readFileSync(path.join(container,entry.name,"capture-session.json"),"utf8"));manifests.set(manifest.sessionId,manifest)}
+    catch{/* a directory that is not a capture session, or a manifest mid-write */}
+  }
+  const start=manifests.get(sessionId);
+  if(!start)throw new Error("The recording was not found.");
+  const recordingId=start.partOf?.recordingId??start.sessionId;
+  const parts=[...manifests.values()]
+    .filter(manifest=>(manifest.partOf?.recordingId??manifest.sessionId)===recordingId)
+    .sort((left,right)=>(left.partOf?.ordinal??1)-(right.partOf?.ordinal??1))
+    .map(manifest=>({
+      ordinal:manifest.partOf?.ordinal??1,sessionId:manifest.sessionId,state:manifest.state,
+      label:manifest.label??null,gapMsBefore:manifest.partOf?.gapMsBefore??null,
+      startedAt:manifest.events?.find(event=>event.type==="LOCAL_RECORDING_STARTED")?.at??null,
+      stoppedAt:[...(manifest.events??[])].reverse().find(event=>event.type==="LOCAL_RECORDING_STOPPED")?.at??null,
+      channels:(manifest.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,
+        bytes:source.artifact?.bytes??null,sha256:source.artifact?.sha256??null})),
+    }));
+  const highest=parts.reduce((most,part)=>Math.max(most,part.ordinal),0);
+  return {
+    recordingId,parts,
+    // Stated rather than left to be inferred from parts.length > 1.
+    continuous:parts.length<=1,
+    missingParts:highest-parts.length,
+    totalGapMs:parts.reduce((total,part)=>total+(part.gapMsBefore??0),0),
+  };
+}
 export function listCaptureSessions(){
   const directory=captureSessionRoot();
   if(!fs.existsSync(directory))return [];
@@ -388,7 +480,7 @@ export function listCaptureSessions(){
       // outside, and the difference between "leave it alone" and "this needs finalizing".
       // synthetic says the audio never came from a microphone, which no amount of state or
       // running can tell you and which decides whether it may ever be attached to a deposition.
-      return {sessionId:session.sessionId,label:session.label,state:session.state,running:active.has(session.sessionId),synthetic:Boolean(session.synthetic),createdAt:session.createdAt,
+      return {sessionId:session.sessionId,label:session.label,state:session.state,running:active.has(session.sessionId),synthetic:Boolean(session.synthetic),createdAt:session.createdAt,partOf:session.partOf??null,
         assignedDepositionId:session.assignedDepositionId??null,assignedAt:session.assignedAt??null,
         channels:(session.sources??[]).map(source=>({id:source.id,role:source.role,state:source.state,bytes:source.artifact?.bytes??null}))};
     }catch{return null}

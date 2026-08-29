@@ -12,7 +12,7 @@ import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
-import { assignCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
+import { assignCaptureSession, captureRecordingParts, continueCaptureSession, createCaptureSession, enumerateWindowsAudioSources, finalizeOrphanedSession, getCaptureSession, listCaptureSessions, recoverableCaptureSessions, registerCaptureAudio, renameCaptureSession, startCaptureSession, stopCaptureSession } from "./live-capture.mjs";
 import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflightArtifact, runTestCapture } from "./live-preflight.mjs";
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
@@ -179,6 +179,11 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/preflight/arm" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,armPreflight(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/live-capture/preflight/audio?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"),file=getPreflightArtifact(root,{depositionId:url.searchParams.get("depositionId"),preflightId:url.searchParams.get("preflightId"),sourceId:url.searchParams.get("sourceId"),storageRoot:depositionStorageRoot}); return sendMedia(req,res,file,{"content-type":"audio/wav","access-control-allow-origin":origin,"vary":"Origin","cache-control":"no-store"}); }
     if (req.url === "/api/live-capture/session" && req.method === "POST") { const input=await body(req,256*1024); return json(res,201,createCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    // Continuing configures the next part; it does not start it. Starting stays one route with one
+    // meaning, and the preflight check on it applies to a continuation exactly as to a first part --
+    // the device signature is computed over the same sources, so the same armed preflight covers it.
+    if (req.url === "/api/live-capture/continue" && req.method === "POST") { const input=await body(req,64*1024); return json(res,201,continueCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
+    if (req.url?.startsWith("/api/live-capture/parts?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,captureRecordingParts(root,{depositionId:url.searchParams.get("depositionId")||null,sessionId:url.searchParams.get("sessionId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/start" && req.method === "POST") { const input=await body(req,64*1024); if(input.preflightId){const session=getCaptureSession(root,{depositionId:input.depositionId,sessionId:input.sessionId,storageRoot:depositionStorageRoot});assertArmed(root,{depositionId:input.depositionId,preflightId:input.preflightId,sources:session.sources,storageRoot:depositionStorageRoot});}return json(res,200,startCaptureSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/deepgram/start" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();return json(res,200,startDeepgramLive(root,{...input,apiKey:config?.deepgramApiKey,keyterms:liveKeyterms(input.depositionId),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/deepgram/stop" && req.method === "POST") { const input=await body(req,64*1024);return json(res,200,await stopDeepgramLive(root,input),origin); }
