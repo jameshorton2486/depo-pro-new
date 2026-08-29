@@ -350,6 +350,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  // Where the selected paragraph sits, so the two join controls can refuse at the ends of the
+  // transcript rather than calling joinParagraph and letting it fail. The first paragraph has
+  // nothing above it and the last has nothing below.
+  const activeIndex = active ? (rendered?.paragraphs ?? []).findIndex(paragraph => paragraph.id===active.id) : -1;
   const speakerMapStatus = rendered?.speakerMap?.status ?? "unreconciled";
   // A transcript with paragraphs and no speaker map renders entirely as colloquy. That is
   // correct -- Q. and A. require knowing who is examining, and nothing should infer it from the
@@ -640,6 +644,20 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               Clear this mark
             </button>
           )}
+          {/* Join was reachable only from the document pages, on Backspace at the start of a
+              paragraph and Delete at the end. The operation was built, tested and wired -- it was
+              the keystroke nobody could guess. These call the same joinParagraph, so a paragraph
+              broken in the wrong place is repaired the same way from either screen.
+
+              They act on whole paragraphs, which is what join does. Moving a highlighted span
+              alone would be split-then-join, and is deliberately not what these buttons claim. */}
+          <h3>Paragraph</h3>
+          <button type="button" disabled={!active||busy||activeIndex<=0} onClick={()=>active&&void joinParagraph(active.id,"previous")}>
+            Join to previous paragraph
+          </button>
+          <button type="button" disabled={!active||busy||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1} onClick={()=>active&&void joinParagraph(active.id,"next")}>
+            Join to next paragraph
+          </button>
           <h3>Label</h3>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="QUESTIONING_ATTORNEY")?.id??examiner??null,"QUESTIONING_ATTORNEY")}>Q.</button>
           <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="WITNESS")?.id??null,"WITNESS")}>A.</button>
