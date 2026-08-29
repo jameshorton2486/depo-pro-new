@@ -17,7 +17,7 @@ currency line exists to prevent. It is restated below against what was actually 
 |---|---|
 | (a), 1′–9 | **Not re-run.** No commit since `6f3101e` touches intake or setup. Checked, not assumed. |
 | 11, 12, 13 | **Partially re-run 2026-08-29 at `f68ab85`** — see *Partial re-run* below. |
-| 10 | **Not re-run, and see the reconciliation note in the step 10 passage.** Its authoritative artefact is the 18:05:13 reporter-completed document recorded under *The reporter-completed document*, not the 16:20:18 document the Word round trip used. |
+| 10 | **Not re-run, and it is the most expensive item on this gate, not the cheapest.** Its verdict rests on the reporter-completed document; the Word round trip ran on the builder-typed one. Neither reporter-completed document survives, so closing it needs a fresh capture and desktop Word. See the reconciliation note in the step 10 passage. |
 
 **The original run is not reproducible.** Steps 10, 11 and 13 ran against `DEP-20260827-LL0D2` with
 a real 8m51s capture. That deposition was a work file and is deleted. Separately, the synthetic
@@ -233,29 +233,54 @@ round trip. Its sha256 is
 
 **Reconciliation, 2026-08-29: the round trip and step 10's result are different documents.**
 
-Three documents exist for this deposition, and step 10's evidence is split across two of them:
+*Established from the artefacts. An earlier version of this note reached the same conclusion from
+the commit message for `3842058` and from sizes quoted elsewhere in this file; that is the failure
+mode this whole passage is about, and the evidence below replaces it.*
 
-| Generated | Certification values | Size | Paragraphs | What it carries |
-|---|---|---|---|---|
-| 16:20:18 | builder-typed | 43,944 | 300 | **the Word round trip above** |
-| 18:05:13 | reporter-entered | 43,929 | 299 | **step 10's result** — see *The reporter-completed document* |
-| 18:43:25 | reporter-entered, post-CSR-fix | 43,928 | — | the only one still on disk |
+**Identification, by hash.** The file `complete-transcript.docx` in the Downloads folder is 38,389
+bytes, sha256 `392c8198246257e32a97c8bf5f39666009c9d7c56fe0376691812110c96aeb09` -- the value this
+document already records for the round-trip artifact -- and its `docProps/app.xml` reports
+**Pages 12, Lines 333, Words 2077**, the figures quoted above. That identifies it as Word's output
+without relying on any narrative. Its input survives as two byte-identical copies,
+`complete-transcript (1).docx` and `(2).docx`, both 43,944 bytes, sha256
+`50c5e6b4beeb84f1305f199100d32f4f4f6937e42542d0149d01fd36790eb760`, 300 paragraphs, whose
+`docProps` carries the application's own stub of `Pages 1, Lines 0, Words 0`.
 
-The Word round trip was performed on the first. Step 10's verdict stands on the second, per
-`3842058`, which is the document produced end to end from a deposition a reporter created. **The
-round trip has never been run against the document step 10 turns on.**
+**Which run produced it.** All three files contain `That $$1,240.00` and
+`Marguerite Okonkwo-Vance, Texas CSR CSR 9174`. The doubled dollar sign is this document's own
+marker for the 16:20:18 builder-typed build; `$1,200` is its marker for the reporter-entered one,
+and appears in none of them. **The Word round trip was therefore performed on the builder-typed
+document, and the reporter-completed document was never round-tripped.**
 
-That is a smaller gap than it sounds and it is not nothing. What differs between the two is four
-certification field values and one trailing blank line the renderer drops when content runs longer.
-Nothing there plausibly changes how Word parses a container. But the round trip's own decisive
-figures -- 300 paragraphs both, text byte-identical across all 300, `docProps/app.xml` reporting
-Pages 12 -- are assertions about a 300-paragraph file, and the authoritative document has 299. They
-do not transfer by inspection.
+**A discriminator that fails, recorded because it is the one a later reader will reach for.**
+The custodial attorney the reporter entered at 18:01:29 was Rufus Q. Pemberton. Searching the
+documents for that name confirms nothing: **`Rufus Q. Pemberton-Stack` appears in all three files**,
+on the appearance page, as defending counsel. Same person, two roles. Only the currency figure
+separates the runs -- `$1,240` against `$1,200`. A name match here would have confirmed the wrong
+answer.
 
-**What would close it.** Open the 18:43:25 document -- the one on disk -- in desktop Word, save,
-close, reopen, and compare as above. It differs from the 18:05:13 document only by the CSR label
-strip. That is one round trip against a file that already exists, and it needs no new capture and
-no new deposition. It is the cheapest remaining item on this gate.
+**Checked absence, with its scope.** No file of 43,929 or 43,928 bytes exists. Searched: every
+`*.docx` under 60 KB anywhere beneath `C:/Users/james`, unlimited depth, matching on byte size.
+`C:/Users/james/depos` exists and holds nothing matching `whitaker` or `LL0D2`;
+`.milestone2-corrected-data` is gone from the repository working tree. `DEP-20260827-LL0D2` was a
+work file and was deleted.
+
+**Two figures in this file are now unverifiable.** The 43,929 bytes attributed to the 18:05:13
+document and the 43,928 bytes attributed to the 18:43:25 document come from the narrative below,
+written when those files existed. Neither survives, so neither figure can be re-measured. They are
+recorded as **unconfirmed**, not as measurements, and nothing should be derived from the one-byte
+difference between them.
+
+**What this costs.** An earlier version of this note claimed step 10 could be closed cheaply by
+round-tripping the surviving on-disk document. That was wrong: the surviving document is the
+builder-typed one, which has already been round-tripped, so a second round trip would establish
+nothing new. **Step 10 needs a fresh deposition, a real capture, and desktop Word.** It is the most
+expensive remaining item on this gate.
+
+**What is not in doubt.** The round trip's own figures -- 300 paragraphs both, text byte-identical
+across all 300, `Pages 12` from Word's own pagination -- hold, and are re-confirmed above against the
+files. What they do not cover is the reporter-completed document, which has 299 paragraphs by the
+narrative below and cannot now be measured.
 
 **The caveat that governs all three.** This document carries certification values entered by the
 builder, not by the reporter: custodial attorney, officer's charges, charges billed to and
