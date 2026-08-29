@@ -10,6 +10,7 @@ export type DepositionCreationMode = "existing_recording" | "live";
 export type ClaudeIntakeAnalysis = {
   caseStyle:string; witness:string; causeNumber:string; depositionDate:string; deponentType:string;
   confidence:string; warnings:string[]; keyterms:string[]; parties:string[]; attorneys:IntakeAttorney[];
+  masterData:Record<string,unknown>;
   deepgramArtifact:Record<string,unknown> & { terms?:KeytermEntry[]; wire?:string[] };
   ufmData:Record<string,unknown> & { entries?:UfmEntry[]; entry_count?:number; anomalies?:unknown[]; cause_number?:string };
   [key:string]:unknown;

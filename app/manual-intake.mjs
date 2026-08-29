@@ -12,9 +12,10 @@
 // PROVENANCE. Nothing here stamps a source. createCanonicalDepositionRecord already decides it:
 // `sourceFor` returns NOD_EXTRACTED only when a notice was supplied AND the key is named in
 // extractedFields, and REPORTER_ENTERED otherwise. So the correct behaviour on this path is not
-// to switch a tag but to refrain from claiming a notice: no notice file, and an empty ufmData so
-// extractedFieldKeys finds nothing. A manual route that fabricated either would make the
-// canonical record cite a Notice as the source of words a reporter typed.
+// to switch a tag but to refrain from claiming a notice. Every cell this module builds is
+// CONFIRMED / REPORTER, so canonicalInputFromMaster -- which names a key only where its cell still
+// says EXTRACTED -- finds none, and no key can cite a Notice as the source of words a reporter
+// typed. That holds even when a notice file is present, which is the case worth guarding.
 
 // Relative, not the "@/" alias: this module is imported by node --test as well as by the bundler,
 // and the alias only resolves in the bundler. The cap stays in server/keyterm-limits.mjs -- there
@@ -147,9 +148,8 @@ export function deriveManualKeyterms({ witness, attorneys = [], parties = [] } =
 /**
  * The intake object, in the shape the extraction path produces.
  *
- * `ufmData` is empty and stays empty. extractedFieldKeys reads it to decide which keys the
- * extraction actually produced; an empty object means none, which is true and is what keeps every
- * field REPORTER_ENTERED.
+ * `ufmData` is empty and stays empty. It is a legacy sibling of `masterData`, still carried for
+ * consumers that have not moved; nothing on this path derives provenance from it any more.
  *
  * Counsel are returned as objects with stable ids, not as prose. The examiner is stored on the
  * assembly as a canonical counsel id, so counsel captured as a name would leave examiner
@@ -173,6 +173,25 @@ export function manualIntakeAnalysis(fields = {}) {
       : { id:text(party.id) || `party-${index + 1}`, name:text(party.name), role:text(party.role) });
 
   const keyterms = deriveManualKeyterms({ witness:fields.witness, attorneys, parties });
+  // CONFIRMED/REPORTER means a person typed this on the form. Nothing else may wear that tag.
+  //
+  // `jurisdiction` and `proceedingType` were seeded here with "Texas" and "ORAL_DEPOSITION" -- true
+  // of most depositions this application will see, and still not something the reporter said. A
+  // guessed value carrying an attestation is worse than a blank, because a blank asks the question
+  // again and an attestation closes it. An empty `represents` array read as truthy and confirmed
+  // the same way, so counsel who represented nobody in particular represented them confirmedly.
+  const supplied = value => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
+  const entered = value => ({ value:supplied(value) ? value : null, status:supplied(value) ? "CONFIRMED" : "MISSING", sourceType:supplied(value) ? "REPORTER" : null, sourceDocument:null, citation:null, confidence:null });
+  const masterData = {
+    schemaVersion:"1.0.0", recordType:"MASTER_DEPOSITION_DATA_RECORD", profile:"TEXAS_FREELANCE_DEPOSITION",
+    case:{caseStyle:entered(text(fields.caseStyle)),causeNumber:entered(text(fields.causeNumber)),jurisdiction:entered(""),court:entered(""),district:entered(""),division:entered(""),county:entered("")},
+    parties:parties.map(party=>({id:party.id,name:entered(party.name),role:entered(party.role||""),entityType:entered("")})),
+    deposition:{witness:entered(text(fields.witness)),representativeCapacity:entered(text(fields.deponentType)),proceedingType:entered(""),scheduledDate:entered(text(fields.depositionDate)),scheduledStart:entered(""),timeZone:entered(""),location:entered(""),remote:entered(""),remotePlatform:entered(""),videotaped:entered(""),interpreted:entered(""),corporateRepresentative:entered("")},
+    counsel:attorneys.map(attorney=>({id:attorney.id,fullName:entered(attorney.name),firm:entered(attorney.firm),address:entered(""),phone:entered(""),email:entered(""),barNumber:entered(""),represents:entered(attorney.represents),appearanceRole:entered("")})),
+    participants:{expected:[],actual:[]},
+    terminology:keyterms.map((canonical,index)=>({canonical,category:index===0?"witness":"proper_name",asrVariants:[],spoken:true,deepgramEligible:true,priority:index===0?1:2,source:"REPORTER",confidence:null,reason:"Manual intake proper name"})),
+    transcript:{examinations:[],index:[],exhibits:[],certifiedQuestions:[],requestedInformation:[]},signature:{status:entered("")},certification:{costResponsibleParty:entered(""),firmRegistrationNumber:entered("")},conflicts:[],anomalies:[],provenance:{promptVersion:null,generatedFrom:[],sourceDocument:null,extractionReport:{manualEntry:true}}
+  };
   return {
     caseStyle: text(fields.caseStyle),
     witness: text(fields.witness),
@@ -182,6 +201,7 @@ export function manualIntakeAnalysis(fields = {}) {
     parties,
     attorneys,
     keyterms,
+    masterData,
     deepgramArtifact: { terms:keyterms, term_count:keyterms.length, estimated_tokens:0, wire:keyterms },
     // Empty, and load-bearing: see the provenance note at the top of this file.
     ufmData: {},

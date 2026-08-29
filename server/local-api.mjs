@@ -51,6 +51,7 @@ import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs
 import { attestWitnessSworn } from "./deposition-store.mjs";
 import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
 import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
+import { masterDataFromExtraction, projectDeepgramKeyterms, projectTexasFreelanceUfm } from "./master-deposition-data.mjs";
 
 // What a rendered document actually is, decided from the model that was actually rendered.
 // COMPLETE_RECORD_TYPE is imported rather than restated so the browser's idea of "complete" and
@@ -142,7 +143,7 @@ function liveKeyterms(depositionId) {
   if (!depositionId) return [];
   try {
     const intake = readDepositionIntake(root, depositionId, { storageRoot:depositionStorageRoot });
-    const source = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
+    const source = intake?.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD" ? projectDeepgramKeyterms(intake.masterData).wire : (Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms);
     return (Array.isArray(source) ? source : []).map(term => String(term).trim()).filter(Boolean);
   } catch { return []; }
 }
@@ -449,7 +450,7 @@ const server = http.createServer(async (req,res) => {
       // registry and intake keyterms. Any groups in the request body are ignored on purpose:
       // a client able to narrow them is a client able to weaken the selection gate.
       let resolved=null,termGroupError=null;
-      try{const intake=input.depositionId?readDepositionIntake(root,input.depositionId,{storageRoot:depositionStorageRoot}):null;resolved=buildTermGroups(input.termGroupSetId,{ufmEntries:intake?.ufmData?.ufm_registry?.entries||[],keyterms:intake?.keyterms||[]})}
+      try{const intake=input.depositionId?readDepositionIntake(root,input.depositionId,{storageRoot:depositionStorageRoot}):null;const masterTerms=intake?.masterData?.terminology||[];resolved=buildTermGroups(input.termGroupSetId,{ufmEntries:masterTerms.map(term=>({canonical:term.canonical,category:term.category})),keyterms:intake?.masterData?projectDeepgramKeyterms(intake.masterData).wire:(intake?.keyterms||[])})}
       catch(error){termGroupError=error instanceof Error?error.message:String(error)}
       const comparison={source,derivativeOperationId:source==="processed"?(input.derivativeOperationId||audit.transcripts?.processed?.derivativeOperationId||null):null,termGroupSetId:resolved?.termGroupSetId??null,termGroupSetVersion:resolved?.termGroupSetVersion??null,termGroupError,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[],resolved?.groups||{})}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
     }
@@ -495,10 +496,16 @@ const server = http.createServer(async (req,res) => {
       data.deepgram_keyterms.estimated_tokens=estimatedTokens;
       data.deepgram_keyterms.budget={token_ceiling:500,working_target:KEYTERM_TOKEN_BUDGET,quality_target_range:[20,KEYTERM_PRODUCT_CAP],product_cap:KEYTERM_PRODUCT_CAP};
       data.ufm_registry.entry_count=(data.ufm_registry.entries||[]).length;
-      const deepgramArtifact={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",...data.deepgram_keyterms};
-      const ufmData={case_id:data.case_id,cause_number:data.setup.causeNumber,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
+      // One extraction authority. Deepgram and UFM are projections of this record, not sibling
+      // files that can disagree with the deposition setup or with each other.
+      const masterData=masterDataFromExtraction(data,{sourceDocument:input.file?.name??null});
+      const deepgramArtifact=projectDeepgramKeyterms(masterData);
+      const ufmProjection=projectTexasFreelanceUfm(masterData);
+      // ufmData remains response-only during the UI migration. New intake persistence stores
+      // masterData and derives this projection when needed; it is not a second authority.
+      const ufmData={...ufmProjection.fields,caption:data.caption,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
       const anomalyWarnings=(data.anomalies||[]).map((item)=>`Review flag: ${item.detail||item.type||"Document anomaly"}${item.action?` — ${item.action}`:""}`);
-      return json(res,200,{...data.setup,keyterms:wire,deepgramArtifact,ufmData,warnings:[...(data.setup.warnings||[]),...(data.extraction_report.low_confidence_spellings||[]).map((term)=>`Low-confidence spelling: ${term}`),...anomalyWarnings],confidence:data.setup.confidence},origin);
+      return json(res,200,{...data.setup,keyterms:deepgramArtifact.wire,masterData,deepgramArtifact,ufmData,warnings:[...(data.setup.warnings||[]),...(data.extraction_report.low_confidence_spellings||[]).map((term)=>`Low-confidence spelling: ${term}`),...anomalyWarnings],confidence:data.setup.confidence},origin);
     }
     if (req.url === "/api/admin/test-keys" && req.method === "POST") {
       const config=loadSecrets();

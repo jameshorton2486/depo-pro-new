@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { flattenLocation, logisticsFields, parseClockTime, parseNoticeDate } from "../app/intake-logistics.mjs";
-import { extractedFieldKeys } from "../app/extracted-fields.mjs";
 
 // The extraction supplied the date, the time, the address and the platform. The setup screen showed
 // all four blank, because the two sides used different vocabularies: the form read
@@ -45,8 +44,6 @@ test("a Notice that does not state the method leaves those fields unsupplied", (
   assert.deepEqual(logisticsFields(silent), {
     depositionDate: undefined, scheduledStart: undefined, location: undefined, remotePlatform: undefined,
   });
-  assert.deepEqual(extractedFieldKeys(silent, () => ""), [],
-    "nothing was supplied, so nothing may be declared as coming from the Notice");
 });
 
 test("remote and videotaped are never mapped, however strongly the prose implies them", () => {
@@ -58,12 +55,6 @@ test("remote and videotaped are never mapped, however strongly the prose implies
   assert.ok(!("videotaped" in mapped), "a recording method is not a videotaped flag");
   assert.ok(!("timeZone" in mapped),
     "the zone sits in the same prose as the time; lifting it out is the same inference");
-  const declared = extractedFieldKeys(NOTICE, key => ({
-    canonicalRemotePlatform: "Zoom", canonicalScheduledStart: "09:30",
-  }[key] ?? ""));
-  for (const forbidden of ["remote", "videotaped", "timeZone", "corporateRepresentative"]) {
-    assert.ok(!declared.includes(forbidden), `${forbidden} has no extractor counterpart and must not be declared`);
-  }
 });
 
 test("a partial address joins only what exists, with no orphaned punctuation", () => {
@@ -108,22 +99,4 @@ test("a time the parser cannot read stays missing too", () => {
   assert.equal(parseClockTime("1:05 p.m."), "13:05");
   assert.equal(parseClockTime("12:00 a.m."), "00:00", "midnight is not noon");
   assert.equal(parseClockTime("12:30 p.m."), "12:30");
-});
-
-test("a mapped value the reporter edited is theirs, not the Notice's", () => {
-  const asExtracted = extractedFieldKeys(NOTICE, key => ({
-    depositionDate: "2026-09-18", canonicalScheduledStart: "09:30",
-    canonicalLocation: "1201 Navarro Street, Suite 400, San Antonio, Texas 78205",
-    canonicalRemotePlatform: "Zoom",
-  }[key] ?? ""));
-  for (const key of ["depositionDate", "scheduledStart", "location", "remotePlatform"]) {
-    assert.ok(asExtracted.includes(key), `${key} came off the Notice unchanged`);
-  }
-  const edited = extractedFieldKeys(NOTICE, key => ({
-    depositionDate: "2026-09-21", canonicalScheduledStart: "09:30",
-    canonicalLocation: "Somewhere else entirely", canonicalRemotePlatform: "Zoom",
-  }[key] ?? ""));
-  assert.ok(!edited.includes("depositionDate"), "the reporter moved the date; it is their answer");
-  assert.ok(!edited.includes("location"), "and changed the address");
-  assert.ok(edited.includes("scheduledStart") && edited.includes("remotePlatform"), "the untouched ones still belong to the Notice");
 });

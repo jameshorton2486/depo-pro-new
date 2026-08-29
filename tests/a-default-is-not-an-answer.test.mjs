@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { DEPONENT_TYPES, deponentTypeOption } from "../app/intake-logistics.mjs";
-import { extractedFieldKeys } from "../app/extracted-fields.mjs";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
 
 // A deponent type nobody stated is unanswered, not a fact witness.
@@ -46,15 +45,6 @@ test("a stated deponent type is still recorded", () => {
     { witness: "W", deponentType: "Expert witness", extractedFields: ["deponentType"] }, { noticeSupplied: true });
   assert.equal(record.deposition.representativeCapacity.value, "Expert witness");
   assert.equal(record.deposition.representativeCapacity.state, "EXTRACTED");
-});
-
-test("it is declared as extracted only when the extraction supplied a mappable value", () => {
-  const supplied = extractedFieldKeys({ deponentType: "Expert witness" }, key => ({ deponentType: "Expert witness" }[key] ?? ""));
-  assert.ok(supplied.includes("deponentType"));
-  const prose = extractedFieldKeys({ deponentType: "Expert witness; deponent" }, key => ({ deponentType: "Expert witness" }[key] ?? ""));
-  assert.ok(!prose.includes("deponentType"), "a note is not an extracted field");
-  const chosen = extractedFieldKeys({}, key => ({ deponentType: "Party" }[key] ?? ""));
-  assert.ok(!chosen.includes("deponentType"), "the reporter chose it; the Notice did not");
 });
 
 test("the screen carries no default deponent type, and its placeholder cannot submit as one", () => {
