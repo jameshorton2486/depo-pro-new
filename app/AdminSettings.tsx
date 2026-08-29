@@ -252,7 +252,7 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
             Claude model
             <input
               name="claudeModel"
-              defaultValue="claude-sonnet-4-5"
+              defaultValue="claude-opus-5"
               spellCheck={false}
             />
             <small>
