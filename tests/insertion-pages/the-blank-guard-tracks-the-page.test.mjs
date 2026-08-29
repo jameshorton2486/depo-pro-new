@@ -90,7 +90,10 @@ async function assembled(parties) {
     // asserting about the certificate, and it is about the caption.
     operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
       certification: { custodialAttorney: "Alicia Moreno", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-        certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" } },
+        certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+      // Same reason as the certificate fields above: the time-used clause blocks now, and this
+      // file is about the caption.
+      timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] } },
     pagination: { index: { entries: [], actualSectionPages: {}, declaredSectionPages: {},
       examinations: [{ examiner: "Ms. Moreno", startPage: 4, endPage: 58 }],
       changesAndSignature: { startPage: 61 }, reportersCertification: { startPage: 63 } } },

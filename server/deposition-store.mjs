@@ -285,6 +285,72 @@ export function writeDepositionCertification(root, { depositionId, certification
 }
 
 /**
+ * The time each party used, as the certificate has to state it.
+ *
+ * certification-1 prints "That the amount of time used by each party at the deposition is as
+ * follows:" and then ^cert.timeUsedLines^. Until now the only thing that could fill that line was
+ * operator.timeUsed -- a fixture construction path -- so on every real deposition the certificate
+ * made that statement over an empty line, and nothing raised it. The blank guard could not: the
+ * line is composed in build-pages and never reaches fieldValues, so it is named in no inventory.
+ *
+ * This is the writer that gives the clause a source. It records what the certificate attributes to
+ * a party and nothing else -- not the total, which is a fact about the recording rather than about
+ * any party, and not the reconciliation between them, which validate.mjs already reports and can
+ * only report once both exist.
+ *
+ * Minutes are whole and may be zero. A party who used none is an answer the certificate can state
+ * -- "Dana Counsel - 00 HOURS:00 MINUTES" -- so the check is `>= 0` rather than truthiness.
+ * Dropping a zero would remove a party from a certified list on the strength of their number.
+ *
+ * Order is preserved as written. The certificate lists parties, and a list a reporter ordered is
+ * not the store's to re-sort.
+ */
+const attorneyTimeEntries = (attorneyTime) => {
+  if (!Array.isArray(attorneyTime)) throw new Error("Attorney time must be an array.");
+  return attorneyTime.map((party, index) => {
+    const unknown = Object.keys(party ?? {}).filter((key) => key !== "name" && key !== "minutes");
+    if (unknown.length) throw new Error(`Unsupported attorney time field: ${unknown.join(", ")}`);
+    const name = String(party?.name ?? "").trim();
+    if (!name) throw new Error(`Attorney time entry ${index + 1} requires a name.`);
+    const minutes = typeof party?.minutes === "string" && party.minutes.trim() !== "" ? Number(party.minutes) : party?.minutes;
+    if (!Number.isInteger(minutes) || minutes < 0) throw new Error(`Attorney time for ${name} must be a whole number of minutes, and not negative.`);
+    return {
+      name: field(name, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }),
+      minutes: field(minutes, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }),
+    };
+  });
+};
+
+/**
+ * What a form has to show, in the shape it shows it.
+ *
+ * Same rule as readDepositionCertification above: a screen that writes without loading first
+ * erases what it never displayed, and this writer replaces the whole list rather than merging into
+ * it -- a merge-only writer would mean a party entered by mistake could never be removed.
+ */
+export function readDepositionAttorneyTime(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const attorneyTime = (record.certification?.attorneyTime ?? []).map((party) => ({
+    name: party?.name?.value ?? "",
+    minutes: party?.minutes?.value ?? null,
+  }));
+  return { depositionId, attorneyTime };
+}
+
+export function writeDepositionAttorneyTime(root, { depositionId, attorneyTime, storageRoot } = {}) {
+  const entries = attorneyTimeEntries(attorneyTime);
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, certification: { ...record.certification, attorneyTime: entries } });
+  return { depositionId, attorneyTime: entries };
+}
+
+/**
  * Where the deposition was taken, and in what court.
  *
  * These four have slots in the canonical record and a place on the certified page, and until now

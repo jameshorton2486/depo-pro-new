@@ -145,6 +145,24 @@ function reporterFromCanonical(reporter = {}, override = {}) {
   };
 }
 
+// The reporter's answer to "how much time did each party use", in the shape build-pages prints and
+// validateWarnings reconciles. operator.timeUsed stays ahead of it on the same terms as
+// operator.certification: a value handed in carries no source, so nothing may treat it as one the
+// reporter gave.
+//
+// Null when nothing is recorded, never an empty parties list. The two are different answers -- an
+// empty list says no party used any time, silence says nobody was asked -- and the gate that
+// refuses the clause has to be able to tell them apart.
+//
+// totalOnRecordMinutes is deliberately absent. It is a fact about the recording, no writer
+// produces it, and summing the parties to fill it would make the reconciliation warning compare a
+// number against itself.
+function recordedTimeUsed(record) {
+  const entries = record?.certification?.attorneyTime ?? [];
+  if (!entries.length) return null;
+  return { parties: entries.map((party) => ({ name: canonicalValue(party.name), minutes: canonicalValue(party.minutes) })) };
+}
+
 export function assembleInsertionInput({ record, intake = {}, operator = {}, pagination = {}, template = null, layoutProfile = UFM_FREELANCE_LAYOUT_PROFILE }) {
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
@@ -203,7 +221,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       witness: operator.witnessLocation ?? { physicalAddress: null },
     },
     index: pagination.index ?? { entries: [], actualSectionPages: {}, declaredSectionPages: {} },
-    timeUsed: operator.timeUsed ?? null,
+    timeUsed: operator.timeUsed ?? recordedTimeUsed(record),
     presentation: operator.presentation ?? {},
     // validateFields reads this map, not the values build-pages composes later -- so a name in a
     // variant's field inventory that is absent here is blank on every render, and blocks
