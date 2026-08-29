@@ -48,6 +48,7 @@ import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
+import { attestWitnessSworn } from "./deposition-store.mjs";
 import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
 import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
 
@@ -298,6 +299,23 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/opening"&&req.method==="POST"){
       const input=await body(req,256*1024);
       saveOpeningState(root,{depositionId:input.depositionId,state:input.state,storageRoot:depositionStorageRoot});
+      return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    // The oath attestation is a separate endpoint from the state save above, and deliberately so.
+    // Saving the Opening screen writes workflow values that carry no attribution; this writes an
+    // attested fact to the canonical record through the correction log. Routing it through the
+    // state save would make a dropdown change indistinguishable from an attestation, which is the
+    // failure ADR-0021 exists to prevent. See docs/opening-procedures/.
+    //
+    // `who` is read from the canonical record rather than accepted from the client. A client-
+    // supplied attestor is a forgeable one, and this value ends up in a certified record's history.
+    if(req.url==="/api/opening/oath-attestation"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const projection=getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const name=projection.canonical?.reporter?.fullName?.value??null,csr=projection.canonical?.reporter?.csrNumber?.value??null;
+      if(!String(name??"").trim())return json(res,400,{error:"This deposition has no court reporter on its canonical record, so there is nobody to attribute an oath attestation to."},origin);
+      const who=csr?`${name}, Texas CSR ${csr}`:String(name);
+      attestWitnessSworn(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,sworn:input.sworn,who,why:input.why});
       return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
