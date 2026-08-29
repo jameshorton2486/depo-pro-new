@@ -458,6 +458,46 @@ It is an accepted exception, not an oversight, and the reasoning is recorded rat
 
 ---
 
+## F-21 — An empty result and a broken instrument are indistinguishable
+
+**Status:** rule proposed, derived from six occurrences in this investigation
+**Affects:** every negative claim in this material, and every guard proved by mutation
+
+A measurement that returns nothing has two explanations, and the output looks the same either way:
+there was nothing to find, or the instrument could not see. Nothing inside the result distinguishes
+them. **A negative claim is therefore not evidence until something that must appear, does.**
+
+That "something" is a positive control: a case where the instrument is known to have a target, run
+through the same path, in the same invocation where possible. Its purpose is not to test the
+subject. It is to test the instrument, so that the null means what it appears to mean.
+
+**Six occurrences, in the order they were found.**
+
+| Where | The null | What the control was, or should have been |
+|---|---|---|
+| The prompt pack's `UNVERIFIED` section | Three runs, all reporting "nothing unverified" | None. An instrument that returns a pass every time is testing nothing — this is the failure the pack was built to catch and did not catch |
+| F-13, the specimen oath | Byte-identical text across seventeen files | The two comma-dropped Thomas files. Without variance somewhere, identity proves only that the extractor ran |
+| F-18, the certificate | Byte-identical page set across both oath selections | Changing `proceedingHeading`, a field the renderer does read, which produced a differing hash |
+| The extraction regeneration | 20/20 strings matched | Offset drift reported on a separate axis, so a passing string match could not hide a touched source |
+| The O-10 mutation proof | The guard's test failed when the guard was deleted | The two tests that kept passing, which show the guard is what failed rather than the harness |
+| The step 10 absence scan | No file at 43,929 or 43,928 bytes | 43,944 and 38,389, both known present. **The control failed** — 43,944 appeared zero times when it must appear twice — and caught a traversal that had exited 1 after enumerating 56 files while reporting no hits |
+
+The last row is the one that earns the rule. Three successive attempts at that negative would each
+have read as true: one scoped too shallow to reach the library, one killed by a timeout partway,
+one that ran with an instrument that could not see. Only the control separated them, and it did so
+by failing.
+
+**Rule to adopt.** No negative claim is recorded without a positive control run in the same
+invocation, and the control's result is reported alongside the null rather than assumed. A control
+that cannot be constructed is itself the finding: it means the measurement cannot distinguish
+absence from blindness, and the claim must be scoped to what was actually observed.
+
+**Corollary for scope.** When a search backs a negative, the claim belongs to the search that
+finished, not the search that was intended. Record the scope, the exit status, and the count — an
+interrupted traversal and a completed one produce the same silence.
+
+---
+
 ## Open items
 
 | ID | Item | Why it matters | Who can close it |
