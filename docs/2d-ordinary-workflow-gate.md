@@ -27,7 +27,7 @@ the screen. Screen-only steps are marked as such, because nothing else can check
 | 7 | Examining attorney selected from canonical counsel | **PASS** |
 | 8 | Preparation saved; survives reload | **PASS** |
 | 9 | A stale second save is refused | **PASS** |
-| 10 | Generate; open the DOCX in desktop Word | **PASS** — reporter-completed document, 18:05:13 |
+| 10 | Generate; open the DOCX in desktop Word | **PASS** — reporter-completed document, superseded 18:43:25 |
 | 11 | Read the index: real examiner, matching range | **PASS** |
 | 12 | Clear the examiner; generation refuses | **PASS (property)** — method unreachable |
 | 13 | Immutable evidence and overlays unchanged across the run | **PASS** |
@@ -259,7 +259,22 @@ during setup. At 18:01:29 the reporter entered their own -- custodial attorney R
 charges $1,200, billed to Brazos Ridge, certified 2026-08-28 -- through Certification pages, where
 Preview saves before it renders. At 18:05:13 they regenerated.
 
-That document, 43,929 bytes, is the one step 10 turns on. It was produced end to end from a
+That document, 43,929 bytes,
+sha256 `5a64c6df9487223632a8cca482ef7e52a6575df858fb4cc77ace6e48b7c2113b`, is the one step 10 turns
+on.
+
+**It no longer exists on disk, and that is recorded rather than tidied.** At 18:43:25, after the
+server was restarted to carry the CSR fix, the deposition was regenerated so the doubled label
+could be confirmed gone by behaviour rather than by tests. That replaced the artifact this entry
+cites. The current file is 43,928 bytes, sha256
+`272bfe2f46c1d98de443f431cea9810ba444e9231e9998bdd2eea6f180b7cf69`, one byte smaller for the label
+removed, and its certificate reads `Marguerite Okonkwo-Vance, Texas CSR 9174` and
+`That $1,200 is the deposition officer's` -- both strips proven in output.
+
+The step 10 result stands on the 18:05:13 document, whose hash was captured before it was
+overwritten. The 18:43:25 document differs from it only by the CSR label. Step 13 was re-run after
+the regeneration: the three generated artifacts changed, nothing else did, and the audio SHA-256 is
+still the value the capture session computed when recording stopped at 18:03:53. It was produced end to end from a
 deposition a reporter created: manual intake, capture through the application's own recorder,
 Deepgram transcription, reporter-entered court and method, reporter-entered certification. The
 earlier document demonstrated the machinery; this one demonstrates the workflow, and the record
