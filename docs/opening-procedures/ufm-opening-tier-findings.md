@@ -456,12 +456,35 @@ It is an accepted exception, not an oversight, and the reasoning is recorded rat
 
 **The rule itself is unchanged and governs any future guard.** Do not read this exception as precedent. It rests on a one-user application and a library with no affirmations in it, and it expires when either stops being true — or when approved affirmation wording exists, which is the same event that closes O-10.
 
+**AMENDED again, 2026-08-29, and this supersedes the exception.** The narrowed O-10 was built,
+merged locally, and **reverted** — it violates ADR-0021. See F-22.
+
+The exception above reasoned about *proportionality*: an affirming witness is rare, the library has
+none, so the elaborate apparatus was disproportionate to a latent defect. That argument was about
+likelihood, and on its own terms it was not wrong. It was answering the wrong question. The
+objection to the cheap version is not that it is too narrow — it is that **it cannot be built at
+that layer at all**, because the value it reads carries no attribution and the certified path
+refuses unattributed values.
+
+A later reader must not conclude from this section that the cheap version was sound and the merge
+merely went wrong. It was not sound. Read F-22 before reopening this.
+
 ---
 
 ## F-21 — An empty result and a broken instrument are indistinguishable
 
-**Status:** rule proposed, derived from six occurrences in this investigation
+**Status:** **already in force in this codebase.** Not derived from this investigation — rediscovered by it.
 **Affects:** every negative claim in this material, and every guard proved by mutation
+
+`tests/verification-never-reaches-a-certified-page.test.mjs` was written months before this work and
+carries four cases. Three assert that a verification does not appear in certified output. The fourth
+is titled **"the search finds a value that does reach the page, so the absences above mean
+something"** — a positive control, present for exactly the reason below, in a file whose header
+already argues that a grep built from the rule it grades would pass while the thing it guards
+travelled through by another route.
+
+So this finding does not propose a rule. It names one the codebase already practises, and records
+six occasions on which this investigation had to rediscover it.
 
 A measurement that returns nothing has two explanations, and the output looks the same either way:
 there was nothing to find, or the instrument could not see. Nothing inside the result distinguishes
@@ -498,6 +521,84 @@ interrupted traversal and a completed one produce the same silence.
 
 ---
 
+## F-22 — The certified render may not read the workflow file, and that makes the cheap O-10 unbuildable
+
+**Status:** **settled by measurement.** The change was written, merged locally, failed the guard, and was reverted.
+**Affects:** O-10 and its authorization, the F-20 exception, O-11
+
+### The boundary
+
+`tests/verification-never-reaches-a-certified-page.test.mjs` enforces ADR-0021. Its header states the
+condition, and the condition is about provenance rather than secrecy:
+
+> A field verification is a `path -> true` map with no who and no per-field at. That is honest only
+> because the value never leaves `workflow/opening-procedures.json` — the correction log and
+> `layout-profile.mjs` both require provenance precisely because they do reach a certified output.
+
+The workflow file is permitted to hold unattributed values **on the condition that they never
+influence certified output**. That is the whole trade.
+
+The guard is behavioural, not a grep, and its header says why: a grep would be built from the rule it
+grades, and would pass while the value travelled through by a route the grep did not know to look
+for. Instead it writes a deliberately unparseable workflow file, so anything that opens it crashes.
+
+### What was measured
+
+`f68ab85` threaded `witnessOathSelection` from the workflow file into `assembleInsertionInput` by
+reading it at the two disk-access points, and refused in `validateInsertionInput`.
+
+| | at `792d895` | after the merge |
+|---|---|---|
+| `the certified render never opens the workflow file` | **passes** | **fails** |
+
+```
+JSON.parse
+readOpeningState                    server/opening-procedures.mjs:98
+prepareInsertionRenderingArtifact   server/insertion-pages/word-service.mjs:71
+```
+
+The other failure in that run, `importing server/local-api.mjs does not bind a port`, fails at
+`792d895` as well and is unrelated to this work.
+
+### Why refusal is not an exemption
+
+The change printed nothing. It only blocked. That does not clear the boundary: **whether a certified
+page generates is itself a certified-output decision**, and it was being made on a value carrying no
+`who` and no `at`. An unattributed value deciding that a certificate exists is the same category of
+problem as one deciding what it says.
+
+### What this settles about O-10
+
+The elaborate design — `oathAttestation` on the record carrying `who` and `at` — was not ceremony
+proportionate to a rare defect. **It is the only shape that gets this fact into the certified path at
+all.** The cheap version is not a smaller correct answer; at that layer it is not an answer.
+
+The shape of any fix is now fixed by the boundary rather than by preference:
+
+- the oath basis reaches the certified path **through the canonical record, with attribution**, or
+- it does not reach the certified path, and F-18 stays open.
+
+There is no third option in which a workflow value influences a certified page.
+
+### Consequences
+
+- **O-10 is not buildable.** Its authorization is marked accordingly.
+- **O-11 is reopened.** Attestation is a precondition again, and with it the library count and the
+  question of depositions reported by another officer.
+- **F-18 remains live and unmitigated.** Nothing shipped.
+
+### What surfaced it, and what did not
+
+The authorization's §4 report-and-stop clause surfaced that the refusal *site* was one layer off. It
+did not surface that the value should not be crossing the layer at all — because §4 itself specified
+the threading. **An instruction that makes a gap surface cannot surface a gap in its own premise.**
+
+The boundary test did, and only when the suite was run. It was written months earlier by someone who
+had already reasoned this through, which is the same finding as F-11 in a different costume:
+completed thinking that was not found until something forced a look at it.
+
+---
+
 ## Open items
 
 | ID | Item | Why it matters | Who can close it |
@@ -509,11 +610,11 @@ interrupted traversal and a completed one produce the same silence.
 | O-05 | Lowercase-do typo in the §3.11 suggested form | Whether to reproduce the source faithfully or correct it. A deliberate divergence from a published form is a ruling, not a fix. | James |
 | ~~O-06~~ | **CLOSED 2026-08-29.** The app emits `was duly sworn by the officer` regardless of the selection. | Superseded by F-18. Confirmed defect, measured with a positive control. Remediation is O-10. | Closed |
 | O-07 | Whether the remote stipulation is templated or stays extemporaneous | F-14. Templating it creates a new authored artifact with no canonical source. | James |
-| ~~O-11~~ | **WITHDRAWN 2026-08-29.** Not needed. The reduced O-10 refuses only on `AFFIRMATION`, which no deposition in the library carries, so there is no attestation, no migration field, no backfill and no library count. The withdrawn requirement was: attest the existing library with a recorded oath basis | F-20 and `authorization-o10-certificate-refusal.md` §3. The adopted O-10 rule refuses without one, so this is a precondition for shipping the refusal, not a follow-up. **Not builder work** — it is an attestation under a CSR number. The number that matters is not the library total but how many depositions James personally reported; any reported by another officer cannot be attested by him and need a separate disposition first. Attribution required: `who` and `at`. | Withdrawn |
+| O-11 | **REOPENED 2026-08-29 by F-22**, having been withdrawn earlier the same day on the reasoning that the reduced O-10 needed no attestation. That reduced form is unbuildable, so the precondition returns: attest the existing library with a recorded oath basis | F-20 and `authorization-o10-certificate-refusal.md` §3. The adopted O-10 rule refuses without one, so this is a precondition for shipping the refusal, not a follow-up. **Not builder work** — it is an attestation under a CSR number. The number that matters is not the library total but how many depositions James personally reported; any reported by another officer cannot be attested by him and need a separate disposition first. Attribution required: `who` and `at` — now required by ADR-0021 rather than by preference. The gating number remains how many depositions James personally reported. | James |
 | O-12 | Cause of the 2026-08-29 Downloads renames | Three files renamed, two deleted, none by this session. The transformation — hyphens, parentheses and spaces stripped or collapsed — matches how uploaded files are named, and the renamed set is exactly the uploaded set, which points at benign upload or sync tooling. **Confirm that, and separately confirm the outstanding credential rotation is done.** Unexplained file operations are also what that exposure would look like. Almost certainly unrelated; cheap to eliminate, expensive to skip. | James |
 | ~~O-08~~ | **CLOSED 2026-08-29.** This file's *Scope of source read* block is now the single authoritative statement. O-03 and the oath inventory reference it and no longer restate it. | Amend scope in that block only. A second scope statement appearing anywhere is a regression. | Closed |
 | O-09 | Guard #5 asserts an emitter that does not exist | F-15 amendment. Either the brief adds a notation emitter as new scope, or guard #5 reverts to asserting the selected script and the notation stays a reporter responsibility. | James |
-| O-10 | Remediation for F-18. **Refusal is a mitigation, not a close.** | **Buildable now.** Refuse on `witnessOathSelection === "AFFIRMATION"` only — see `authorization-o10-certificate-refusal.md`. Blocks nothing that currently generates, because F-17 records no affirmation anywhere in the library. `UNRESOLVED` still generates, accepted and recorded in the F-20 amendment. **Do not mark this item done when refusal ships.** The close requires approved affirmation certificate wording, which F-17 records as existing nowhere. | James |
+| O-10 | Remediation for F-18. **NOT BUILDABLE — see F-22.** | ~~Buildable now.~~ **Withdrawn 2026-08-29:** the narrowed form violates ADR-0021 and was reverted. Any fix must route the oath basis through the canonical record with `who` and `at`. Superseded text follows. Refuse on `witnessOathSelection === "AFFIRMATION"` only — see `authorization-o10-certificate-refusal.md`. Blocks nothing that currently generates, because F-17 records no affirmation anywhere in the library. `UNRESOLVED` still generates, accepted and recorded in the F-20 amendment. **Do not mark this item done when refusal ships.** The close requires approved affirmation certificate wording, which F-17 records as existing nowhere. | James |
 
 ---
 

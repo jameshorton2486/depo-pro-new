@@ -6,8 +6,34 @@ Mitigates F-18. Closes nothing — see §2.
 
 **This is a separate authorization from the Opening Procedures Run Sequencer brief.** That brief authorizes its sections 3 through 9 and puts the certification page out of scope. Nothing here extends it, and nothing there extends this.
 
-**Status: buildable.** There is no precondition.
+**Status: NOT BUILDABLE. This authorization is withdrawn as written.**
 
+> **Withdrawn 2026-08-29, after the change was built, merged locally, and reverted.**
+>
+> What this document authorizes violates **ADR-0021**, enforced by
+> `tests/verification-never-reaches-a-certified-page.test.mjs`. The test passes at `792d895` and
+> fails once the change lands; the stack names `readOpeningState` called from
+> `prepareInsertionRenderingArtifact`. Nothing shipped and `main` is unchanged.
+>
+> **The defect is in §3 of this document, which specified the threading.** `witnessOathSelection`
+> lives in `workflow/opening-procedures.json`, whose values are permitted to carry no `who` and no
+> `at` **on the condition that they never influence certified output**. Reading it into the render
+> path breaks that condition. Refusing rather than printing is not an exemption: whether a certified
+> page generates is itself a certified-output decision, and it was being made on an unattributed
+> value.
+>
+> **So the reduction recorded in the banner below was wrong, and wrong for a reason neither the
+> reduction nor the draft it replaced identified.** The first draft's `oathAttestation` field with
+> `who` and `at` was not ceremony proportionate to a rare defect — it is the only shape that gets
+> this fact into the certified path at all. The precondition in the withdrawn §3 returns with it.
+>
+> Any replacement must route the oath basis **through the canonical record, with attribution**, or
+> accept that F-18 stays open. There is no third option. See findings F-22.
+>
+> Everything below is retained as the superseded text.
+
+> **SUPERSEDED — see the withdrawal above.**
+>
 > **This document was rewritten on 2026-08-29 and is much smaller than its first draft.** That draft required an attestation of the existing library, a migration field with attribution, a backfill, and a library count before anything could be built. It was disproportionate to a latent defect and it is withdrawn. What replaced it is one conditional and one named test. The withdrawn version is in this file's history if the larger problem ever becomes real.
 
 ---
