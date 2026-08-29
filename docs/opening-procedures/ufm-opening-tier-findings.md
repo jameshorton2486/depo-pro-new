@@ -434,6 +434,18 @@ Then backfill the existing library, writing that field with attribution. The lib
 
 This closes `AFFIRMATION`, closes `UNRESOLVED` in **both** of its forms, and never lets a missing file mean yes.
 
+**AMENDED 2026-08-29. The rule stands; it is deliberately not applied to O-10.**
+
+The adopted O-10 was reduced to refusing on `AFFIRMATION` alone. `UNRESOLVED`, including the missing-state-file form, still generates. That is absence granting permission, which is the thing this finding exists to forbid.
+
+It is an accepted exception, not an oversight, and the reasoning is recorded rather than left implicit:
+
+- F-17 establishes that no deposition in the library is `AFFIRMATION`, so refusing on that value alone blocks nothing that currently generates. The elaborate version — attestation of the library, a migration field, a backfill, a library count — was disproportionate to a latent defect, and it is withdrawn.
+- `AFFIRMATION` is a **false statement**: the record says the witness did not swear and the certificate says they did. `UNRESOLVED` is a **missing basis**, which is what the application has always produced and what the certifying officer's own knowledge has always covered. Different in kind, not degree.
+- The application has one user, who is the certifying officer.
+
+**The rule itself is unchanged and governs any future guard.** Do not read this exception as precedent. It rests on a one-user application and a library with no affirmations in it, and it expires when either stops being true — or when approved affirmation wording exists, which is the same event that closes O-10.
+
 ---
 
 ## Open items
@@ -447,11 +459,11 @@ This closes `AFFIRMATION`, closes `UNRESOLVED` in **both** of its forms, and nev
 | O-05 | Lowercase-do typo in the §3.11 suggested form | Whether to reproduce the source faithfully or correct it. A deliberate divergence from a published form is a ruling, not a fix. | James |
 | ~~O-06~~ | **CLOSED 2026-08-29.** The app emits `was duly sworn by the officer` regardless of the selection. | Superseded by F-18. Confirmed defect, measured with a positive control. Remediation is O-10. | Closed |
 | O-07 | Whether the remote stipulation is templated or stays extemporaneous | F-14. Templating it creates a new authored artifact with no canonical source. | James |
-| O-11 | Attest the existing library with a recorded oath basis | F-20 and `authorization-o10-certificate-refusal.md` §3. The adopted O-10 rule refuses without one, so this is a precondition for shipping the refusal, not a follow-up. **Not builder work** — it is an attestation under a CSR number. The number that matters is not the library total but how many depositions James personally reported; any reported by another officer cannot be attested by him and need a separate disposition first. Attribution required: `who` and `at`. | James |
+| ~~O-11~~ | **WITHDRAWN 2026-08-29.** Not needed. The reduced O-10 refuses only on `AFFIRMATION`, which no deposition in the library carries, so there is no attestation, no migration field, no backfill and no library count. The withdrawn requirement was: attest the existing library with a recorded oath basis | F-20 and `authorization-o10-certificate-refusal.md` §3. The adopted O-10 rule refuses without one, so this is a precondition for shipping the refusal, not a follow-up. **Not builder work** — it is an attestation under a CSR number. The number that matters is not the library total but how many depositions James personally reported; any reported by another officer cannot be attested by him and need a separate disposition first. Attribution required: `who` and `at`. | Withdrawn |
 | O-12 | Cause of the 2026-08-29 Downloads renames | Three files renamed, two deleted, none by this session. The transformation — hyphens, parentheses and spaces stripped or collapsed — matches how uploaded files are named, and the renamed set is exactly the uploaded set, which points at benign upload or sync tooling. **Confirm that, and separately confirm the outstanding credential rotation is done.** Unexplained file operations are also what that exposure would look like. Almost certainly unrelated; cheap to eliminate, expensive to skip. | James |
 | ~~O-08~~ | **CLOSED 2026-08-29.** This file's *Scope of source read* block is now the single authoritative statement. O-03 and the oath inventory reference it and no longer restate it. | Amend scope in that block only. A second scope statement appearing anywhere is a regression. | Closed |
 | O-09 | Guard #5 asserts an emitter that does not exist | F-15 amendment. Either the brief adds a notation emitter as new scope, or guard #5 reverts to asserting the selected script and the notation stays a reporter responsibility. | James |
-| O-10 | Remediation for F-18. **Refusal is a mitigation, not a close.** | Refuse unless the record affirmatively says an oath was administered: `witnessOathSelection === "OATH"`, or a recorded migration field carrying `who` and `when`. See **F-20** — an earlier proposal keyed on the absence of a state file was rejected, and the rule against that shape is recorded there. Refusal needs no authority research and it stops the false assertion, but it converts a silent false statement into a **blocked workflow**. That is a real improvement and a worse experience. **Do not mark this item done when refusal ships.** The close requires approved affirmation certificate wording, which F-17 records as existing nowhere. | James |
+| O-10 | Remediation for F-18. **Refusal is a mitigation, not a close.** | **Buildable now.** Refuse on `witnessOathSelection === "AFFIRMATION"` only — see `authorization-o10-certificate-refusal.md`. Blocks nothing that currently generates, because F-17 records no affirmation anywhere in the library. `UNRESOLVED` still generates, accepted and recorded in the F-20 amendment. **Do not mark this item done when refusal ships.** The close requires approved affirmation certificate wording, which F-17 records as existing nowhere. | James |
 
 ---
 
