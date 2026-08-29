@@ -259,8 +259,24 @@ on the appearance page, as defending counsel. Same person, two roles. Only the c
 separates the runs -- `$1,240` against `$1,200`. A name match here would have confirmed the wrong
 answer.
 
-**Checked absence, with its scope.** No file of 43,929 or 43,928 bytes exists. Searched: every
-`*.docx` under 60 KB anywhere beneath `C:/Users/james`, unlimited depth, matching on byte size.
+**Checked absence, scoped to the search that actually completed.** No file of 43,929 or 43,928
+bytes exists in:
+
+`C:/Users/james/Downloads`, `C:/Users/james/depos`, `C:/Users/james/Projects/depo-pro-new`,
+`C:/Users/james/Documents`, `C:/Users/james/Desktop` — every `*.docx`, unlimited depth, matched on
+exact byte size. All five traversals exited 0. **725 files enumerated. Positive controls passed:
+43,944 found twice and 38,389 found once**, which is what proves the scan could see the files it
+was looking for.
+
+*Two earlier attempts at this negative are recorded because both would have read as true.* The
+first was scoped `-maxdepth 4` from the user profile, which does not reach into the deposition
+library at all. The second removed the depth limit but was killed by a timeout partway, and a
+search that was interrupted is not a search that found nothing. A third, at profile scope, ran to
+an exit status of 1 having enumerated 56 files, and **its positive control failed — 43,944 appeared
+zero times when it must appear twice** — so that traversal was incomplete and establishes nothing.
+The scoped search above is the only one whose controls hold, and the absence is claimed at its
+scope and no wider.
+
 `C:/Users/james/depos` exists and holds nothing matching `whitaker` or `LL0D2`;
 `.milestone2-corrected-data` is gone from the repository working tree. `DEP-20260827-LL0D2` was a
 work file and was deleted.
