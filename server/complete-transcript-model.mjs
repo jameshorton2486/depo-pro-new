@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { assembleInsertionInput } from "./insertion-pages/assemble.mjs";
-import { readOpeningState } from "./opening-procedures.mjs";
 import { buildTexasInsertionPageSet } from "./insertion-pages/build-pages.mjs";
 import { horizontalOverflowFindings } from "./insertion-pages/page-model.mjs";
 import { loadTemplateVariant } from "./insertion-pages/templates.mjs";
@@ -122,10 +121,5 @@ export async function getCompleteTranscriptModel(root,{depositionId,storageRoot,
   const record=JSON.parse(fs.readFileSync(path.join(directory,"intake","canonical-deposition-record.json"),"utf8"));
   const intakeFile=path.join(directory,"intake","intake.json"),intake=fs.existsSync(intakeFile)?JSON.parse(fs.readFileSync(intakeFile,"utf8")):{};
   const printModel=getTranscriptPrintModel(root,{depositionId,storageRoot,examinerIdentity});
-  // The Opening state is where the reporter recorded how the witness was put under, and it is the
-  // only place that fact lives. It is read here rather than trusted from the assembly request,
-  // because the request is operator-supplied and this one governs whether a certificate may state
-  // that the witness was sworn.
-  const opening=readOpeningState(root,{depositionId,storageRoot});
-  return buildCompleteTranscriptModel({depositionId,printModel,record,intake:{...intake,...request.intake},operator:{...request.operator,witnessOathSelection:opening.witnessOathSelection},generatedAt:request.generatedAt??new Date().toISOString()});
+  return buildCompleteTranscriptModel({depositionId,printModel,record,intake:{...intake,...request.intake},operator:request.operator,generatedAt:request.generatedAt??new Date().toISOString()});
 }

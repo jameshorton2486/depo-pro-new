@@ -206,10 +206,6 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     jurisdiction,
     signatureDisposition,
     signatureDispositionBasis: operator.signatureDispositionBasis ?? null,
-    // What the reporter recorded on the Opening screen about how the witness was put under.
-    // Lifted rather than read out of `operator` so the validator asserts on a named field.
-    // Null is the ordinary case and is not a refusal -- see validateOathBasis.
-    witnessOathSelection: operator.witnessOathSelection ?? null,
     variant,
     caption: { court, causeNumber, caseStyle, label: operator.captionLabel ?? null },
     deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote) },

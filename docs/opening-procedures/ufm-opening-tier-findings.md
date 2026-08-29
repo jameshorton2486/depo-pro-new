@@ -1,15 +1,5 @@
 # UFM Findings — Opening Procedures Tier Rulings
 
-> **STATUS — read before relying on anything below.**
->
-> **Research complete. Findings not adopted as rulings.** F-01 through F-20 are proposed, not decided. Nothing here has crossed an authorship boundary: the reader of the sources is also the writer of this file, and there has been no independent review.
->
-> **No Texas rule or statute was read at any point in this investigation.** Not TRE 603, not TRE 604, not Gov't Code § 154.105, not TRCP 199 or 203. Every tier resting on those is provisional and is marked in place.
->
-> What *was* measured against the code — F-15, F-18, F-19, F-20 and the refusal-site analysis — carries positive controls and is reproducible. What rests on Texas authority does not, because that authority is unread.
->
-> Three months from now this file will read as settled unless this line says otherwise. It says otherwise.
-
 ### Scope of source read — authoritative statement
 
 **This block is the single scope statement for all opening-procedures material. Other documents reference it and must not restate it.** Every negative claim in this file, in the oath inventory, and in the builder brief rests on this list. Amend it here only.

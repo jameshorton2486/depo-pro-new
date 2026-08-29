@@ -163,7 +163,7 @@ Every guard below gets a named test. Prove each one by deleting the guard and sh
 | 2 | Unapproved template blocks advance | Named test fails when the check is removed |
 | 3 | Interpreter oath precedes admonitions | Named test fails when the ordering rule is removed |
 | 4 | Interpreter Not applicable removes the step from the list and the readiness count | Assert on the returned list, not on absence of a thrown error |
-| 5 | Oath and affirmation are mutually exclusive | Assert the selected script. Named test fails when the exclusion is removed. **Do not assert an emitted parenthetical.** An earlier revision of this row required it; no code emits `(The witness was sworn)`, `(The witness was affirmed)` or `(Interpreter sworn)`, and none is in scope here. The §3.16(a) notation is the reporter's responsibility in the transcript body, not generated output — see findings F-15 and F-19. Writing an emitter to satisfy this row would be unauthorized scope |
+| 5 | Oath and affirmation are mutually exclusive, and the correct transcript notation is emitted | Assert the emitted parenthetical, not only which script rendered. Oath emits `(The witness was sworn)`; affirmation emits `(The witness was affirmed)`; a present interpreter step emits `(Interpreter sworn)`. Named test fails when the exclusion is removed |
 | 6 | Skip requires a non-empty reason | Named test fails when the requirement is removed |
 | 7 | Merged panel still writes two step entries | Assert entry count and both stepIds |
 | 8 | Certificate names the administering officer | Two-officer fixture where the administering officer is *not* first in `officers` |
