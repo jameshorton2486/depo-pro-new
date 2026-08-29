@@ -50,6 +50,46 @@ function serialJoin(names) {
   return `${names.slice(0, -1).map(upper).join(", ")}, AND ${upper(names[names.length - 1])}`;
 }
 
+// The two caption lines under the court heading, composed from the record instead of handed in.
+//
+// Both used to read operator.countyCourtLine and operator.judicialDistrictLine -- the fixture
+// construction path -- so on a real deposition each printed empty in the caption block of the
+// title page AND of certification-1, with nothing raised: neither field is named in a reviewed
+// inventory, so the blank guard never looked at them.
+//
+// Composed, not typed, and for the reason the caption above is composed: the wording is fixed by
+// the certificate and only the county and the district vary. TEXAS is safe to fix here because
+// buildTexasInsertionPageSet throws on any variant that is not TEXAS_STATE_, so this function
+// cannot reach a page for another state.
+//
+// Normalised at this boundary, because this is the boundary that adds the words. A reporter who
+// records "Bexar County" must not print BEXAR COUNTY COUNTY, TEXAS, and one who records
+// "45th Judicial District" must not print 45TH JUDICIAL DISTRICT JUDICIAL DISTRICT.
+//
+// An unrecorded value prints nothing at all. "COUNTY, TEXAS" with no county names no court, and a
+// caption is the part of the page that says which court this record belongs to.
+const recorded = (envelope) => String(value(envelope) ?? "").trim();
+
+// Formatting, not invention: "45" is the district the reporter recorded and "45TH" is that same
+// district spelled the way a Texas caption spells it. A value that already carries an ordinal is
+// left exactly as recorded, because it is not this function's business to restyle it.
+function ordinalDistrict(district) {
+  if (!/^\d+$/.test(district)) return district;
+  const teens = Number(district) % 100;
+  if (teens >= 11 && teens <= 13) return `${district}th`;
+  return `${district}${["th", "st", "nd", "rd"][Number(district) % 10] ?? "th"}`;
+}
+
+function countyCourtLine(record) {
+  const county = recorded(record?.case?.county).replace(/[\s,]+county$/i, "");
+  return county ? `${county.toUpperCase()} COUNTY, TEXAS` : "";
+}
+
+function judicialDistrictLine(record) {
+  const district = recorded(record?.case?.judicialDistrict).replace(/\s+judicial\s+district$/i, "");
+  return district ? `${ordinalDistrict(district).toUpperCase()} JUDICIAL DISTRICT` : "";
+}
+
 function captionValues(input) {
   const { plaintiffs, defendants } = captionParties(input.record);
   return {
@@ -59,8 +99,8 @@ function captionValues(input) {
     "caption.plaintiffs": upper(plaintiffs.join(", ")),
     "caption.defendantLabel": defendants.length === 1 ? "DEFENDANT," : "DEFENDANTS,",
     "caption.defendants": upper(defendants.join(", ")),
-    "caption.countyCourtLine": input.operator.countyCourtLine ?? "",
-    "caption.judicialDistrictLine": input.operator.judicialDistrictLine ?? "",
+    "caption.countyCourtLine": input.operator.countyCourtLine ?? countyCourtLine(input.record),
+    "caption.judicialDistrictLine": input.operator.judicialDistrictLine ?? judicialDistrictLine(input.record),
   };
 }
 

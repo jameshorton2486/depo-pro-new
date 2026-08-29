@@ -40,7 +40,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, readDepositionCertification, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -394,6 +394,17 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/deposition/certification"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionCertification(root,{depositionId:input.depositionId,certification:input.certification,storageRoot:depositionStorageRoot}),origin);
+    }
+    // The time each party used, which the certificate states by name and nothing could record.
+    // Same shape as the certification pair above and for the same reason: the screen has to be
+    // able to see the list before it replaces it.
+    if(req.url?.startsWith("/api/deposition/attorney-time?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionAttorneyTime(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/deposition/attorney-time"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionAttorneyTime(root,{depositionId:input.depositionId,attorneyTime:input.attorneyTime,storageRoot:depositionStorageRoot}),origin);
     }
     // GET beside the POST: the screen that chooses an examining attorney needs the same canonical
     // ids the assembly stores, and there was no way to ask for them.

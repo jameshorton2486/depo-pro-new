@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
-import { writeDepositionCertification } from "../server/deposition-store.mjs";
+import { writeDepositionAttorneyTime, writeDepositionCertification } from "../server/deposition-store.mjs";
 import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/word-service.mjs";
 
 // The test that was missing.
@@ -51,6 +51,10 @@ function scratch(t) {
         firmRegistrationWaiver: "Certifies under an individual Texas CSR; no firm registration applies.",
       },
     }), null, 2));
+  // Through the writer, not into the seeded JSON. The operator payload here is exactly what the
+  // screen sends and must stay that way, so the time-used clause has to be answered where a real
+  // deposition answers it -- on the canonical record.
+  writeDepositionAttorneyTime(null, { depositionId, storageRoot, attorneyTime: [{ name: "Pat Counsel", minutes: 60 }] });
   return { depositionId, storageRoot };
 }
 

@@ -21,6 +21,19 @@ export const INTENTIONAL_BLANKS = Object.freeze({
   FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
 });
 
+// The reviewed certificates that state, in their own words, how much time each party used. Both
+// Texas certification-1 templates print "That the amount of time used by each party at the
+// deposition is as follows:" followed by ^cert.timeUsedLines^.
+//
+// A list, not a blanket rule, because the clause is a property of a reviewed certificate rather
+// than of certification in general -- the federal templates are stubs and nobody has read what
+// theirs will say. And a list beside the templates is a list that can drift from them, so
+// tests/the-certificate-states-the-time-each-party-used.test.mjs reads the reviewed template
+// bodies and asserts this set is exactly the ones carrying the caret.
+export const TIME_USED_CERTIFIED = Object.freeze([
+  "TEXAS_STATE_SIGNATURE_REQUESTED", "TEXAS_STATE_SIGNATURE_WAIVED",
+]);
+
 const blocking = (code, target, message, extra = {}) => ({ code, target, severity: "blocking", message, ...extra });
 const warning = (code, target, message, extra = {}) => ({ code, target, severity: "warning", message, ...extra });
 const normalizedName = (name) => String(name ?? "").toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
@@ -181,6 +194,33 @@ function validateFields(input, findings) {
   }
 }
 
+// The certificate states the time each party used; this refuses to let it state it over nothing.
+//
+// The blank guard cannot cover this. cert.timeUsedLines is composed in build-pages from
+// input.timeUsed and never reaches fieldValues, so it is named in no inventory and isBlank never
+// sees it -- and renderTemplatePage drops a line whose fields are all absent, so the empty result
+// was not even visible as a gap on the page. The sentence introducing it printed anyway.
+//
+// Blocking, on the same grounds as validateDepositionMethod: the clause is a certification about
+// the deposition, and one made over an empty list is worse than one refused. It fails where the
+// fact is missing rather than where a reader would eventually notice.
+function validateTimeUsed(input, findings) {
+  if (!TIME_USED_CERTIFIED.includes(input.variant)) return;
+  const parties = input.timeUsed?.parties ?? [];
+  if (!parties.length) {
+    findings.push(blocking("CERT_TIME_USED_UNRECORDED", "cert.timeUsedLines", "The certificate states the amount of time used by each party, and no party time is recorded for this deposition.", { path: "timeUsed.parties" }));
+    return;
+  }
+  for (const [position, party] of parties.entries()) {
+    // Zero is an answer. Absent, negative and fractional are not: each would print a duration the
+    // reporter did not give, and "00 HOURS:00 MINUTES" from an unanswered field is the same
+    // manufactured value as any other.
+    if (!String(party?.name ?? "").trim() || !Number.isInteger(party?.minutes) || party.minutes < 0) {
+      findings.push(blocking("CERT_TIME_USED_INCOMPLETE", "cert.timeUsedLines", `Party time entry ${position + 1} must name a party and give a whole, non-negative number of minutes.`, { path: `timeUsed.parties.${position}` }));
+    }
+  }
+}
+
 function validateWarnings(input, findings) {
   if (!isLayoutProfileVerified(input.layoutProfile)) findings.push(warning("LAYOUT_PROFILE_UNVERIFIED", "layoutProfile", `Layout profile ${input.layoutProfile.id} has not been reporter-verified.`));
   if (!input.locations?.witness?.physicalAddress) findings.push(warning("WITNESS_LOCATION_UNSTATED", "locations.witness.physicalAddress", "Witness physical location is not stated."));
@@ -204,6 +244,7 @@ export function validateInsertionInput(input) {
   validateDepositionMethod(input, findings);
   validateCounsel(input, findings);
   validateIndex(input, findings);
+  validateTimeUsed(input, findings);
   if ((input.deposition?.volumeCount ?? 1) > 1) findings.push(blocking("MULTI_VOLUME_UNSUPPORTED", "deposition.volumeCount", `This renderer supports one volume; received ${input.deposition.volumeCount}.`));
   findings.push(...pageOverflowFindings(input.pages ?? [], input.layoutProfile));
   validateFields(input, findings);

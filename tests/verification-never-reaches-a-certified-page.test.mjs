@@ -90,6 +90,9 @@ const render = (s) =>
         // guard and nothing collects them yet. Not what this file is about.
         certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
           certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+        // Same reason: the time-used clause blocks now, and this guard needs a render that
+        // completes.
+        timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] },
       },
       pagination: {
         index: {

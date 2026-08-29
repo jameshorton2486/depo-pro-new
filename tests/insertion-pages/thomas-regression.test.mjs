@@ -77,6 +77,10 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "CERT_COUNSEL_INCOMPLETE:cert.counselOfRecord",
     "CERT_FIRM_REGISTRATION_UNRESOLVED:reporter.firmRegistrationNumber",
     "CERT_JURISDICTION_MISMATCH:cert.jurisdiction",
+    // The fixture records no party time, and certification-1 states the time each party used.
+    // Approved as a defect of this record on the same footing as the UNEXPECTED_BLANK entries
+    // below: the clause was printing over nothing and no finding said so.
+    "CERT_TIME_USED_UNRECORDED:cert.timeUsedLines",
     "INDEX_PAGE_MISMATCH:index.section.changesAndSignature",
     "INDEX_UNRESOLVED_ENTRY:index.page.75",
     "INDEX_UNRESOLVED_ENTRY:index.section.changesAndSignature",

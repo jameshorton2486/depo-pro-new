@@ -76,7 +76,10 @@ const render = (s, operatorExtra = {}) =>
       // and cert.furtherCertificationDate now reach the guard and nothing collects them yet.
       operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
         certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" }, ...operatorExtra },
+          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+        // The certificate states the time each party used and now refuses to state it over
+        // nothing. Handed in here for the same reason the certification block above is.
+        timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] }, ...operatorExtra },
       pagination: {
         index: {
           entries: [], actualSectionPages: {}, declaredSectionPages: {},
