@@ -39,6 +39,27 @@ const warning = (code, target, message, extra = {}) => ({ code, target, severity
 const normalizedName = (name) => String(name ?? "").toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
 const isBlank = (value) => value == null || value === "" || (Array.isArray(value) && value.length === 0);
 
+// The certification page states, as a literal in both Texas templates, that the witness "was duly
+// sworn by the officer". When the reporter has recorded an affirmation, that sentence is false, and
+// it goes out under their name and CSR number. Refuse rather than print it.
+//
+// Only AFFIRMATION refuses. UNRESOLVED and a missing value still generate, and that is a decision
+// rather than an oversight: an unrecorded basis is a gap in the record, which is what this
+// application has always produced and what the certifying officer's own knowledge covers. An
+// affirmation is a contradiction of the record. See docs/opening-procedures/, findings F-17, F-18,
+// and the F-20 amendment recording why the absence-refuses rule is deliberately not applied here.
+//
+// There is no approved affirmation certificate wording to substitute -- no Texas authority
+// publishes one and no certified specimen contains one -- so the refusal is the whole remedy.
+// Do not "fix" this by authoring that sentence.
+function validateOathBasis(input, findings) {
+  if (input.witnessOathSelection !== "AFFIRMATION") return;
+  findings.push(blocking(
+    "CERT_OATH_BASIS_AFFIRMATION", "deposition.witnessOathSelection",
+    "The record states this witness affirmed rather than swore, and the certification page states the witness was duly sworn by the officer. No approved affirmation wording exists, so the page cannot be generated.",
+  ));
+}
+
 function validateVariant(input, findings) {
   if (!input.jurisdiction || !input.signatureDisposition || !input.variant || !input.signatureDispositionBasis) {
     findings.push(blocking("CERT_VARIANT_UNSPECIFIED", "cert.variant", "Jurisdiction, signature disposition, and its source basis must all be explicitly provided."));
@@ -239,6 +260,7 @@ function validateWarnings(input, findings) {
 
 export function validateInsertionInput(input) {
   const findings = [];
+  validateOathBasis(input, findings);
   validateVariant(input, findings);
   validateCredentials(input, findings);
   validateDepositionMethod(input, findings);

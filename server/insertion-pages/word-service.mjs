@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { depositionDirectory } from "../deposition-store.mjs";
 import { assertStorageRootIsLocal } from "../storage-config.mjs";
 import { assembleInsertionInput } from "./assemble.mjs";
+import { readOpeningState } from "../opening-procedures.mjs";
 import { buildTexasInsertionPageSet } from "./build-pages.mjs";
 import { createRenderingSpec, workspaceDocumentFromRenderingSpec } from "./rendering-spec.mjs";
 import { loadTemplateVariant } from "./templates.mjs";
@@ -65,7 +66,11 @@ export async function prepareInsertionRenderingArtifact(root, depositionId, requ
   const variant = selectInsertionVariant(request.operator);
   if (!variant) throw new Error("CERT_VARIANT_UNSPECIFIED: jurisdiction and signature disposition are required.");
   const template = await loadTemplateVariant(variant);
-  const assembled = assembleInsertionInput({ record, intake: request.intake ?? {}, operator: request.operator ?? {}, pagination: request.pagination ?? {}, template });
+  // See the note in getCompleteTranscriptModel: the recorded oath basis comes from the Opening
+  // state, not from the caller's operator block.
+  const opening = readOpeningState(root, { depositionId, storageRoot });
+  const operator = { ...(request.operator ?? {}), witnessOathSelection: opening.witnessOathSelection };
+  const assembled = assembleInsertionInput({ record, intake: request.intake ?? {}, operator, pagination: request.pagination ?? {}, template });
   const findings = validateInsertionInput(assembled);
   const blockers = findings.filter((finding) => finding.severity === "blocking");
   if (blockers.length) throw new Error(`INSERTION_VALIDATION_BLOCKED: ${blockers.map((finding) => `${finding.code}:${finding.target}`).join(", ")}`);
