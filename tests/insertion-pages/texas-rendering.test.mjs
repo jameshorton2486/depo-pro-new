@@ -10,7 +10,7 @@ import { loadTemplateVariant } from "../../server/insertion-pages/templates.mjs"
 
 const TEST_GEOMETRY = Object.freeze({ lineNumberLeft: 36, textLeft: 72, firstLineY: 744, lineHeight: 27 });
 
-async function validInput(signatureDisposition) {
+async function validInput(signatureDisposition, operatorExtras = {}) {
   const record = createCanonicalDepositionRecord({
     court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS", causeNumber: "2026-CI-10001",
     witness: "Jordan Example", depositionDate: "2026-08-01",
@@ -33,6 +33,7 @@ async function validInput(signatureDisposition) {
       titleNarrative: ["Jordan Example, produced as a witness and duly sworn,", "was taken remotely by Zoom before Riley Reporter,", "Certified Shorthand Reporter in and for Texas."],
       certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff", serviceDate: "August 14, 2026", certificationDate: "August 14, 2026", furtherCertificationDate: "August 30, 2026" },
       timeUsed: { totalOnRecordMinutes: 120, parties: [{ name: "Pat Counsel", minutes: 60 }, { name: "Dana Counsel", minutes: 60 }] },
+      ...operatorExtras,
     },
     pagination: { index: { appearances: { startPage: 2 }, examinations: [{ examiner: "Pat Counsel", startPage: 5, endPage: 40 }], changesAndSignature: { startPage: 41 }, reportersCertification: { startPage: signatureDisposition === "requested" ? 43 : 41 }, entries: [], actualSectionPages: {}, declaredSectionPages: {} } },
   });
@@ -85,4 +86,23 @@ test("the caption delimiter forms one column, inside the geometry", async () => 
     assert.ok(line.text.length <= 63, `a caption row of ${line.text.length} characters would be re-flowed and lose its column`);
     assert.doesNotMatch(line.text, /^\S+ \) /, "a single space before the delimiter is the collapsed shape re-flow produces");
   }
+});
+
+test("a caption that cannot be squared is refused rather than re-flowed", async () => {
+  // There is no square form for a row whose party name and court line together exceed the geometry,
+  // and the wrapper's answer -- split on whitespace, rejoin with single spaces -- silently destroys
+  // the column instead of saying so. The remedy is real: the court column carries the short heading
+  // line, and supplying it brings the row back inside the width.
+  const { validateInsertionInput } = await import("../../server/insertion-pages/validate.mjs");
+  const long = await validInput("waived", { courtHeadingLine: "IN THE 285TH JUDICIAL DISTRICT COURT OF BEXAR COUNTY, TEXAS" });
+  const overflow = validateInsertionInput(long).filter((finding) => finding.code === "CAPTION_ROW_OVERFLOW");
+  assert.ok(overflow.length, "a 59-character court line beside a caption value cannot fit 63");
+  // A warning, not a blocker: no screen collects the heading line that would resolve it, and a
+  // gate the reporter cannot pass is not a gate.
+  assert.equal(overflow[0].severity, "warning");
+  assert.match(overflow[0].message, /Supply the court heading/);
+
+  const short = await validInput("waived");
+  assert.deepEqual(validateInsertionInput(short).filter((finding) => finding.code === "CAPTION_ROW_OVERFLOW"), [],
+    "the short heading line fits, and nothing is reported");
 });

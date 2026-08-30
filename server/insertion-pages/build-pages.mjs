@@ -255,31 +255,39 @@ function wrapAdministrativeLine(line, width) {
   return output;
 }
 
+// Squares up the court-column delimiter after substitution, and reports any row that will not fit.
+//
+// Caret replacement changes the length of every caption value, so the delimiter lands somewhere
+// different on each row. The column comes from the widest caption VALUE, not from where the
+// delimiter happens to sit once substituted: the template pads each caret field to a placeholder
+// width no real value matches, and taking the widest post-substitution position inherits that
+// padding. On a Bexar County caption that put the delimiter at column 46 and pushed the three rows
+// carrying a court line past the geometry, where wrapAdministrativeLine re-flowed them -- and
+// re-flowing splits on whitespace and rejoins with single spaces, so those rows came out as
+// "PLAINTIFF, ) IN THE DISTRICT COURT OF" while the two short enough to survive kept their padding.
+//
+// Measuring the values keeps the block as narrow as its content allows. A caption whose widest
+// party name and court line still will not fit inside that width has no square form at all, and is
+// returned as overflow so validateInsertionInput can refuse rather than let the wrapper mangle it.
+export function alignCaptionLines(lines, profile) {
+  const isCaption = line => (line.fields ?? []).some(field => field.startsWith("caption.")) && String(line.text ?? "").includes(")");
+  const captionRows = lines.filter(isCaption);
+  const delimiterColumn = Math.max(0, ...captionRows.map(line => { const text = String(line.text); return text.slice(0, text.indexOf(")")).trimEnd().length + 1; }));
+  const overflow = [];
+  const aligned = lines.map(line => {
+    if (!isCaption(line)) return line;
+    const text = String(line.text ?? ""), at = text.indexOf(")"), left = text.slice(0, at).trimEnd();
+    const squared = `${left}${" ".repeat(Math.max(1, delimiterColumn - left.length))}${text.slice(at)}`;
+    if (profile?.charactersPerLine && squared.length > profile.charactersPerLine) overflow.push({ text: squared, length: squared.length });
+    return { ...line, text: squared };
+  });
+  return { lines: aligned, overflow };
+}
+
 function renderRolePages(template, values, { role, profile }) {
   const rendered = renderTemplatePage(template, values, { pageNumber: 1, role, linesPerPage: 0 });
   while (rendered.lines.length && !String(rendered.lines.at(-1)?.text ?? "").trim()) rendered.lines.pop();
-  // Caret replacement changes the length of every caption value, so the court-column delimiter
-  // lands somewhere different on each row and has to be squared up after substitution.
-  //
-  // The column comes from the widest caption VALUE, not from where the delimiter happens to sit
-  // once substituted. The template pads each caret field out to a placeholder width no real value
-  // matches, so taking the widest post-substitution position inherits that padding: on a Bexar
-  // County caption it put the delimiter at column 46, pushing the three rows that carry a court
-  // line past the 63-character geometry. wrapAdministrativeLine then re-flowed them, and re-flowing
-  // splits on whitespace and rejoins with single spaces -- so the rows that overflowed came out as
-  // "PLAINTIFF, ) IN THE DISTRICT COURT OF" while the two that fit kept their padding. Aligning
-  // made the caption worse than leaving it alone.
-  //
-  // Measuring the values instead keeps the block as narrow as its content allows, which is what
-  // keeps it inside the geometry and out of the wrapper.
-  const isCaption=line=>(line.fields??[]).some(field=>field.startsWith("caption."))&&String(line.text??"").includes(")");
-  const captionRows=rendered.lines.filter(isCaption);
-  const delimiterColumn=Math.max(0,...captionRows.map(line=>{const text=String(line.text);return text.slice(0,text.indexOf(")")).trimEnd().length+1}));
-  const aligned=rendered.lines.map(line=>{
-    if(!isCaption(line))return line;
-    const text=String(line.text??""),at=text.indexOf(")"),left=text.slice(0,at).trimEnd();
-    return {...line,text:`${left}${" ".repeat(Math.max(1,delimiterColumn-left.length))}${text.slice(at)}`};
-  });
+  const { lines: aligned } = alignCaptionLines(rendered.lines, profile);
   const wrapped = aligned.flatMap((line) => wrapAdministrativeLine(line, profile.charactersPerLine));
   const pages = [];
   // UFM section 2.13 permits a short final page. Preserve normal sequential pagination; without
@@ -292,9 +300,54 @@ function renderRolePages(template, values, { role, profile }) {
   return pages.length ? pages : [{ pageNumber: 0, role, lines: Array.from({ length: profile.linesPerPage }, (_, index) => ({ line: index + 1, text: "", fields: [] })) }];
 }
 
-export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {
-  if (!input.variant?.startsWith("TEXAS_STATE_")) throw new Error(`Texas page builder cannot render ${input.variant ?? "an unspecified variant"}`);
-  const templates = input.template.templates;
+/**
+ * The caption rows that will not fit the geometry, as blocking findings.
+ *
+ * validateInsertionInput runs before the page set is built, so it renders the same templates with
+ * the same values through the same aligner rather than composing a second idea of what the caption
+ * says. Two compositions of one certified block is the divergence certificationValues already
+ * carries a note about; this is the same rule applied to the caption.
+ */
+export function captionOverflowFindings(input) {
+  if (!input?.variant?.startsWith("TEXAS_STATE_") || !input.template?.templates) return [];
+  const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
+  const roles = insertionRoles(input);
+  // Caption values only. The full value map composes appearance and certification lines, and both
+  // refuse outright on data the validator exists to report on -- printedPhrase throws
+  // APPEARANCE_SIDE_MISSING for counsel with no side, so building them here turned every finding
+  // this function sits beside into an exception. A caption row carries only caption.* fields and
+  // literal furniture, so caption values are all this measurement needs.
+  const values = captionValues(input);
+  const findings = [];
+  for (const role of roles) {
+    const template = input.template.templates[role];
+    if (!template) continue;
+    const rendered = renderTemplatePage(template, values, { pageNumber: 1, role, linesPerPage: 0 });
+    for (const row of alignCaptionLines(rendered.lines, profile).overflow) {
+      findings.push({
+        code: "CAPTION_ROW_OVERFLOW", target: `pages.${role}.caption`, severity: "warning",
+        message: `The ${role} caption row "${row.text.trim()}" occupies ${row.length} characters; the profile permits ${profile.charactersPerLine}. Squared up it would be re-flowed and lose its column. Supply the court heading, county and judicial district lines so the court column carries the short form rather than the whole court name.`,
+        path: `pages.${role}.caption`,
+      });
+    }
+  }
+  // One row cannot fit without every row on that page sharing the fault, so the same caption is
+  // reported once per page rather than once per row.
+  return findings.filter((finding, index) => findings.findIndex(other => other.target === finding.target) === index);
+}
+
+function insertionRoles(input, certificateOnly = false) {
+  // certificateOnly is the standalone certification path: a document with no transcript behind it,
+  // and therefore no authoritative pagination. It carries NO INDEX, because an index states where
+  // sections land and only complete-transcript pagination knows that. Omitting the page is the
+  // honest form -- printing one with invented numbers was the defect.
+  const allRoles = input.signatureDisposition === "requested"
+    ? ["title", "appearances", "index", "changes", "signature", "certification1", "certification2", "certification3"]
+    : ["title", "appearances", "index", "certification1", "certification2"];
+  return certificateOnly ? allRoles.filter(role => role !== "index") : allRoles;
+}
+
+function templateValues(input, roles) {
   const baseValues = {
     ...input.fieldValues,
     ...captionValues(input),
@@ -311,21 +364,16 @@ export function buildTexasInsertionPageSet(input, { setId, depositionId, generat
     "deposition.narrative.9": input.operator.titleNarrative?.[8] ?? "",
     "appearances.lines": appearanceLines(input),
   };
-  // certificateOnly is the standalone certification path: a document with no transcript behind it,
-  // and therefore no authoritative pagination. It carries NO INDEX, because an index states where
-  // sections land and only complete-transcript pagination knows that. Omitting the page is the
-  // honest form -- printing one with invented numbers was the defect.
-  //
   // The index lines are built only when the index page is, so a certificate-only document never
   // asks for a number nobody can supply.
-  const allRoles = input.signatureDisposition === "requested"
-    ? ["title", "appearances", "index", "changes", "signature", "certification1", "certification2", "certification3"]
-    : ["title", "appearances", "index", "certification1", "certification2"];
-  const roles = certificateOnly ? allRoles.filter(role => role !== "index") : allRoles;
-  const values = {
-    ...baseValues,
-    ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}),
-  };
+  return { ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) };
+}
+
+export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {
+  if (!input.variant?.startsWith("TEXAS_STATE_")) throw new Error(`Texas page builder cannot render ${input.variant ?? "an unspecified variant"}`);
+  const templates = input.template.templates;
+  const roles = insertionRoles(input, certificateOnly);
+  const values = templateValues(input, roles);
   const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
   const pages = roles.flatMap((role) => renderRolePages(templates[role], values, { role, profile }));
   pages.forEach((page, index) => { page.pageNumber = index + 1; });

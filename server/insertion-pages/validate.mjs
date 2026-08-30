@@ -1,4 +1,5 @@
 import { appearancePhrase } from "./assemble.mjs";
+import { captionOverflowFindings } from "./build-pages.mjs";
 import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
 import { captionJurisdiction } from "./variants.mjs";
@@ -275,6 +276,7 @@ export function validateInsertionInput(input) {
   validateIndex(input, findings);
   validateTimeUsed(input, findings);
   if ((input.deposition?.volumeCount ?? 1) > 1) findings.push(blocking("MULTI_VOLUME_UNSUPPORTED", "deposition.volumeCount", `This renderer supports one volume; received ${input.deposition.volumeCount}.`));
+  findings.push(...captionOverflowFindings(input));
   findings.push(...pageOverflowFindings(input.pages ?? [], input.layoutProfile));
   validateFields(input, findings);
   validateWarnings(input, findings);
