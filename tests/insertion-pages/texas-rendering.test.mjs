@@ -65,3 +65,24 @@ test("PDF rendering refuses to guess unknown UFM geometry", async () => {
   const set = buildTexasInsertionPageSet(input, { setId: "set", depositionId: "DEP-20260814-TEXAS", generatedAt: "2026-08-14T12:00:00.000Z" });
   assert.throws(() => renderInsertionPdf(set), /PDF_GEOMETRY_UNVERIFIED/);
 });
+
+test("the caption delimiter forms one column, inside the geometry", async () => {
+  // The template pads each caret field to a placeholder width no real value matches, so after
+  // substitution the delimiter sat somewhere different on every row. Aligning to the widest
+  // POST-substitution position inherited that padding and pushed the rows carrying a court line
+  // past 63 characters, where wrapAdministrativeLine re-flowed them -- and re-flowing collapses
+  // runs of whitespace, so those rows came out as "PLAINTIFF, ) IN THE DISTRICT COURT OF" while
+  // the rows that happened to fit kept their padding. The column has to come from the values.
+  const input = await validInput("waived");
+  const set = buildTexasInsertionPageSet(input, { setId: "caption", depositionId: "DEP-20260814-TEXAS", generatedAt: "2026-08-14T12:00:00.000Z" });
+  const title = set.pages.find((page) => page.role === "title");
+  const captionLines = title.lines.filter((line) => (line.fields ?? []).some((field) => field.startsWith("caption.")) && line.text.includes(")"));
+
+  assert.ok(captionLines.length >= 4, "the caption block should be several rows");
+  const columns = new Set(captionLines.map((line) => line.text.indexOf(")")));
+  assert.equal(columns.size, 1, `the delimiter must form one column, found ${[...columns].join(", ")}`);
+  for (const line of captionLines) {
+    assert.ok(line.text.length <= 63, `a caption row of ${line.text.length} characters would be re-flowed and lose its column`);
+    assert.doesNotMatch(line.text, /^\S+ \) /, "a single space before the delimiter is the collapsed shape re-flow produces");
+  }
+});

@@ -258,11 +258,28 @@ function wrapAdministrativeLine(line, width) {
 function renderRolePages(template, values, { role, profile }) {
   const rendered = renderTemplatePage(template, values, { pageNumber: 1, role, linesPerPage: 0 });
   while (rendered.lines.length && !String(rendered.lines.at(-1)?.text ?? "").trim()) rendered.lines.pop();
-  // Caret replacement changes the length of each caption value. Align the literal court-column
-  // delimiter after substitution, using the widest caption row, before wrapping to geometry.
-  const captionRows=rendered.lines.filter(line=>(line.fields??[]).some(field=>field.startsWith("caption."))&&String(line.text??"").includes(")"));
-  const delimiterColumn=Math.max(0,...captionRows.map(line=>String(line.text).indexOf(")")));
-  const aligned=rendered.lines.map(line=>{const text=String(line.text??""),at=text.indexOf(")");return at>=0&&at<delimiterColumn?{...line,text:`${text.slice(0,at)}${" ".repeat(delimiterColumn-at)}${text.slice(at)}`} : line});
+  // Caret replacement changes the length of every caption value, so the court-column delimiter
+  // lands somewhere different on each row and has to be squared up after substitution.
+  //
+  // The column comes from the widest caption VALUE, not from where the delimiter happens to sit
+  // once substituted. The template pads each caret field out to a placeholder width no real value
+  // matches, so taking the widest post-substitution position inherits that padding: on a Bexar
+  // County caption it put the delimiter at column 46, pushing the three rows that carry a court
+  // line past the 63-character geometry. wrapAdministrativeLine then re-flowed them, and re-flowing
+  // splits on whitespace and rejoins with single spaces -- so the rows that overflowed came out as
+  // "PLAINTIFF, ) IN THE DISTRICT COURT OF" while the two that fit kept their padding. Aligning
+  // made the caption worse than leaving it alone.
+  //
+  // Measuring the values instead keeps the block as narrow as its content allows, which is what
+  // keeps it inside the geometry and out of the wrapper.
+  const isCaption=line=>(line.fields??[]).some(field=>field.startsWith("caption."))&&String(line.text??"").includes(")");
+  const captionRows=rendered.lines.filter(isCaption);
+  const delimiterColumn=Math.max(0,...captionRows.map(line=>{const text=String(line.text);return text.slice(0,text.indexOf(")")).trimEnd().length+1}));
+  const aligned=rendered.lines.map(line=>{
+    if(!isCaption(line))return line;
+    const text=String(line.text??""),at=text.indexOf(")"),left=text.slice(0,at).trimEnd();
+    return {...line,text:`${left}${" ".repeat(Math.max(1,delimiterColumn-left.length))}${text.slice(at)}`};
+  });
   const wrapped = aligned.flatMap((line) => wrapAdministrativeLine(line, profile.charactersPerLine));
   const pages = [];
   // UFM section 2.13 permits a short final page. Preserve normal sequential pagination; without
