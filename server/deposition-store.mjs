@@ -356,6 +356,29 @@ export function writeDepositionAttorneyTime(root, { depositionId, attorneyTime, 
   return { depositionId, attorneyTime: entries };
 }
 
+export function readDepositionVideographers(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  return { depositionId, videographers: (record.participants?.videographers ?? []).map((person) => ({ id: person.id, fullName: person.fullName?.value ?? "" })) };
+}
+
+export function writeDepositionVideographers(root, { depositionId, videographers, storageRoot } = {}) {
+  if (!Array.isArray(videographers)) throw new Error("Videographers must be an array.");
+  const entries = videographers.map((person, index) => {
+    const fullName = String(person?.fullName ?? "").trim();
+    if (!fullName) throw new Error(`Videographer ${index + 1} requires a name.`);
+    return { id: String(person?.id || `videographer-${crypto.randomUUID()}`), fullName: field(fullName, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }) };
+  });
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, participants: { ...record.participants, videographers: entries } });
+  return { depositionId, videographers: entries };
+}
+
 /**
  * Where the deposition was taken, and in what court.
  *

@@ -61,12 +61,12 @@ test("counsel whose attendance was never recorded is not dropped", () => {
   assert.deepEqual(names(assembled), ["Pat Counsel"]);
 });
 
-async function renderedPages(counsel, participants) {
+async function renderedPages(counsel, participants, videotaped = false) {
   const { buildTexasInsertionPageSet } = await import("../../server/insertion-pages/build-pages.mjs");
   const { loadTemplateVariant } = await import("../../server/insertion-pages/templates.mjs");
   const template = await loadTemplateVariant("TEXAS_STATE_SIGNATURE_REQUESTED");
   const assembled = assembleInsertionInput({
-    record:{ counsel, parties:[], participants, case:{}, deposition:{} }, intake:{}, template, pagination:{},
+    record:{ counsel, parties:[], participants, case:{}, deposition:{ videotaped } }, intake:{}, template, pagination:{},
     operator:{ jurisdiction:"texas-state", signatureDisposition:"requested", signatureDispositionBasis:"Stated on the record" },
   });
   return buildTexasInsertionPageSet(assembled, { setId:"s", depositionId:"d", generatedAt:"2026-08-19T00:00:00Z", certificateOnly: true });
@@ -96,4 +96,26 @@ test("an absent field is omitted, not rendered as a blank line", async () => {
   const nameAt = without.findIndex(line => line.includes("Steven A. Nunez"));
   assert.ok(nameAt >= 0);
   assert.notEqual(without[nameAt + 1], "", "a missing firm must produce no line at all, not an empty one");
+});
+
+test("a videotaped deposition never fabricates a NONE videographer", async () => {
+  const zhan = attorney("Lucia D. Zhan", "Brothers, Alvarado", ["Home Depot U.S.A., Inc."], true);
+  const text = appearanceText(await renderedPages([zhan], { videographers:[], otherAttendees:[] }, true));
+  assert.ok(!text.some(line => /THE VIDEOGRAPHER:\s+NONE/.test(line)));
+});
+
+test("the ALSO PRESENT heading is not printed with nothing under it", async () => {
+  // Once NONE stopped being printed for a deposition nobody had answered the question about, the
+  // heading was left standing alone -- a category named on a certified page with no answer beneath
+  // it, which is the same defect as the omitted labels above. No specimen shows that state.
+  const zhan = attorney("Lucia D. Zhan", "Brothers, Alvarado", ["Home Depot U.S.A., Inc."], true);
+  const unstated = appearanceText(await renderedPages([zhan], { videographers:[], otherAttendees:[] }, null));
+  // null, not undefined: renderedPages defaults an omitted argument to false, which is an answer.
+  assert.ok(!unstated.includes("ALSO PRESENT:"),
+    "nothing is known to be present, so the page says nothing rather than opening an empty heading");
+
+  // It still prints whenever it has something to carry -- the specimens all do.
+  const stated = appearanceText(await renderedPages([zhan], { videographers:[], otherAttendees:[] }, false));
+  assert.ok(stated.includes("ALSO PRESENT:"));
+  assert.ok(stated.some(line => /THE VIDEOGRAPHER:\s+NONE/.test(line)), "an answered question is still answered");
 });

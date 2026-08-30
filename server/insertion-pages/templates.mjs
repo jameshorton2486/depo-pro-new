@@ -104,3 +104,28 @@ export async function templateAvailability(variant, options) {
     throw error;
   }
 }
+
+export async function insertionTemplateCatalog(options = {}) {
+  const variants = [
+    "TEXAS_STATE_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_SIGNATURE_WAIVED",
+    "FEDERAL_SIGNATURE_REQUESTED",
+    "FEDERAL_SIGNATURE_WAIVED",
+  ];
+  return Promise.all(variants.map(async (variant) => {
+    const loaded = await templateAvailability(variant, options);
+    const manifest = loaded.manifest ?? {};
+    return {
+      variant,
+      templateId: manifest.templateId ?? null,
+      version: manifest.version ?? null,
+      available: Boolean(loaded.available),
+      reviewStatus: manifest.reviewStatus ?? "unknown",
+      sourceFigures: manifest.sourceFigures ?? [],
+      roles: Object.keys(manifest.templates ?? {}).filter((role) => role !== "fieldInventory"),
+      approval: loaded.approval ?? null,
+      blockedBy: manifest.blockedBy ?? [],
+      expectedTemplatePath: loaded.expectedPath ?? null,
+    };
+  }));
+}

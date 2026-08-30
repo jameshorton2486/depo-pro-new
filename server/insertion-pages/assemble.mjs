@@ -216,7 +216,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     //
     // null is MISSING -- nobody has attested -- and is distinct from false, which is an attestation
     // that the witness did not swear. Only false refuses. See docs/opening-procedures/.
-    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), witnessSworn: canonicalValue(record.deposition?.witnessSworn) },
+    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), videotaped: canonicalValue(record.deposition?.videotaped), witnessSworn: canonicalValue(record.deposition?.witnessSworn) },
     reporter,
     appearances: counsel,
     counselReconciliation: {

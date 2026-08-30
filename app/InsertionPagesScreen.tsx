@@ -5,10 +5,14 @@ import { useEffect, useState } from "react";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 
 type Finding = { code: string; target: string; severity: "blocking" | "warning"; message: string };
-type RenderingSpec = { sha256?: string; pages?: unknown[] };
+type RenderedLine = { line: number; text: string };
+type RenderedPage = { id: string; role: string; pageNumber?: number | null; lines: RenderedLine[] };
+type RenderingSpec = { sha256?: string; pages?: RenderedPage[] };
 type Preview = { variant: string; findings: Finding[]; renderingSpec: RenderingSpec; workspaceDocument?: unknown };
 type Artifact = { outputPath: string; bytes: number; mode: string; variant: string; findings: Finding[]; pageSetSha256: string; renderingSpecSha256: string; renderingSpecPath: string };
 type Deposition = { id: string; caseStyle: string; witness: string; depositionDate: string; courtReporterName: string };
+type AttorneyTime = { name: string; minutes: string };
+type CatalogVariant = { variant: string; available: boolean; reviewStatus: string; roles: string[]; sourceFigures: number[]; blockedBy: string[]; approval?: { state?: string } | null };
 
 const JURISDICTIONS = [
   { value: "texas-state", label: "Texas state court" },
@@ -48,6 +52,9 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [busy, setBusy] = useState(false);
   const [certificate, setCertificate] = useState<Record<CertificateKey, string>>(EMPTY_CERTIFICATE);
+  const [attorneyTime, setAttorneyTime] = useState<AttorneyTime[]>([]);
+  const [videographers, setVideographers] = useState<Array<{ id?: string; fullName: string }>>([]);
+  const [catalog, setCatalog] = useState<CatalogVariant[]>([]);
   // What is already on the record, before the reporter can overwrite it.
   //
   // This screen used to start at EMPTY_CERTIFICATE and never read. runPreview posts the whole
@@ -59,11 +66,23 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`${API}/api/deposition/certification?depositionId=${encodeURIComponent(deposition.id)}`);
-        if (!response.ok) return;
-        const body = (await response.json()) as { certification?: Partial<Record<CertificateKey, string>> };
-        if (cancelled || !body.certification) return;
-        setCertificate((current) => ({ ...current, ...body.certification }));
+        const [certResponse, timeResponse, videographerResponse, catalogResponse] = await Promise.all([
+          fetch(`${API}/api/deposition/certification?depositionId=${encodeURIComponent(deposition.id)}`),
+          fetch(`${API}/api/deposition/attorney-time?depositionId=${encodeURIComponent(deposition.id)}`),
+          fetch(`${API}/api/deposition/videographers?depositionId=${encodeURIComponent(deposition.id)}`),
+          fetch(`${API}/api/insertion-pages/catalog`),
+        ]);
+        if (cancelled) return;
+        if (certResponse.ok) {
+          const body = (await certResponse.json()) as { certification?: Partial<Record<CertificateKey, string>> };
+          if (body.certification) setCertificate((current) => ({ ...current, ...body.certification }));
+        }
+        if (timeResponse.ok) {
+          const body = (await timeResponse.json()) as { attorneyTime?: Array<{ name: string; minutes: number | null }> };
+          setAttorneyTime((body.attorneyTime ?? []).map((item) => ({ name: item.name, minutes: item.minutes == null ? "" : String(item.minutes) })));
+        }
+        if (videographerResponse.ok) setVideographers(((await videographerResponse.json()) as { videographers?: Array<{ id?: string; fullName: string }> }).videographers ?? []);
+        if (catalogResponse.ok) setCatalog(((await catalogResponse.json()) as { variants?: CatalogVariant[] }).variants ?? []);
       } catch { /* an unreachable API leaves the form as it was; Preview still refuses on its own findings */ }
     })();
     return () => { cancelled = true; };
@@ -93,6 +112,14 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
       // have to arrive carrying REPORTER_ENTERED provenance, and a field left alone is recorded
       // MISSING rather than as an empty string somebody could mistake for an answer.
       await post("/api/deposition/certification", { depositionId: deposition.id, certification: certificate });
+      await post("/api/deposition/attorney-time", {
+        depositionId: deposition.id,
+        attorneyTime: attorneyTime.map((item) => ({ name: item.name, minutes: item.minutes })),
+      });
+      // A row the reporter added and never filled in is not a videographer. The store refuses a
+      // nameless one -- correctly -- so sending it unfiltered made Add videographer followed by
+      // Preview fail outright, with the only remedy being to find and remove the empty row.
+      await post("/api/deposition/videographers", { depositionId: deposition.id, videographers:videographers.filter((person) => person.fullName.trim()) });
       const body = (await post("/api/insertion-pages/rendering-spec")) as Preview;
       setPreview(body);
       const stops = (body.findings ?? []).filter((finding) => finding.severity === "blocking");
@@ -138,6 +165,35 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
         </fieldset>
 
         <fieldset className="insertion-field">
+          <legend>Time used by each examining party</legend>
+          <p className="insertion-help">Enter whole minutes. These entries populate the certified time-used statement in the order shown.</p>
+          {attorneyTime.map((item, index) => (
+            <div className="insertion-time-row" key={index}>
+              <input aria-label={`Party ${index + 1} name`} type="text" value={item.name} placeholder="Attorney or party"
+                onChange={(event) => setAttorneyTime((current) => current.map((entry, row) => row === index ? { ...entry, name: event.target.value } : entry))} />
+              <input aria-label={`Party ${index + 1} minutes`} type="number" min="0" step="1" value={item.minutes} placeholder="Minutes"
+                onChange={(event) => setAttorneyTime((current) => current.map((entry, row) => row === index ? { ...entry, minutes: event.target.value } : entry))} />
+              <button type="button" className="secondary-button" onClick={() => setAttorneyTime((current) => current.filter((_, row) => row !== index))}>Remove</button>
+            </div>
+          ))}
+          <button type="button" className="secondary-button" onClick={() => setAttorneyTime((current) => [...current, { name: "", minutes: "" }])}>Add party time</button>
+        </fieldset>
+
+        <fieldset className="insertion-field">
+          <legend>Videographers appearing</legend>
+          <p className="insertion-help">Required when the canonical record says the deposition was videotaped.</p>
+          {videographers.map((person, index) => (
+            <div className="insertion-time-row" key={person.id ?? index}>
+              <input aria-label={`Videographer ${index + 1} name`} type="text" value={person.fullName} placeholder="Full name"
+                onChange={(event) => setVideographers((current) => current.map((entry, row) => row === index ? { ...entry, fullName: event.target.value } : entry))} />
+              <span />
+              <button type="button" className="secondary-button" onClick={() => setVideographers((current) => current.filter((_, row) => row !== index))}>Remove</button>
+            </div>
+          ))}
+          <button type="button" className="secondary-button" onClick={() => setVideographers((current) => [...current, { fullName: "" }])}>Add videographer</button>
+        </fieldset>
+
+        <fieldset className="insertion-field">
           <legend>Signature disposition</legend>
           {DISPOSITIONS.map((item) => (
             <label key={item.value} className="insertion-option">
@@ -174,7 +230,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
           </label>
           <label className="insertion-option">
             <input type="radio" name="mode" value="full" checked={mode === "full"} onChange={() => { setMode("full"); setArtifact(null); }} />
-            <span>Transcript with certification pages<small>Requires the canonical transcript rendering specification, which final pagination has not yet produced.</small></span>
+            <span>Transcript with certification pages<small>Uses the complete transcript prepared in the Workspace so its page numbers remain authoritative.</small></span>
           </label>
         </fieldset>
 
@@ -198,6 +254,39 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
             <div><dt>Pages</dt><dd>{preview.renderingSpec?.pages?.length ?? 0}</dd></div>
             <div><dt>Rendering spec</dt><dd className="insertion-hash">{preview.renderingSpec?.sha256 ?? "—"}</dd></div>
           </dl>
+        </section>
+      )}
+
+      {preview?.renderingSpec.pages && (
+        <section className="insertion-card">
+          <h2>Page preview</h2>
+          <p className="insertion-help">This is the exact shared 25-line rendering model used for Word output.</p>
+          <div className="insertion-page-grid">
+            {preview.renderingSpec.pages.map((page) => (
+              <article className="insertion-page" key={page.id}>
+                <header>{page.role.replaceAll("-", " ")} {page.pageNumber ? `· page ${page.pageNumber}` : ""}</header>
+                <ol>{page.lines.map((line) => <li key={line.line}><span>{line.text || "\u00a0"}</span></li>)}</ol>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {catalog.length > 0 && (
+        <section className="insertion-card">
+          <h2>UFM template catalog</h2>
+          <p className="insertion-help">Each variant contains several coordinated page templates. Availability is fail-closed when source figures or approval are missing.</p>
+          <div className="insertion-catalog">
+            {catalog.map((item) => (
+              <article key={item.variant}>
+                <h3>{item.variant.replaceAll("_", " ")}</h3>
+                <p><strong>{item.available ? "Available" : "Blocked"}</strong> · {item.reviewStatus} · approval {item.approval?.state ?? "not recorded"}</p>
+                <p>{item.roles.length ? item.roles.join(", ") : "No renderable page roles installed."}</p>
+                {item.sourceFigures.length > 0 && <p>Source figures: {item.sourceFigures.join(", ")}</p>}
+                {item.blockedBy.length > 0 && <ul>{item.blockedBy.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+              </article>
+            ))}
+          </div>
         </section>
       )}
 

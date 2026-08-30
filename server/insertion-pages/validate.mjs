@@ -258,8 +258,15 @@ function validateWarnings(input, findings) {
   }
 }
 
+function validateVideographer(input,findings){
+  if(input.deposition?.videotaped===true&&!(input.record?.participants?.videographers??[]).length){
+    findings.push(blocking("VIDEOGRAPHER_UNRECORDED","participants.videographers","The deposition is marked videotaped, but no videographer is recorded. The appearance page will not state that no videographer attended.",{path:"record.participants.videographers"}));
+  }
+}
+
 export function validateInsertionInput(input) {
   const findings = [];
+  validateVideographer(input,findings);
   validateOathBasis(input, findings);
   validateVariant(input, findings);
   validateCredentials(input, findings);

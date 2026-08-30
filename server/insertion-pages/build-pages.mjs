@@ -153,8 +153,13 @@ function appearanceDesignation(attorney, input) {
 
 function appearanceLines(input) {
   const lines = [];
+  let priorHeading = null;
   for (const attorney of input.appearances) {
-    lines.push(`FOR ${printedPhrase(attorney)}:${appearanceDesignation(attorney, input)}`);
+    const heading=`FOR ${printedPhrase(attorney)}:${appearanceDesignation(attorney, input)}`;
+    // Co-counsel for the same side belong under one heading. Repeating the identical designation
+    // before every lawyer made a single appearance block look like several separate parties.
+    if(heading!==priorHeading)lines.push(heading);
+    priorHeading=heading;
     lines.push(`${attorney.name}${methodLabel(attorney.participation.method, attorney.participation.detail)}`);
     // Omitted, not blanked. The specimens carry no empty lines where a field is absent -- Nunez
     // prints with no phone and no email at all, rather than with labels holding nothing.
@@ -162,14 +167,24 @@ function appearanceLines(input) {
     if (attorney.address) lines.push(attorney.address);
     if (attorney.phone) lines.push(`Phone: ${attorney.phone}`);
   }
-  // ALSO PRESENT prints whether or not anyone was. All three certified specimens carry the block
-  // and a videographer line; Thomas renders "THE VIDEOGRAPHER:  NONE". Suppressing the block when
-  // empty would leave a reader unable to tell "no videographer" from "not recorded".
+  // All three certified specimens carry the ALSO PRESENT block AND a videographer line under it;
+  // Thomas renders "THE VIDEOGRAPHER:  NONE". None of them shows the heading standing alone, which
+  // is the state that arises once NONE stops being printed for a deposition nobody has answered the
+  // question about -- "NONE" asserts that no videographer attended, and an empty array only says
+  // nobody recorded one. So the line is emitted when the record can support it, and the heading is
+  // emitted only when something follows it. A heading holding nothing is the same defect as the
+  // labels omitted above: it states a category on a certified page and then answers nothing.
+  //
+  // Where the record says videotaped and names no videographer, validateInsertionInput raises
+  // VIDEOGRAPHER_UNRECORDED and both production callers refuse before reaching this point. The
+  // remaining silent case is a deposition whose recording was never stated at all.
   const videographers = input.record.participants?.videographers ?? [];
   const others = input.record.participants?.otherAttendees ?? [];
-  lines.push("ALSO PRESENT:");
-  lines.push(`THE VIDEOGRAPHER:  ${videographers.map((person) => value(person.fullName) ?? value(person.name) ?? String(person)).join(", ") || "NONE"}`);
-  lines.push(...others.map((person) => value(person.name) ?? String(person)));
+  const present = [];
+  if(videographers.length)present.push(`THE VIDEOGRAPHER:  ${videographers.map((person) => value(person.fullName) ?? value(person.name) ?? String(person)).join(", ")}`);
+  else if(input.deposition?.videotaped===false)present.push("THE VIDEOGRAPHER:  NONE");
+  present.push(...others.map((person) => value(person.name) ?? String(person)));
+  if(present.length)lines.push("ALSO PRESENT:",...present);
   return lines;
 }
 
@@ -243,8 +258,15 @@ function wrapAdministrativeLine(line, width) {
 function renderRolePages(template, values, { role, profile }) {
   const rendered = renderTemplatePage(template, values, { pageNumber: 1, role, linesPerPage: 0 });
   while (rendered.lines.length && !String(rendered.lines.at(-1)?.text ?? "").trim()) rendered.lines.pop();
-  const wrapped = rendered.lines.flatMap((line) => wrapAdministrativeLine(line, profile.charactersPerLine));
+  // Caret replacement changes the length of each caption value. Align the literal court-column
+  // delimiter after substitution, using the widest caption row, before wrapping to geometry.
+  const captionRows=rendered.lines.filter(line=>(line.fields??[]).some(field=>field.startsWith("caption."))&&String(line.text??"").includes(")"));
+  const delimiterColumn=Math.max(0,...captionRows.map(line=>String(line.text).indexOf(")")));
+  const aligned=rendered.lines.map(line=>{const text=String(line.text??""),at=text.indexOf(")");return at>=0&&at<delimiterColumn?{...line,text:`${text.slice(0,at)}${" ".repeat(delimiterColumn-at)}${text.slice(at)}`} : line});
+  const wrapped = aligned.flatMap((line) => wrapAdministrativeLine(line, profile.charactersPerLine));
   const pages = [];
+  // UFM section 2.13 permits a short final page. Preserve normal sequential pagination; without
+  // the missing source figure there is no authority to redistribute a 26-line form as 13 + 13.
   for (let offset = 0; offset < wrapped.length; offset += profile.linesPerPage) {
     const lines = wrapped.slice(offset, offset + profile.linesPerPage);
     while (lines.length < profile.linesPerPage) lines.push({ text: "", fields: [] });

@@ -40,11 +40,12 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
+import { insertionTemplateCatalog } from "./insertion-pages/templates.mjs";
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
@@ -208,6 +209,9 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/insertion-pages/docx" && req.method === "POST") {
       const input=await body(req,10*1024*1024);
       return json(res,201,await createInsertionWordArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot}),origin);
+    }
+    if (req.url === "/api/insertion-pages/catalog" && req.method === "GET") {
+      return json(res,200,{variants:await insertionTemplateCatalog()},origin);
     }
     if (req.url === "/api/insertion-pages/rendering-spec" && req.method === "POST") {
       const input=await body(req,10*1024*1024);
@@ -424,6 +428,14 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/deposition/attorney-time"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionAttorneyTime(root,{depositionId:input.depositionId,attorneyTime:input.attorneyTime,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url?.startsWith("/api/deposition/videographers?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionVideographers(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/deposition/videographers"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionVideographers(root,{depositionId:input.depositionId,videographers:input.videographers,storageRoot:depositionStorageRoot}),origin);
     }
     // GET beside the POST: the screen that chooses an examining attorney needs the same canonical
     // ids the assembly stores, and there was no way to ask for them.
