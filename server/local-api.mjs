@@ -17,6 +17,7 @@ import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflig
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
 import { listCorrectionPasses, readCorrectionPass, runEntityPass } from "./entity-pass.mjs";
+import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -187,7 +188,10 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/recover" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await finalizeOrphanedSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
       if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
-      return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+      return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/transcript/speaker-suggestions" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();
+      if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before suggesting speakers."},origin);
+      return json(res,200,await suggestSpeakerAttributions(root,{depositionId:input.depositionId,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/correction/passes?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,{passes:listCorrectionPasses(root,{depositionId:url.searchParams.get("depositionId"),storageRoot:depositionStorageRoot})},origin); }
     if (req.url?.startsWith("/api/correction/pass?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,readCorrectionPass(root,{depositionId:url.searchParams.get("depositionId"),passId:url.searchParams.get("passId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/read-back" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await readBackSearch(root,{...input,storageRoot:depositionStorageRoot}),origin); }
@@ -489,7 +493,11 @@ const server = http.createServer(async (req,res) => {
       const config=loadSecrets(); if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings first."},origin);
       const input=await body(req); const document=contentBlock(input.file); const supportingDocuments=(input.supportingFiles||[]).slice(0,10).map((file,index)=>[{type:"text",text:`Supporting document ${index+1}: ${file.name}. Use this only to confirm spellings, proper names, firms, locations, and specialized terminology. Do not override conflicting deposition facts from the Notice.`},contentBlock(file)]).flat();
       const tool=extractionTool;
-      const response=await fetchExternal("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":config.anthropicApiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:config.claudeModel,max_tokens:8192,output_config:{effort:"low"},system:terminologyPrompt+"\n\nCompatibility requirement: In the same extraction, populate the setup object for the Depo-Pro setup screen. The Notice controls setup facts when sources conflict.",tools:[tool],tool_choice:{type:"tool",name:"extract_deposition_intake"},messages:[{role:"user",content:[{type:"text",text:"The first document is the authoritative Notice of Deposition. Supporting documents follow."},document,...supportingDocuments]}]})},{label:"Claude document analysis",attempts:2,timeoutMs:Number(process.env.CLAUDE_TIMEOUT_MS)||5*60*1000});
+      // Effort controls are optional and model-specific. The configured model is administrator
+      // selectable, so attaching one unconditionally makes an otherwise valid model reject the
+      // entire extraction request. Use the model's supported default unless compatibility has
+      // been established for that exact model and API version.
+      const response=await fetchExternal("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":config.anthropicApiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:config.claudeModel,max_tokens:8192,system:terminologyPrompt+"\n\nCompatibility requirement: In the same extraction, populate the setup object for the Depo-Pro setup screen. The Notice controls setup facts when sources conflict.",tools:[tool],tool_choice:{type:"tool",name:"extract_deposition_intake"},messages:[{role:"user",content:[{type:"text",text:"The first document is the authoritative Notice of Deposition. Supporting documents follow."},document,...supportingDocuments]}]})},{label:"Claude document analysis",attempts:2,timeoutMs:Number(process.env.CLAUDE_TIMEOUT_MS)||5*60*1000});
       const result=await response.json(); if(!response.ok) return json(res,response.status,{error:result?.error?.message || "Claude request failed."},origin);
       const toolUse=result.content?.find((item)=>item.type==="tool_use"&&item.name==="extract_deposition_intake"); if(!toolUse) throw new Error("Claude did not return structured intake data.");
       const data=toolUse.input;
