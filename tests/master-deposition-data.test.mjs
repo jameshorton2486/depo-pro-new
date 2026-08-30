@@ -7,6 +7,26 @@ const extracted=()=>masterDataFromExtraction({setup:{caseStyle:"Rivera v. Northg
 
 test("one extraction record drives setup, Deepgram, and Texas UFM projections",()=>{const master=extracted(),canonical=canonicalInputFromMaster(master),deepgram=projectDeepgramKeyterms(master),ufm=projectTexasFreelanceUfm(master);assert.equal(master.recordType,"MASTER_DEPOSITION_DATA_RECORD");assert.equal(canonical.caseStyle,"Rivera v. Northgate");assert.deepEqual(deepgram.wire,["Jordan Rivera","Northgate"]);assert.equal(ufm.fields.cause_number,"2026-CV-1");assert.equal(ufm.fields.witness_name,"Jordan Rivera")});
 
+test("spoken UFM vocabulary joins the one authoritative Deepgram projection",()=>{
+  const master=masterDataFromExtraction({setup:{},ufm_registry:{entries:[
+    {canonical:"Heath Thomas",category:"person",spoken:true,in_keyterms:false},
+    {canonical:"Home Depot U.S.A., Inc.",category:"organization",spoken:true,in_keyterms:false},
+    {canonical:"Unspoken filing code",category:"procedural",spoken:false,in_keyterms:false},
+  ]},deepgram_keyterms:{terms:[]}});
+  assert.deepEqual(projectDeepgramKeyterms(master).wire,["Heath Thomas","Home Depot U.S.A., Inc."]);
+});
+
+test("reporter terminology edits and Deepgram inclusion choices persist in the master record",()=>{
+  const master=masterDataFromExtraction({setup:{},ufm_registry:{entries:[{canonical:"Heath Tomas",category:"person",spoken:true,in_keyterms:false}]}});
+  const data=submit({"canonicalTerm:0":"Heath Thomas","canonicalTermEligible:0":"false"});
+  const reviewedMaster=reviewedMasterData(master,data);
+  assert.equal(reviewedMaster.terminology[0].canonical,"Heath Thomas");
+  assert.equal(reviewedMaster.terminology[0].extractedTerm,"Heath Tomas");
+  assert.equal(reviewedMaster.terminology[0].source,"REPORTER");
+  assert.equal(reviewedMaster.terminology[0].deepgramEligible,false);
+  assert.deepEqual(projectDeepgramKeyterms(reviewedMaster).wire,[]);
+});
+
 test("missing fields do not claim Notice provenance and explicit false survives",()=>{const canonical=canonicalInputFromMaster(extracted());assert.equal(canonical.remote,false);assert.ok(canonical.extractedFields.includes("remote"));assert.ok(!canonical.extractedFields.includes("district"));assert.equal(canonical.district,null)});
 
 // The rules below moved here from app/extracted-fields.mjs, which decided the same question against

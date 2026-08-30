@@ -4,10 +4,8 @@ import { deponentTypeOption } from "./intake-logistics.mjs";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import AudioReviewCard from "./AudioReviewCard";
 import AudioToolsScreen from "./AudioToolsScreen";
-import TermReviewTable from "./TermReviewTable";
 import ManualIntakeForm from "./ManualIntakeForm";
 import { manualIntakeAnalysis, validateManualIntake } from "./manual-intake.mjs";
-import { KEYTERM_PRODUCT_CAP } from "@/server/keyterm-limits.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import type { ClaudeIntakeAnalysis, DepositionCreationMode, IntakeAttorney } from "./intake-types";
 export type AudioDerivative = {
@@ -153,7 +151,7 @@ export default function IntakeScreen({
     [analyzing, setAnalyzing] = useState(false),
     [analysisElapsed, setAnalysisElapsed] = useState(0),
     [error, setError] = useState(""),
-    [reviewFile, setReviewFile] = useState<"terms" | "master" | null>(null),
+    [reviewFile, setReviewFile] = useState<"master" | null>(null),
     [audioProfiles, setAudioProfiles] = useState<Record<string, AudioProfile>>(
       {},
     ),
@@ -561,12 +559,10 @@ export default function IntakeScreen({
                 <strong>Master deposition data</strong>
                 <p>One extracted record supplies setup, UFM templates, and Deepgram.</p>
               </div>
-              <button type="button" onClick={() => setReviewFile("terms")}>
-                <span>ABC</span> Review and correct terms{" "}
-                <small>
-                  {analysis.keyterms.length}/{KEYTERM_PRODUCT_CAP}
-                </small>
-              </button>
+              <div className="generated-file-status">
+                <span>ABC</span><strong>Terminology ready for setup review</strong>{" "}
+                <small>{Array.isArray(analysis.masterData?.terminology) ? analysis.masterData.terminology.length : analysis.keyterms.length} master terms</small>
+              </div>
               <button type="button" onClick={() => setReviewFile("master")}>
                 <span>{"▦"}</span> Review all field data{" "}
                 <small>{analysis.warnings.length} flags</small>
@@ -780,21 +776,9 @@ export default function IntakeScreen({
             </button>
             <span className="eyebrow">MASTER DEPOSITION DATA</span>
             <h2 id="generated-review-title">
-              {reviewFile === "terms"
-                ? "Review and correct terms"
-                : "Review extracted field data"}
+              Review extracted field data
             </h2>
-            {reviewFile === "terms" ? (
-              <TermReviewTable
-                intake={analysis}
-                onCancel={() => setReviewFile(null)}
-                onSave={(next) => {
-                  setAnalysis(next);
-                  setReviewFile(null);
-                }}
-              />
-            ) : (
-              <>
+            <>
                 <p>
                   This is the single persisted extraction record. Deposition
                   setup, Texas UFM templates, and Deepgram each read a projection
@@ -813,7 +797,6 @@ export default function IntakeScreen({
                   </button>
                 </div>
               </>
-            )}
           </section>
         </div>
       )}

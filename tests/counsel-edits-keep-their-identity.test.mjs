@@ -139,3 +139,11 @@ test("the editor sends each row back with the id it arrived with", async () => {
   assert.ok(blank !== null, "BLANK not found");
   assert.doesNotMatch(blank, /\bid\b/, "a new counsel row invents an id the server should assign");
 });
+
+test("each persisted counsel row can select an observed Deepgram speaker",()=>{
+  const text=fs.readFileSync(new URL("../app/CounselEditor.tsx",import.meta.url),"utf8");
+  assert.match(text,/Deepgram speaker/);
+  assert.match(text,/speakerAssignmentForCounsel\?\.\(row\.id\)/);
+  assert.match(text,/onSpeakerAssignment\?\.\(row\.id,event\.target\.value,row\.appearanceRole\)/);
+  assert.match(text,/Save the speaker map below/);
+});

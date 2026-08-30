@@ -25,7 +25,9 @@ test("Workspace prefers the complete shared model and retains a testimony-only f
 
 test("administrative pages render from modeled lines but cannot become direct-edit authorities",()=>{
   assert.ok(pages.includes('page.editable===false'));
-  assert.ok(pages.includes('page.editable!==false&&line.paragraphId'));
+  // The current control renders evidence fragments on both page kinds, then refuses the edit in
+  // the click boundary. Administrative text remains visible without becoming an edit authority.
+  assert.ok(pages.includes('if(page.editable===false||!line.paragraphId)return'));
   assert.ok(pages.includes('line.fragments.length?line.fragments.map'));
   assert.ok(pages.includes(':line.content'));
 });

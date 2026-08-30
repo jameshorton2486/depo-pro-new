@@ -66,5 +66,17 @@ export function reviewedMasterData(seed, data) {
   write(deposition, "interpreted", "canonicalInterpreted", { kind:"boolean" });
   write(deposition, "corporateRepresentative", "canonicalCorporateRepresentative", { kind:"boolean" });
 
+  // Terminology is part of the same master record, not a second Deepgram-only file. Each row has
+  // an explicit yes/no control so an unchecked checkbox can never masquerade as "not submitted".
+  if(Array.isArray(master.terminology))master.terminology=master.terminology.map((entry,index)=>{
+    const next={...entry},termKey=`canonicalTerm:${index}`,eligibleKey=`canonicalTermEligible:${index}`;
+    if(data.has(termKey)){
+      const canonical=String(data.get(termKey)??"").trim();
+      if(canonical&&canonical!==entry?.canonical){next.extractedTerm=entry?.extractedTerm??entry?.canonical;next.canonical=canonical;next.source="REPORTER";next.confidence=null;}
+    }
+    if(data.has(eligibleKey))next.deepgramEligible=String(data.get(eligibleKey))==="true";
+    return next;
+  });
+
   return master;
 }

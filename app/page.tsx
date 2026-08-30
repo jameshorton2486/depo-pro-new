@@ -12,6 +12,7 @@ import OpeningProceduresScreen from "./OpeningProceduresScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
+import { normalizeCauseNumber } from "../server/cause-number.mjs";
 import { formatDisplayDate } from "./date-format.mjs";
 import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
@@ -180,7 +181,7 @@ export default function Home() {
       id: makeId(),
       caseStyle: String(data.get("caseStyle")),
       witness: String(data.get("witness")),
-      causeNumber: String(data.get("causeNumber")),
+      causeNumber: normalizeCauseNumber(data.get("causeNumber")),
       deponentType: String(data.get("deponentType")),
       depositionDate: String(data.get("depositionDate")),
       courtReporterId: reporter?.id ?? "",
@@ -358,15 +359,15 @@ export default function Home() {
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <button className="close-button" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
             <span className="eyebrow">NEW DEPOSITION</span><h2 id="modal-title">Set up the deposition</h2><p>Review the intake details, select the Court Reporter, and create the deposition workspace.</p>
-            <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Master deposition data ready for review</strong><small>One record will supply setup, Texas UFM templates, and {intakeDraft.keyterms.length} Deepgram terms.</small></div></div>}
+            <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Master deposition data ready for review</strong><small>One record will supply setup, the applicable template workflow, and {intakeDraft.keyterms.length} Deepgram terms.</small></div></div>}
               <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={deponentTypeOption(intakeDraft?.deponentType) ?? ""}><option value="">Not stated</option>{DEPONENT_TYPES.map(option => <option key={option} value={option}>{option}</option>)}</select></label></div>
-              <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
+              <label>Cause number <small>Letters are saved in uppercase</small><input name="causeNumber" required defaultValue={normalizeCauseNumber(intakeDraft?.causeNumber)} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.toLocaleUpperCase("en-US"); }} placeholder="e.g., 25-CV-00598-OLG" /></label>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={parseNoticeDate(intakeDraft?.depositionDate) ?? logisticsFields(intakeDraft?.ufmData).depositionDate ?? ""} /></label><label>Court Reporter <small>{reporters.length ? "Required for local filing" : "Required — no court reporter is saved on this computer yet. Add one below before creating the deposition."}</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
               <CanonicalDataSheet seed={intakeDraft?.masterData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
-              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":intakeDraft?.creationMode==="live"?"Create and Continue to Recording Setup":"Create Deposition"}</button></div>
+              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":intakeDraft?.creationMode==="live"?"Save, Create, and Continue to Recording Setup":"Save and Create Deposition"}</button></div>
             </form>
           </section>
         </div>

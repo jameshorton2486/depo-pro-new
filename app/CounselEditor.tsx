@@ -20,11 +20,12 @@ type Counsel = {
   id?:string; name:string; honorific:string; firm:string; represents:string[];
   appearanceRole:string; side:string; sideOther:string; actualAppearance:boolean|null;
 };
+export type CounselSpeakerOption = { key:string; label:string };
 const BLANK:Counsel = { name:"", honorific:"", firm:"", represents:[], appearanceRole:"", side:"", sideOther:"", actualAppearance:true };
 const APPEARANCE_ROLES = ["", "QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY"];
 const roleLabel = (role:string) => role ? role.replaceAll("_", " ").toLowerCase().replace(/^./, c => c.toUpperCase()) : "Not stated";
 
-export default function CounselEditor({ depositionId, onSaved }:{ depositionId:string; onSaved?:()=>void }) {
+export default function CounselEditor({ depositionId, onSaved, speakerOptions=[], speakerAssignmentForCounsel, onSpeakerAssignment }:{ depositionId:string; onSaved?:()=>void; speakerOptions?:CounselSpeakerOption[]; speakerAssignmentForCounsel?:(counselId:string)=>string; onSpeakerAssignment?:(counselId:string,bucketKey:string,transcriptRole:string)=>void }) {
   const [counsel, setCounsel] = useState<Counsel[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -73,7 +74,7 @@ export default function CounselEditor({ depositionId, onSaved }:{ depositionId:s
   }
 
   return (
-    <section className="counsel-editor" aria-label="Counsel">
+    <section id="workspace-counsel-editor" className="counsel-editor" aria-label="Counsel">
       <p className="counsel-editor-note">
         Corrections here reach the canonical record as the reporter&rsquo;s own, and keep each
         attorney&rsquo;s identity: the examining attorney and the speaker map both refer to it.
@@ -99,11 +100,19 @@ export default function CounselEditor({ depositionId, onSaved }:{ depositionId:s
               </select>
             </label>
             <label>Examination role
-              <select value={row.appearanceRole} onChange={event => edit(index, { appearanceRole:event.target.value })}>
+              <select value={row.appearanceRole} onChange={event => {const appearanceRole=event.target.value;edit(index, { appearanceRole });if(row.id&&speakerAssignmentForCounsel?.(row.id))onSpeakerAssignment?.(row.id,speakerAssignmentForCounsel(row.id),appearanceRole)}}>
                 {APPEARANCE_ROLES.map(role => <option key={role || "none"} value={role}>{roleLabel(role)}</option>)}
               </select>
             </label>
+            <label>Deepgram speaker
+              <select value={row.id?speakerAssignmentForCounsel?.(row.id)??"":""} disabled={!row.id}
+                onChange={event=>{if(row.id)onSpeakerAssignment?.(row.id,event.target.value,row.appearanceRole)}}>
+                <option value="">Unassigned</option>
+                {speakerOptions.map(option=><option key={option.key} value={option.key}>{option.label}</option>)}
+              </select>
+            </label>
           </div>
+          {row.id&&speakerOptions.length>0&&<small className="counsel-speaker-hint">This updates the speaker-map draft. Save the speaker map below after reviewing every person.</small>}
           {row.side === "OTHER" && (
             <label>How this appearance prints after the word FOR
               <input value={row.sideOther} onChange={event => edit(index, { sideOther:event.target.value })} placeholder="THE GUARDIAN AD LITEM" /></label>
@@ -120,7 +129,7 @@ export default function CounselEditor({ depositionId, onSaved }:{ depositionId:s
 
       <div className="counsel-editor-actions">
         {message && <span className="counsel-editor-message" role="status">{message}</span>}
-        <button type="button" className="secondary-button" disabled={busy}
+        <button id="workspace-add-missing-counsel" type="button" className="secondary-button" disabled={busy}
           onClick={() => setCounsel(current => [...current, { ...BLANK }])}>Add counsel</button>
         <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>
           {busy ? "Saving…" : "Save counsel"}

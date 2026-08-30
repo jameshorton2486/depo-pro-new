@@ -1,3 +1,5 @@
+import { normalizeCauseNumber } from "../server/cause-number.mjs";
+
 // Creating a deposition when there is no Notice to read.
 //
 // Continue to Deposition Setup was disabled until Claude analysed a Notice, so with no Anthropic
@@ -184,7 +186,7 @@ export function manualIntakeAnalysis(fields = {}) {
   const entered = value => ({ value:supplied(value) ? value : null, status:supplied(value) ? "CONFIRMED" : "MISSING", sourceType:supplied(value) ? "REPORTER" : null, sourceDocument:null, citation:null, confidence:null });
   const masterData = {
     schemaVersion:"1.0.0", recordType:"MASTER_DEPOSITION_DATA_RECORD", profile:"TEXAS_FREELANCE_DEPOSITION",
-    case:{caseStyle:entered(text(fields.caseStyle)),causeNumber:entered(text(fields.causeNumber)),jurisdiction:entered(""),court:entered(""),district:entered(""),division:entered(""),county:entered("")},
+    case:{caseStyle:entered(text(fields.caseStyle)),causeNumber:entered(normalizeCauseNumber(fields.causeNumber)),jurisdiction:entered(""),court:entered(""),district:entered(""),division:entered(""),county:entered("")},
     parties:parties.map(party=>({id:party.id,name:entered(party.name),role:entered(party.role||""),entityType:entered("")})),
     deposition:{witness:entered(text(fields.witness)),representativeCapacity:entered(text(fields.deponentType)),proceedingType:entered(""),scheduledDate:entered(text(fields.depositionDate)),scheduledStart:entered(""),timeZone:entered(""),location:entered(""),remote:entered(""),remotePlatform:entered(""),videotaped:entered(""),interpreted:entered(""),corporateRepresentative:entered("")},
     counsel:attorneys.map(attorney=>({id:attorney.id,fullName:entered(attorney.name),firm:entered(attorney.firm),address:entered(""),phone:entered(""),email:entered(""),barNumber:entered(""),represents:entered(attorney.represents),appearanceRole:entered(""),side:entered(attorney.side),sideOther:entered(attorney.sideOther)})),
@@ -195,7 +197,7 @@ export function manualIntakeAnalysis(fields = {}) {
   return {
     caseStyle: text(fields.caseStyle),
     witness: text(fields.witness),
-    causeNumber: text(fields.causeNumber),
+    causeNumber: normalizeCauseNumber(fields.causeNumber),
     depositionDate: text(fields.depositionDate),
     deponentType: text(fields.deponentType),
     parties,

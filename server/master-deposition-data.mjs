@@ -1,4 +1,5 @@
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
+import { normalizeCauseNumber } from "./cause-number.mjs";
 
 export const MASTER_DATA_VERSION = "1.0.0";
 export const MASTER_DATA_RECORD_TYPE = "MASTER_DEPOSITION_DATA_RECORD";
@@ -18,7 +19,12 @@ function terminology(data) {
   const add = (name, input={}) => {
     const canonical=text(name); if(!canonical)return;
     const key=canonical.toLocaleLowerCase("en-US"),current=byName.get(key)??{};
-    byName.set(key,{ canonical, category:input.category??current.category??"other", asrVariants:array(input.asr_variants??input.asrVariants??current.asrVariants), spoken:input.spoken??current.spoken??true, deepgramEligible:input.deepgramEligible??input.in_keyterms??current.deepgramEligible??false, priority:input.tier??current.priority??6, source:input.source??current.source??null, confidence:input.confidence??current.confidence??null, reason:input.reason??current.reason??null });
+    // The UFM registry is the shared vocabulary inventory. `in_keyterms:false` in Claude's
+    // legacy projection meant "not chosen for that separate five-term list", not "the reporter
+    // forbids this term from Deepgram". Spoken registry entries therefore start eligible and the
+    // reporter can opt them out in the unified data sheet.
+    const eligible=input.deepgramEligible??(input.in_keyterms===true?true:undefined)??current.deepgramEligible??(input.spoken!==false);
+    byName.set(key,{ canonical, category:input.category??current.category??"other", asrVariants:array(input.asr_variants??input.asrVariants??current.asrVariants), spoken:input.spoken??current.spoken??true, deepgramEligible:eligible, priority:input.tier??current.priority??6, source:input.source??current.source??null, confidence:input.confidence??current.confidence??null, reason:input.reason??current.reason??null });
   };
   for(const entry of array(data?.ufm_registry?.entries))add(entry.canonical??entry.term,entry);
   for(const entry of array(data?.deepgram_keyterms?.terms))add(entry.term,{...entry,deepgramEligible:true});
@@ -38,7 +44,7 @@ export function masterDataFromExtraction(data={}, { sourceDocument=null }={}) {
   const counsel=array(setup.attorneys).map((attorney,index)=>({id:attorney.id??`attorney-${index+1}`,fullName:evidence(attorney.name,{sourceDocument,confidence}),firm:evidence(attorney.firm,{sourceDocument,confidence}),address:evidence(attorney.address,{sourceDocument,confidence}),phone:evidence(attorney.phone,{sourceDocument,confidence}),email:evidence(attorney.email,{sourceDocument,confidence}),barNumber:evidence(attorney.barNumber,{sourceDocument,confidence}),represents:evidence(array(attorney.represents),{sourceDocument,confidence}),appearanceRole:evidence(attorney.appearanceRole,{sourceDocument,confidence}),side:reporterAnswer(attorney.side),sideOther:reporterAnswer(attorney.sideOther),actualAppearance:evidence(null,{sourceType:"REPORTER"})}));
   return {
     schemaVersion:MASTER_DATA_VERSION, recordType:MASTER_DATA_RECORD_TYPE, profile:"TEXAS_FREELANCE_DEPOSITION",
-    case:{caseStyle:evidence(setup.caseStyle,{sourceDocument,confidence}),causeNumber:evidence(setup.causeNumber,{sourceDocument,confidence}),jurisdiction:evidence(setup.jurisdiction,{sourceDocument,confidence}),court:evidence(first(setup.court,caption.court),{sourceDocument,confidence}),district:evidence(caption.district,{sourceDocument,confidence}),division:evidence(caption.division,{sourceDocument,confidence}),county:evidence(caption.county,{sourceDocument,confidence}),judicialDistrict:evidence(caption.judicial_district??caption.judicialDistrict,{sourceDocument,confidence}),appellateCauseNumber:evidence(caption.appellate_cause_number,{sourceDocument,confidence})},
+    case:{caseStyle:evidence(setup.caseStyle,{sourceDocument,confidence}),causeNumber:evidence(normalizeCauseNumber(setup.causeNumber),{sourceDocument,confidence}),jurisdiction:evidence(setup.jurisdiction,{sourceDocument,confidence}),court:evidence(first(setup.court,caption.court),{sourceDocument,confidence}),district:evidence(caption.district,{sourceDocument,confidence}),division:evidence(caption.division,{sourceDocument,confidence}),county:evidence(caption.county,{sourceDocument,confidence}),judicialDistrict:evidence(caption.judicial_district??caption.judicialDistrict,{sourceDocument,confidence}),appellateCauseNumber:evidence(caption.appellate_cause_number,{sourceDocument,confidence})},
     parties,
     deposition:{witness:evidence(setup.witness,{sourceDocument,confidence}),representativeCapacity:evidence(setup.deponentType,{sourceDocument,confidence}),proceedingType:evidence(logistics.proceeding_type??logistics.deposition_type,{sourceDocument,confidence}),scheduledDate:evidence(setup.depositionDate??logistics.deposition_date,{sourceDocument,confidence}),scheduledStart:evidence(logistics.start_time??logistics.scheduled_start,{sourceDocument,confidence}),timeZone:evidence(logistics.time_zone??logistics.timeZone,{sourceDocument,confidence}),location:evidence(logistics.location,{sourceDocument,confidence}),remote:evidence(logistics.remote,{sourceDocument,confidence}),remotePlatform:evidence(logistics.remote_platform??logistics.platform,{sourceDocument,confidence}),videotaped:evidence(logistics.videotaped,{sourceDocument,confidence}),interpreted:evidence(logistics.interpreted,{sourceDocument,confidence}),corporateRepresentative:evidence(logistics.corporate_representative??logistics.corporateRepresentative,{sourceDocument,confidence}),recordingMethod:evidence(null,{sourceType:"REPORTER_PROFILE"}),actualStart:evidence(null,{sourceType:"TRANSCRIPT"}),actualEnd:evidence(null,{sourceType:"TRANSCRIPT"}),volumeNumber:evidence(null,{sourceType:"WORKFLOW"})},
     counsel,

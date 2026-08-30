@@ -64,7 +64,7 @@ export default function ManualIntakeForm({ onReady, onCancel }:{ onReady:(fields
 
       <div className="form-row">
         <label>Case style<input value={fields.caseStyle} aria-invalid={missing("caseStyle")} onKeyDown={submitOnEnter} onChange={event=>set("caseStyle",event.target.value)} placeholder="Alex Plaintiff v. Delta Company" /></label>
-        <label>Cause number<input value={fields.causeNumber} aria-invalid={missing("causeNumber")} onKeyDown={submitOnEnter} onChange={event=>set("causeNumber",event.target.value)} placeholder="2026-CI-10001" /></label>
+        <label>Cause number<input value={fields.causeNumber} aria-invalid={missing("causeNumber")} onKeyDown={submitOnEnter} onChange={event=>set("causeNumber",event.target.value.toLocaleUpperCase("en-US"))} placeholder="2026-CI-10001" /></label>
       </div>
       <div className="form-row">
         <label>Witness<input value={fields.witness} aria-invalid={missing("witness")} onKeyDown={submitOnEnter} onChange={event=>set("witness",event.target.value)} placeholder="Full name of the deponent" /></label>
