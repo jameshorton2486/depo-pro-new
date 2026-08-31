@@ -4,6 +4,17 @@ import { createCanonicalDepositionRecord } from "../server/canonical-deposition-
 import { buildCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../server/texas-freelance-deposition-profile.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 // completePagination used to emit { examiner: "EXAMINING ATTORNEY" } whenever no examination data
 // was supplied, and the index printed it. Nothing supplied that data: operator.examinations only
 // ever arrived from the fixture generator, so every reporter-created complete transcript would have
@@ -22,7 +33,7 @@ const printModel = {
   layoutProfile:TEXAS_FREELANCE_DEPOSITION_V1,
   pages:[{ pageNumber:1, lines:lines(1) }, { pageNumber:2, lines:lines(2) }], findings:{},
 };
-const record = () => createCanonicalDepositionRecord({
+const record = () => attested({
   jurisdictionType:"texas-state", court:"45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS",
   causeNumber:"2026-CI-90210", caseStyle:"Whitaker v. Brazos Ridge Logistics, LLC",
   witness:"Dana Ellsworth Whitaker", depositionDate:"2026-08-28", remote:true, remotePlatform:"Zoom",

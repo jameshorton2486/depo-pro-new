@@ -5,8 +5,19 @@ import { assembleInsertionInput } from "../../server/insertion-pages/assemble.mj
 import { loadTemplateVariant } from "../../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../../server/insertion-pages/validate.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 async function thomasFixture() {
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     jurisdictionType: "federal",
     court: "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF TEXAS",
     causeNumber: "25-CV-00598-OLG",
