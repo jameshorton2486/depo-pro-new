@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord, field } from "../server/canonical-deposition-record.mjs";
-import { extractedFieldKeys } from "../app/extracted-fields.mjs";
 
 // Two rules, one record.
 //
@@ -107,26 +106,3 @@ test("the envelope refuses to guess when presence was not declared", () => {
     "nothing was supplied, so nothing is carried, whatever shape was passed");
 });
 
-test("an extraction value the reporter edited becomes the reporter's answer", () => {
-  // The review step exists so the reporter can disagree with the extraction. A record that keeps
-  // calling the result NOD_EXTRACTED erases that they did.
-  const ufm = { case_style: "Vasquez v. Central Texas Logistics", cause_number: "2024-CI-88214",
-    deponent: "Dr. Priya Ramanathan", caption: { court: "DISTRICT COURT", county: "BEXAR COUNTY" } };
-  const unchanged = extractedFieldKeys(ufm, key => ({
-    caseStyle: "Vasquez v. Central Texas Logistics", causeNumber: "2024-CI-88214",
-    witness: "Dr. Priya Ramanathan", canonicalCourt: "DISTRICT COURT", canonicalCounty: "BEXAR COUNTY",
-  }[key]));
-  assert.ok(unchanged.includes("caseStyle") && unchanged.includes("witness") && unchanged.includes("court"));
-
-  const edited = extractedFieldKeys(ufm, key => ({
-    caseStyle: "Vasquez v. Central Texas Logistics, LLC", causeNumber: "2024-CI-88214",
-    witness: "Dr. Priya Ramanathan", canonicalCourt: "DISTRICT COURT", canonicalCounty: "BEXAR COUNTY",
-  }[key]));
-  assert.ok(!edited.includes("caseStyle"), "the reporter changed it, so it is their answer now");
-  assert.ok(edited.includes("causeNumber"), "and the ones they left alone still belong to the notice");
-});
-
-test("a field the extraction never produced is never declared extracted", () => {
-  const keys = extractedFieldKeys({ caption: {} }, () => "something the reporter typed");
-  assert.deepEqual(keys, [], "nothing was extracted, so nothing may claim to have been");
-});

@@ -93,6 +93,14 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",
+    // The fixture's court is the full "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF
+    // TEXAS" with no short heading line supplied, so the caption column carries all 62 characters
+    // of it and the row cannot be squared inside the geometry. Recorded as a defect of this record:
+    // before the finding existed the row was re-flowed to a single space either side of the
+    // delimiter and the caption silently lost its column. It warns rather than blocks because
+    // nothing in the application collects the heading line that would fix it.
+    "CAPTION_ROW_OVERFLOW:pages.certification1.caption",
+    "CAPTION_ROW_OVERFLOW:pages.title.caption",
     "ALSO_PRESENT_AWKWARD:participants.videographer",
     "CAPTION_PLURALIZATION:caption.partyLabel",
     "CAPTION_PUNCTUATION:caption.causeNumber",

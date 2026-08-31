@@ -5,6 +5,8 @@ import { readAudioAudit, resolveAudioItem } from "./audio-pipeline.mjs";
 import { depositionStorageRoot, resolveDefaultDepositionsRoot } from "./storage-config.mjs";
 import { counselEntry, createCanonicalDepositionRecord, field, partyEntry } from "./canonical-deposition-record.mjs";
 import { applyCorrection, parseCorrectionLog, serializeCorrectionLog, validateCorrection } from "./canonical-corrections.mjs";
+import { canonicalInputFromMaster, projectDeepgramKeyterms } from "./master-deposition-data.mjs";
+import { normalizeCauseNumber } from "./cause-number.mjs";
 
 const ID_PATTERN=/^DEP-\d{8}-[A-Z0-9]{5}$/;
 function base(_root,{storageRoot}={}){return storageRoot?path.resolve(storageRoot):depositionStorageRoot()}
@@ -13,7 +15,7 @@ function safeName(value,fallback){return path.basename(String(value||fallback)).
 function pathPart(value,label){const normalized=String(value||"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase().replace(/[^a-z0-9-]+/g,"_").replace(/_+/g,"_").replace(/^[-_]+|[-_]+$/g,"");if(!normalized)throw new Error(`${label} is required to create the deposition folder.`);return normalized}
 function personName(value,label){const name=String(value||"").trim();if(!name)throw new Error(`${label} is required to create the deposition folder.`);const suffixes=new Set(["jr","jr.","sr","sr.","ii","iii","iv"]);let first,last;if(name.includes(",")&&!suffixes.has(name.split(",").at(-1).trim().toLowerCase())){const parts=name.split(",");last=parts[0];first=parts.slice(1).join(" ").trim()}else{const parts=name.replace(/,/g,"").split(/\s+/).filter(Boolean);while(parts.length>1&&suffixes.has(parts.at(-1).toLowerCase()))parts.pop();first=parts[0];last=parts.at(-1)}return{first:pathPart(first,`${label} first name`),last:pathPart(last,`${label} last name`)}}
 function reporterFolder(value){const {first,last}=personName(value,"Court reporter");return `${last}_${first[0]}`}
-function causeFolder(metadata){return pathPart(metadata?.causeNumber||metadata?.ufmData?.cause_number||metadata?.ufmData?.causeNumber,"Cause number")}
+function causeFolder(metadata){return pathPart(normalizeCauseNumber(metadata?.causeNumber||metadata?.ufmData?.cause_number||metadata?.ufmData?.causeNumber),"Cause number")}
 function depositionFolder(metadata){const {first,last}=personName(metadata?.witness,"Deponent"),date=pathPart(requiredText(metadata?.depositionDate,"Deposition date"),"Deposition date");return `${last}_${first}_${date}`}
 function atomicText(file,text){const temporary=`${file}.${crypto.randomUUID()}.tmp`,descriptor=fs.openSync(temporary,"wx");try{fs.writeFileSync(descriptor,text);fs.fsyncSync(descriptor)}finally{fs.closeSync(descriptor)}fs.renameSync(temporary,file)}
 function atomicJson(file,value){const temporary=`${file}.${crypto.randomUUID()}.tmp`,descriptor=fs.openSync(temporary,"wx");try{fs.writeFileSync(descriptor,JSON.stringify(value,null,2));fs.fsyncSync(descriptor)}finally{fs.closeSync(descriptor)}fs.renameSync(temporary,file)}
@@ -30,17 +32,22 @@ export function scanDepositions(root,options={}){const storageRoot=base(root,opt
 
 function writeArtifact(directory,relative,artifact){if(!artifact?.base64)return null;const target=path.join(directory,...relative.split("/"));if(!within(target,directory))throw new Error("Intake artifact path escaped the deposition folder.");fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,Buffer.from(artifact.base64,"base64"),{flag:"wx"});return relative}
 
-export function createDeposition(root,input,options={}){const metadata=input?.deposition||{},id=String(metadata.id||"");if(!ID_PATTERN.test(id))throw new Error("Invalid deposition ID.");const rootDirectory=base(root,options),reporter=reporterFolder(metadata.courtReporterName),cause=causeFolder(metadata),deposition=depositionFolder(metadata),causeDirectory=path.join(rootDirectory,reporter,cause),finalDirectory=path.join(causeDirectory,deposition);if(!within(finalDirectory,rootDirectory))throw new Error("Deposition path escaped its storage root.");fs.mkdirSync(causeDirectory,{recursive:true});if(fs.existsSync(finalDirectory))throw new Error(`A deposition already exists for ${metadata.witness} on ${metadata.depositionDate} in cause number ${metadata.causeNumber}.`);const staging=path.join(causeDirectory,`.creating-${deposition}-${crypto.randomUUID()}`);fs.mkdirSync(staging,{recursive:false});
+export function createDeposition(root,input,options={}){const metadata={...(input?.deposition||{}),causeNumber:normalizeCauseNumber(input?.deposition?.causeNumber)},id=String(metadata.id||"");if(!ID_PATTERN.test(id))throw new Error("Invalid deposition ID.");const rootDirectory=base(root,options),reporter=reporterFolder(metadata.courtReporterName),cause=causeFolder(metadata),deposition=depositionFolder(metadata),causeDirectory=path.join(rootDirectory,reporter,cause),finalDirectory=path.join(causeDirectory,deposition);if(!within(finalDirectory,rootDirectory))throw new Error("Deposition path escaped its storage root.");fs.mkdirSync(causeDirectory,{recursive:true});if(fs.existsSync(finalDirectory))throw new Error(`A deposition already exists for ${metadata.witness} on ${metadata.depositionDate} in cause number ${metadata.causeNumber}.`);const staging=path.join(causeDirectory,`.creating-${deposition}-${crypto.randomUUID()}`);fs.mkdirSync(staging,{recursive:false});
  try{
   for(const name of ["intake","audio/original","audio/processed","deepgram","transcript","exhibits","ufm","certification/history"])fs.mkdirSync(path.join(staging,...name.split("/")),{recursive:true});
   const artifacts=input.artifacts||{},noticeName=artifacts.notice?safeName(artifacts.notice.name,"notice.bin"):"",courtOrderName=artifacts.courtOrder?safeName(artifacts.courtOrder.name,"court-order.bin"):"";
   if(artifacts.notice)writeArtifact(staging,`intake/${noticeName}`,artifacts.notice);if(artifacts.courtOrder)writeArtifact(staging,`intake/${courtOrderName}`,artifacts.courtOrder);
   const supporting=(artifacts.supportingFiles||[]).map((artifact,index)=>writeArtifact(staging,`intake/supporting/${String(index+1).padStart(2,"0")}-${safeName(artifact.name,"document.bin")}`,artifact));
   const audio=[];for(const uploadId of metadata.audioIntakeIds||[]){const audit=readAudioAudit(root,uploadId),item=resolveAudioItem(audit),source=path.resolve(root,"data",item.key);const category=audit.selectedSource==="processed"?"processed":"original",name=safeName(audit.selectedSource==="processed"?path.basename(item.key):audit.originalName,path.basename(item.key)),relative=`audio/${category}/${name}`,target=path.join(staging,...relative.split("/"));fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);/* copyFileSync returns only after its internal handles are closed. */audio.push({uploadId,source:audit.selectedSource,operationId:audit.selectedDerivativeOperationId||null,sha256:item.sha256,path:relative,name})}
-  const canonicalData=createCanonicalDepositionRecord({...metadata,...(metadata.canonicalSeed||{}),caseStyle:metadata.caseStyle,witness:metadata.witness,causeNumber:metadata.causeNumber,depositionDate:metadata.depositionDate,deponentType:metadata.deponentType},{noticeSupplied:Boolean(noticeName)});
+  const masterInput=metadata.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD"?canonicalInputFromMaster(metadata.masterData):{};
+  const canonicalData=createCanonicalDepositionRecord({...metadata,...masterInput,...(metadata.canonicalSeed||{}),caseStyle:metadata.caseStyle,witness:metadata.witness,causeNumber:metadata.causeNumber,depositionDate:metadata.depositionDate,deponentType:metadata.deponentType},{noticeSupplied:Boolean(noticeName)});
   const creationMode=metadata.creationMode==="live"?"live":"existing_recording",workflowStatus=String(metadata.workflowStatus||(creationMode==="live"?"scheduled":"review"));
   const now=new Date().toISOString(),record={schemaVersion:"1.2.0",id,caseStyle:requiredText(metadata.caseStyle,"Case style"),witness:requiredText(metadata.witness,"Witness"),deponentType:String(metadata.deponentType||"Fact witness"),depositionDate:requiredText(metadata.depositionDate,"Deposition date"),courtReporterId:String(metadata.courtReporterId||""),courtReporterName:String(metadata.courtReporterName||""),causeNumber:requiredText(metadata.causeNumber,"Cause number"),creationMode,workflowStatus,canonicalData,storagePath:`${reporter}/${cause}/${deposition}`,intakeNotes:String(metadata.intakeNotes||""),noticeName,courtOrderName,audioFiles:audio.map(item=>item.name),audioIntakeIds:audio.map(item=>item.uploadId),audio,keytermCount:Array.isArray(metadata.keyterms)?metadata.keyterms.length:0,keyterms:Array.isArray(metadata.keyterms)?metadata.keyterms:[],paths:{intake:"intake/intake.json",canonicalData:"intake/canonical-deposition-record.json",workingTranscript:"transcript/working.json"},createdAt:now,updatedAt:now};
-  atomicJson(path.join(staging,"intake","intake.json"),{schemaVersion:"1.0.0",notice:noticeName||null,courtOrder:courtOrderName||null,supporting,keyterms:record.keyterms,deepgramArtifact:metadata.deepgramArtifact||{},ufmData:metadata.ufmData||{},warnings:metadata.warnings||[],audio});
+  const intake=metadata.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD"
+    ? {schemaVersion:"2.0.0",notice:noticeName||null,courtOrder:courtOrderName||null,supporting,masterData:metadata.masterData,warnings:metadata.warnings||[],audio}
+    : {schemaVersion:"1.0.0",notice:noticeName||null,courtOrder:courtOrderName||null,supporting,keyterms:record.keyterms,deepgramArtifact:metadata.deepgramArtifact||{},ufmData:metadata.ufmData||{},warnings:metadata.warnings||[],audio};
+  if(intake.masterData){const projection=projectDeepgramKeyterms(intake.masterData);record.keyterms=projection.wire;record.keytermCount=projection.term_count}
+  atomicJson(path.join(staging,"intake","intake.json"),intake);
   atomicJson(path.join(staging,"audio","audit.json"),{schemaVersion:"1.0.0",items:audio});atomicJson(path.join(staging,"intake","canonical-deposition-record.json"),canonicalData);atomicJson(path.join(staging,"deposition.json"),record);commitDirectory(staging,finalDirectory);return record;
  }catch(error){fs.rmSync(staging,{recursive:true,force:true});throw error}}
 
@@ -350,6 +357,29 @@ export function writeDepositionAttorneyTime(root, { depositionId, attorneyTime, 
   return { depositionId, attorneyTime: entries };
 }
 
+export function readDepositionVideographers(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  return { depositionId, videographers: (record.participants?.videographers ?? []).map((person) => ({ id: person.id, fullName: person.fullName?.value ?? "" })) };
+}
+
+export function writeDepositionVideographers(root, { depositionId, videographers, storageRoot } = {}) {
+  if (!Array.isArray(videographers)) throw new Error("Videographers must be an array.");
+  const entries = videographers.map((person, index) => {
+    const fullName = String(person?.fullName ?? "").trim();
+    if (!fullName) throw new Error(`Videographer ${index + 1} requires a name.`);
+    return { id: String(person?.id || `videographer-${crypto.randomUUID()}`), fullName: field(fullName, { source: "REPORTER_ENTERED", state: "REPORTER_ADDED" }) };
+  });
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  atomicJson(file, { ...record, participants: { ...record.participants, videographers: entries } });
+  return { depositionId, videographers: entries };
+}
+
 /**
  * Where the deposition was taken, and in what court.
  *
@@ -467,6 +497,36 @@ export function writeParticipantHonorific(root,{depositionId,participantId,honor
   // correction path. This is not an inferred title and does not touch testimony or evidence.
   if(!record.counsel[index].honorific){record.counsel[index]={...record.counsel[index],honorific:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
   return appendDepositionCorrections(root,{depositionId,storageRoot,who,corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
+}
+
+/**
+ * Records the reporter's attestation that the witness was, or was not, put under oath.
+ *
+ * This is deliberately a separate call from saving the Opening screen's `witnessOathSelection`.
+ * That selector is a workflow value: it lives in workflow/opening-procedures.json, carries no who
+ * and no at, and under ADR-0021 it may never influence certified output. This writes an attested
+ * fact to the canonical record through the ordinary correction log, which is the path that is
+ * allowed to reach a certified page precisely because it demands attribution.
+ *
+ * Changing the selector must never call this. Attribution attached to an act the reporter did not
+ * intend as an attestation is worse than no attribution, because it reads as provenance.
+ *
+ * `sworn` is a strict boolean and is not coerced. false is an answer -- "the witness affirmed" --
+ * and is the case the certification page refuses. Absence is a different fact and stays MISSING.
+ */
+export function attestWitnessSworn(root,{depositionId,sworn,who,why,at,storageRoot}={}){
+  if(sworn!==true&&sworn!==false)throw new Error("An oath attestation must be true or false. Absence is not an attestation.");
+  if(!String(who??"").trim())throw new Error("An oath attestation requires who made it.");
+  if(!String(why??"").trim())throw new Error("An oath attestation requires why it was made. A certified record has to say what a value rests on.");
+  const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
+  if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
+  const record=JSON.parse(fs.readFileSync(file,"utf8"));
+  // Records created before witnessSworn entered the canonical schema legitimately lack the
+  // envelope. Add only that declared field, as MISSING, before the append-only correction path --
+  // the same repair writeParticipantHonorific makes, and for the same reason.
+  if(!record.deposition?.witnessSworn){record.deposition={...record.deposition,witnessSworn:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
+  const current=record.deposition?.witnessSworn?.value??null;
+  return appendDepositionCorrections(root,{depositionId,storageRoot,who,...(at?{at}:{}),corrections:[{path:"deposition.witnessSworn",from:current,to:sworn,why}]});
 }
 
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}

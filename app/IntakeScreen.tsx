@@ -4,10 +4,8 @@ import { deponentTypeOption } from "./intake-logistics.mjs";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import AudioReviewCard from "./AudioReviewCard";
 import AudioToolsScreen from "./AudioToolsScreen";
-import TermReviewTable from "./TermReviewTable";
 import ManualIntakeForm from "./ManualIntakeForm";
 import { manualIntakeAnalysis, validateManualIntake } from "./manual-intake.mjs";
-import { KEYTERM_PRODUCT_CAP } from "@/server/keyterm-limits.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import type { ClaudeIntakeAnalysis, DepositionCreationMode, IntakeAttorney } from "./intake-types";
 export type AudioDerivative = {
@@ -105,6 +103,7 @@ export type IntakeDraft = {
   audioFiles: File[];
   audioProfiles: Record<string, AudioProfile>;
   keyterms: string[];
+  masterData: Record<string, unknown>;
   parties: string[];
   attorneys: IntakeAttorney[];
   deepgramArtifact: Record<string, unknown>;
@@ -152,7 +151,7 @@ export default function IntakeScreen({
     [analyzing, setAnalyzing] = useState(false),
     [analysisElapsed, setAnalysisElapsed] = useState(0),
     [error, setError] = useState(""),
-    [reviewFile, setReviewFile] = useState<"keyterms" | "ufm" | null>(null),
+    [reviewFile, setReviewFile] = useState<"master" | null>(null),
     [audioProfiles, setAudioProfiles] = useState<Record<string, AudioProfile>>(
       {},
     ),
@@ -300,6 +299,7 @@ export default function IntakeScreen({
       audioFiles: mode === "live" ? [] : audioFiles,
       audioProfiles: mode === "live" ? {} : audioProfiles,
       keyterms: analysis.keyterms || [],
+      masterData: analysis.masterData || {},
       parties: analysis.parties || [],
       attorneys: analysis.attorneys || [],
       deepgramArtifact: analysis.deepgramArtifact || {
@@ -362,9 +362,9 @@ export default function IntakeScreen({
           <span className="eyebrow">CASE INTAKE</span>
           <h1>Prepare a new deposition</h1>
           <p>
-            Add the source documents and audio recordings. Claude will analyze
-            the Notice, and you will verify every extracted field on the
-            Deposition Setup screen.
+            Add the source documents and audio recordings. Claude will build one
+            master deposition data record, and you will verify its extracted
+            fields on the Deposition Setup screen.
           </p>
         </section>
         <section className="intake-panel">
@@ -480,13 +480,13 @@ export default function IntakeScreen({
           </div>
           <div className="ai-analysis">
             <div>
-              <span className="ai-mark">DA</span>
+              <span className="ai-mark">AD</span>
               <div>
                 <strong>Analyze documents</strong>
                 <p>
                   {analysis
                     ? `Extraction ready · ${analysis.confidence} confidence · ${analysis.keyterms?.length || 0} Deepgram keyterms`
-                    : "Analyze the Notice and supporting documents for setup fields, verified spellings, Deepgram keyterms, and future UFM data."}
+                    : "Analyze the Notice and supporting documents once for deposition setup, Texas UFM templates, and Deepgram terminology."}
                 </p>
               </div>
             </div>
@@ -556,21 +556,16 @@ export default function IntakeScreen({
           {analysis && (
             <div className="generated-files">
               <div>
-                <strong>Generated transcription files</strong>
-                <p>Review the files Claude created before continuing.</p>
+                <strong>Master deposition data</strong>
+                <p>One extracted record supplies setup, UFM templates, and Deepgram.</p>
               </div>
-              <button type="button" onClick={() => setReviewFile("keyterms")}>
-                <span>ABC</span> Review and correct terms{" "}
-                <small>
-                  {analysis.keyterms.length}/{KEYTERM_PRODUCT_CAP}
-                </small>
-              </button>
-              <button type="button" onClick={() => setReviewFile("ufm")}>
-                <span>{"{}"}</span> Review UFM Data{" "}
-                <small>
-                  {analysis.ufmData?.entry_count || 0} terms ·{" "}
-                  {analysis.ufmData?.anomalies?.length || 0} flags
-                </small>
+              <div className="generated-file-status">
+                <span>ABC</span><strong>Terminology ready for setup review</strong>{" "}
+                <small>{Array.isArray(analysis.masterData?.terminology) ? analysis.masterData.terminology.length : analysis.keyterms.length} master terms</small>
+              </div>
+              <button type="button" onClick={() => setReviewFile("master")}>
+                <span>{"▦"}</span> Review all field data{" "}
+                <small>{analysis.warnings.length} flags</small>
               </button>
             </div>
           )}
@@ -779,29 +774,18 @@ export default function IntakeScreen({
             >
               ×
             </button>
-            <span className="eyebrow">CLAUDE GENERATED FILE</span>
+            <span className="eyebrow">MASTER DEPOSITION DATA</span>
             <h2 id="generated-review-title">
-              {reviewFile === "keyterms"
-                ? "Review and correct terms"
-                : "UFM Template Data"}
+              Review extracted field data
             </h2>
-            {reviewFile === "keyterms" ? (
-              <TermReviewTable
-                intake={analysis}
-                onCancel={() => setReviewFile(null)}
-                onSave={(next) => {
-                  setAnalysis(next);
-                  setReviewFile(null);
-                }}
-              />
-            ) : (
-              <>
+            <>
                 <p>
-                  This structured data will be available when UFM template
-                  population is added.
+                  This is the single persisted extraction record. Deposition
+                  setup, Texas UFM templates, and Deepgram each read a projection
+                  of this data.
                 </p>
                 <pre className="json-review">
-                  {JSON.stringify(analysis.ufmData, null, 2)}
+                  {JSON.stringify(analysis.masterData, null, 2)}
                 </pre>
                 <div className="modal-actions">
                   <button
@@ -813,7 +797,6 @@ export default function IntakeScreen({
                   </button>
                 </div>
               </>
-            )}
           </section>
         </div>
       )}

@@ -1,4 +1,5 @@
 import { appearancePhrase } from "./assemble.mjs";
+import { captionOverflowFindings } from "./build-pages.mjs";
 import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
 import { captionJurisdiction } from "./variants.mjs";
@@ -38,6 +39,27 @@ const blocking = (code, target, message, extra = {}) => ({ code, target, severit
 const warning = (code, target, message, extra = {}) => ({ code, target, severity: "warning", message, ...extra });
 const normalizedName = (name) => String(name ?? "").toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
 const isBlank = (value) => value == null || value === "" || (Array.isArray(value) && value.length === 0);
+
+// Both Texas certification templates state, as a literal, that the witness "was duly sworn by the
+// officer". When the record carries an attestation that the witness did not swear, that sentence is
+// false and it goes out under the reporter's name and CSR number. Refuse rather than print it.
+//
+// Only an explicit false refuses. null is MISSING -- nobody has attested -- and still generates.
+// That is a scoping decision, not an oversight: MISSING is the common state and an unattested
+// certificate is a gap in the record rather than a false statement, which is what this application
+// has always produced. Refusing on MISSING is phase 2 and is gated on the existing library being
+// attested first. See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
+//
+// There is no approved affirmation certificate wording to substitute -- no Texas authority
+// publishes one and no certified specimen contains one -- so refusal is the whole remedy.
+// Do not "fix" this by authoring that sentence.
+function validateOathBasis(input, findings) {
+  if (input.deposition?.witnessSworn !== false) return;
+  findings.push(blocking(
+    "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",
+    "The record attests that this witness was not sworn, and the certification page states the witness was duly sworn by the officer. No approved wording exists for a witness who affirmed, so the page cannot be generated.",
+  ));
+}
 
 function validateVariant(input, findings) {
   if (!input.jurisdiction || !input.signatureDisposition || !input.variant || !input.signatureDispositionBasis) {
@@ -237,8 +259,16 @@ function validateWarnings(input, findings) {
   }
 }
 
+function validateVideographer(input,findings){
+  if(input.deposition?.videotaped===true&&!(input.record?.participants?.videographers??[]).length){
+    findings.push(blocking("VIDEOGRAPHER_UNRECORDED","participants.videographers","The deposition is marked videotaped, but no videographer is recorded. The appearance page will not state that no videographer attended.",{path:"record.participants.videographers"}));
+  }
+}
+
 export function validateInsertionInput(input) {
   const findings = [];
+  validateVideographer(input,findings);
+  validateOathBasis(input, findings);
   validateVariant(input, findings);
   validateCredentials(input, findings);
   validateDepositionMethod(input, findings);
@@ -246,6 +276,7 @@ export function validateInsertionInput(input) {
   validateIndex(input, findings);
   validateTimeUsed(input, findings);
   if ((input.deposition?.volumeCount ?? 1) > 1) findings.push(blocking("MULTI_VOLUME_UNSUPPORTED", "deposition.volumeCount", `This renderer supports one volume; received ${input.deposition.volumeCount}.`));
+  findings.push(...captionOverflowFindings(input));
   findings.push(...pageOverflowFindings(input.pages ?? [], input.layoutProfile));
   validateFields(input, findings);
   validateWarnings(input, findings);

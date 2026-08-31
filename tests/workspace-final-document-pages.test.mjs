@@ -29,6 +29,22 @@ test("Phase 5 uses a controlled one-paragraph editor and the stale-state transac
   assert.match(workspace,/api\/transcript\/overlay\/redo/);
 });
 
+test("a continuation-page word opens its canonical paragraph editor immediately",()=>{
+  const pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(pages,/onActivate\(line\.paragraphId,fragment\.id,event\.shiftKey,lineKey,fragment\.sourceStart\?\?0,event\.altKey\)/);
+  assert.match(pages,/if\(!\(await save\(\)\)\)return;/);
+  assert.match(pages,/onSelect\(paragraphId,wordId,shiftKey\)/);
+  assert.match(pages,/if\(!shiftKey\)openEdit\(paragraphId,lineKey,offset\)/);
+  assert.match(pages,/Press Enter at the cursor to split there/);
+});
+
+test("modeled line timestamps are visible playback controls",()=>{
+  const pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(pages,/workspace-line-time/);
+  assert.match(pages,/Save the open paragraph and play audio from/);
+  assert.match(pages,/async function playAt\(seconds:number\)\{if\(!\(await save\(\)\)\)return;setActiveEdit\(null\);onPlayAt\(seconds\)\}/);
+});
+
 test("every Workspace page receives exactly 25 numbered physical positions including blanks",()=>{
   const pages=model(emptyOverlay("DEP-PHASE4")).pages;
   assert.ok(pages.length);

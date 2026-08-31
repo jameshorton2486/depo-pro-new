@@ -10,7 +10,7 @@ import { loadTemplateVariant } from "../../server/insertion-pages/templates.mjs"
 
 const TEST_GEOMETRY = Object.freeze({ lineNumberLeft: 36, textLeft: 72, firstLineY: 744, lineHeight: 27 });
 
-async function validInput(signatureDisposition) {
+async function validInput(signatureDisposition, operatorExtras = {}) {
   const record = createCanonicalDepositionRecord({
     court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS", causeNumber: "2026-CI-10001",
     witness: "Jordan Example", depositionDate: "2026-08-01",
@@ -33,6 +33,7 @@ async function validInput(signatureDisposition) {
       titleNarrative: ["Jordan Example, produced as a witness and duly sworn,", "was taken remotely by Zoom before Riley Reporter,", "Certified Shorthand Reporter in and for Texas."],
       certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff", serviceDate: "August 14, 2026", certificationDate: "August 14, 2026", furtherCertificationDate: "August 30, 2026" },
       timeUsed: { totalOnRecordMinutes: 120, parties: [{ name: "Pat Counsel", minutes: 60 }, { name: "Dana Counsel", minutes: 60 }] },
+      ...operatorExtras,
     },
     pagination: { index: { appearances: { startPage: 2 }, examinations: [{ examiner: "Pat Counsel", startPage: 5, endPage: 40 }], changesAndSignature: { startPage: 41 }, reportersCertification: { startPage: signatureDisposition === "requested" ? 43 : 41 }, entries: [], actualSectionPages: {}, declaredSectionPages: {} } },
   });
@@ -64,4 +65,44 @@ test("PDF rendering refuses to guess unknown UFM geometry", async () => {
   const input = await validInput("waived");
   const set = buildTexasInsertionPageSet(input, { setId: "set", depositionId: "DEP-20260814-TEXAS", generatedAt: "2026-08-14T12:00:00.000Z" });
   assert.throws(() => renderInsertionPdf(set), /PDF_GEOMETRY_UNVERIFIED/);
+});
+
+test("the caption delimiter forms one column, inside the geometry", async () => {
+  // The template pads each caret field to a placeholder width no real value matches, so after
+  // substitution the delimiter sat somewhere different on every row. Aligning to the widest
+  // POST-substitution position inherited that padding and pushed the rows carrying a court line
+  // past 63 characters, where wrapAdministrativeLine re-flowed them -- and re-flowing collapses
+  // runs of whitespace, so those rows came out as "PLAINTIFF, ) IN THE DISTRICT COURT OF" while
+  // the rows that happened to fit kept their padding. The column has to come from the values.
+  const input = await validInput("waived");
+  const set = buildTexasInsertionPageSet(input, { setId: "caption", depositionId: "DEP-20260814-TEXAS", generatedAt: "2026-08-14T12:00:00.000Z" });
+  const title = set.pages.find((page) => page.role === "title");
+  const captionLines = title.lines.filter((line) => (line.fields ?? []).some((field) => field.startsWith("caption.")) && line.text.includes(")"));
+
+  assert.ok(captionLines.length >= 4, "the caption block should be several rows");
+  const columns = new Set(captionLines.map((line) => line.text.indexOf(")")));
+  assert.equal(columns.size, 1, `the delimiter must form one column, found ${[...columns].join(", ")}`);
+  for (const line of captionLines) {
+    assert.ok(line.text.length <= 63, `a caption row of ${line.text.length} characters would be re-flowed and lose its column`);
+    assert.doesNotMatch(line.text, /^\S+ \) /, "a single space before the delimiter is the collapsed shape re-flow produces");
+  }
+});
+
+test("a caption that cannot be squared is refused rather than re-flowed", async () => {
+  // There is no square form for a row whose party name and court line together exceed the geometry,
+  // and the wrapper's answer -- split on whitespace, rejoin with single spaces -- silently destroys
+  // the column instead of saying so. The remedy is real: the court column carries the short heading
+  // line, and supplying it brings the row back inside the width.
+  const { validateInsertionInput } = await import("../../server/insertion-pages/validate.mjs");
+  const long = await validInput("waived", { courtHeadingLine: "IN THE 285TH JUDICIAL DISTRICT COURT OF BEXAR COUNTY, TEXAS" });
+  const overflow = validateInsertionInput(long).filter((finding) => finding.code === "CAPTION_ROW_OVERFLOW");
+  assert.ok(overflow.length, "a 59-character court line beside a caption value cannot fit 63");
+  // A warning, not a blocker: no screen collects the heading line that would resolve it, and a
+  // gate the reporter cannot pass is not a gate.
+  assert.equal(overflow[0].severity, "warning");
+  assert.match(overflow[0].message, /Supply the court heading/);
+
+  const short = await validInput("waived");
+  assert.deepEqual(validateInsertionInput(short).filter((finding) => finding.code === "CAPTION_ROW_OVERFLOW"), [],
+    "the short heading line fits, and nothing is reported");
 });

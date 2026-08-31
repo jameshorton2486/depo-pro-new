@@ -17,6 +17,7 @@ import { armPreflight, assertArmed, confirmPlayback, createPreflight, getPreflig
 import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive} from "./deepgram-live.mjs";
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
 import { listCorrectionPasses, readCorrectionPass, runEntityPass } from "./entity-pass.mjs";
+import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -40,16 +41,19 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
+import { insertionTemplateCatalog } from "./insertion-pages/templates.mjs";
 import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
+import { attestWitnessSworn } from "./deposition-store.mjs";
 import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
 import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
+import { masterDataFromExtraction, projectDeepgramKeyterms, projectTexasFreelanceUfm } from "./master-deposition-data.mjs";
 
 // What a rendered document actually is, decided from the model that was actually rendered.
 // COMPLETE_RECORD_TYPE is imported rather than restated so the browser's idea of "complete" and
@@ -141,7 +145,7 @@ function liveKeyterms(depositionId) {
   if (!depositionId) return [];
   try {
     const intake = readDepositionIntake(root, depositionId, { storageRoot:depositionStorageRoot });
-    const source = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
+    const source = intake?.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD" ? projectDeepgramKeyterms(intake.masterData).wire : (Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms);
     return (Array.isArray(source) ? source : []).map(term => String(term).trim()).filter(Boolean);
   } catch { return []; }
 }
@@ -184,7 +188,10 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/live-capture/recover" && req.method === "POST") { const input=await body(req,64*1024); return json(res,200,await finalizeOrphanedSession(root,{...input,storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
       if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
-      return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+      return json(res,201,await runEntityPass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+    if (req.url === "/api/transcript/speaker-suggestions" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();
+      if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before suggesting speakers."},origin);
+      return json(res,200,await suggestSpeakerAttributions(root,{depositionId:input.depositionId,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,storageRoot:depositionStorageRoot}),origin); }
     if (req.url?.startsWith("/api/correction/passes?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,{passes:listCorrectionPasses(root,{depositionId:url.searchParams.get("depositionId"),storageRoot:depositionStorageRoot})},origin); }
     if (req.url?.startsWith("/api/correction/pass?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,readCorrectionPass(root,{depositionId:url.searchParams.get("depositionId"),passId:url.searchParams.get("passId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/read-back" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await readBackSearch(root,{...input,storageRoot:depositionStorageRoot}),origin); }
@@ -206,6 +213,9 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/insertion-pages/docx" && req.method === "POST") {
       const input=await body(req,10*1024*1024);
       return json(res,201,await createInsertionWordArtifact(root,input.depositionId,input,{storageRoot:depositionStorageRoot}),origin);
+    }
+    if (req.url === "/api/insertion-pages/catalog" && req.method === "GET") {
+      return json(res,200,{variants:await insertionTemplateCatalog()},origin);
     }
     if (req.url === "/api/insertion-pages/rendering-spec" && req.method === "POST") {
       const input=await body(req,10*1024*1024);
@@ -298,6 +308,23 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/opening"&&req.method==="POST"){
       const input=await body(req,256*1024);
       saveOpeningState(root,{depositionId:input.depositionId,state:input.state,storageRoot:depositionStorageRoot});
+      return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    // The oath attestation is a separate endpoint from the state save above, and deliberately so.
+    // Saving the Opening screen writes workflow values that carry no attribution; this writes an
+    // attested fact to the canonical record through the correction log. Routing it through the
+    // state save would make a dropdown change indistinguishable from an attestation, which is the
+    // failure ADR-0021 exists to prevent. See docs/opening-procedures/.
+    //
+    // `who` is read from the canonical record rather than accepted from the client. A client-
+    // supplied attestor is a forgeable one, and this value ends up in a certified record's history.
+    if(req.url==="/api/opening/oath-attestation"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      const projection=getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const name=projection.canonical?.reporter?.fullName?.value??null,csr=projection.canonical?.reporter?.csrNumber?.value??null;
+      if(!String(name??"").trim())return json(res,400,{error:"This deposition has no court reporter on its canonical record, so there is nobody to attribute an oath attestation to."},origin);
+      const who=csr?`${name}, Texas CSR ${csr}`:String(name);
+      attestWitnessSworn(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,sworn:input.sworn,who,why:input.why});
       return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
@@ -406,6 +433,14 @@ const server = http.createServer(async (req,res) => {
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionAttorneyTime(root,{depositionId:input.depositionId,attorneyTime:input.attorneyTime,storageRoot:depositionStorageRoot}),origin);
     }
+    if(req.url?.startsWith("/api/deposition/videographers?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionVideographers(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/deposition/videographers"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionVideographers(root,{depositionId:input.depositionId,videographers:input.videographers,storageRoot:depositionStorageRoot}),origin);
+    }
     // GET beside the POST: the screen that chooses an examining attorney needs the same canonical
     // ids the assembly stores, and there was no way to ask for them.
     if(req.url?.startsWith("/api/deposition/counsel?")&&req.method==="GET"){
@@ -431,7 +466,7 @@ const server = http.createServer(async (req,res) => {
       // registry and intake keyterms. Any groups in the request body are ignored on purpose:
       // a client able to narrow them is a client able to weaken the selection gate.
       let resolved=null,termGroupError=null;
-      try{const intake=input.depositionId?readDepositionIntake(root,input.depositionId,{storageRoot:depositionStorageRoot}):null;resolved=buildTermGroups(input.termGroupSetId,{ufmEntries:intake?.ufmData?.ufm_registry?.entries||[],keyterms:intake?.keyterms||[]})}
+      try{const intake=input.depositionId?readDepositionIntake(root,input.depositionId,{storageRoot:depositionStorageRoot}):null;const masterTerms=intake?.masterData?.terminology||[];resolved=buildTermGroups(input.termGroupSetId,{ufmEntries:masterTerms.map(term=>({canonical:term.canonical,category:term.category})),keyterms:intake?.masterData?projectDeepgramKeyterms(intake.masterData).wire:(intake?.keyterms||[])})}
       catch(error){termGroupError=error instanceof Error?error.message:String(error)}
       const comparison={source,derivativeOperationId:source==="processed"?(input.derivativeOperationId||audit.transcripts?.processed?.derivativeOperationId||null):null,termGroupSetId:resolved?.termGroupSetId??null,termGroupSetVersion:resolved?.termGroupSetVersion??null,termGroupError,...compareTranscripts(input.reference,hypothesis,input.criticalTerms||[],resolved?.groups||{})}; await recordComparison(root,audit,comparison); return json(res,200,comparison,origin);
     }
@@ -451,13 +486,17 @@ const server = http.createServer(async (req,res) => {
       if (current && !validCode(input.adminCode,current)) return json(res,401,{error:"The administrator access code is incorrect."},origin);
       if (!current && (!input.adminCode || input.adminCode.length < 8)) return json(res,400,{error:"Create an administrator access code with at least 8 characters."},origin);
       const derived=current ? {salt:current.adminSalt,hash:current.adminHash} : hashCode(input.adminCode);
-      saveSecrets({ adminSalt:derived.salt, adminHash:derived.hash, anthropicApiKey:input.anthropicApiKey || current?.anthropicApiKey || "", deepgramApiKey:input.deepgramApiKey || current?.deepgramApiKey || "", claudeModel:input.claudeModel || current?.claudeModel || "claude-sonnet-4-5" });
+      saveSecrets({ adminSalt:derived.salt, adminHash:derived.hash, anthropicApiKey:input.anthropicApiKey || current?.anthropicApiKey || "", deepgramApiKey:input.deepgramApiKey || current?.deepgramApiKey || "", claudeModel:input.claudeModel || current?.claudeModel || "claude-opus-5" });
       return json(res,200,{ok:true},origin);
     }
     if (req.url === "/api/claude/extract-notice" && req.method === "POST") {
       const config=loadSecrets(); if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings first."},origin);
       const input=await body(req); const document=contentBlock(input.file); const supportingDocuments=(input.supportingFiles||[]).slice(0,10).map((file,index)=>[{type:"text",text:`Supporting document ${index+1}: ${file.name}. Use this only to confirm spellings, proper names, firms, locations, and specialized terminology. Do not override conflicting deposition facts from the Notice.`},contentBlock(file)]).flat();
       const tool=extractionTool;
+      // Effort controls are optional and model-specific. The configured model is administrator
+      // selectable, so attaching one unconditionally makes an otherwise valid model reject the
+      // entire extraction request. Use the model's supported default unless compatibility has
+      // been established for that exact model and API version.
       const response=await fetchExternal("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":config.anthropicApiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:config.claudeModel,max_tokens:8192,system:terminologyPrompt+"\n\nCompatibility requirement: In the same extraction, populate the setup object for the Depo-Pro setup screen. The Notice controls setup facts when sources conflict.",tools:[tool],tool_choice:{type:"tool",name:"extract_deposition_intake"},messages:[{role:"user",content:[{type:"text",text:"The first document is the authoritative Notice of Deposition. Supporting documents follow."},document,...supportingDocuments]}]})},{label:"Claude document analysis",attempts:2,timeoutMs:Number(process.env.CLAUDE_TIMEOUT_MS)||5*60*1000});
       const result=await response.json(); if(!response.ok) return json(res,response.status,{error:result?.error?.message || "Claude request failed."},origin);
       const toolUse=result.content?.find((item)=>item.type==="tool_use"&&item.name==="extract_deposition_intake"); if(!toolUse) throw new Error("Claude did not return structured intake data.");
@@ -477,10 +516,16 @@ const server = http.createServer(async (req,res) => {
       data.deepgram_keyterms.estimated_tokens=estimatedTokens;
       data.deepgram_keyterms.budget={token_ceiling:500,working_target:KEYTERM_TOKEN_BUDGET,quality_target_range:[20,KEYTERM_PRODUCT_CAP],product_cap:KEYTERM_PRODUCT_CAP};
       data.ufm_registry.entry_count=(data.ufm_registry.entries||[]).length;
-      const deepgramArtifact={case_id:data.case_id,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",...data.deepgram_keyterms};
-      const ufmData={case_id:data.case_id,cause_number:data.setup.causeNumber,case_style:data.setup.caseStyle,deponent:data.setup.witness,deposition_date:data.setup.depositionDate,generated_from:data.generated_from,prompt_version:"case_terms/v2",caption:data.caption,speaker_map:data.speaker_map,collisions:data.collisions,entries:data.ufm_registry.entries,entry_count:data.ufm_registry.entry_count,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
+      // One extraction authority. Deepgram and UFM are projections of this record, not sibling
+      // files that can disagree with the deposition setup or with each other.
+      const masterData=masterDataFromExtraction(data,{sourceDocument:input.file?.name??null});
+      const deepgramArtifact=projectDeepgramKeyterms(masterData);
+      const ufmProjection=projectTexasFreelanceUfm(masterData);
+      // ufmData remains response-only during the UI migration. New intake persistence stores
+      // masterData and derives this projection when needed; it is not a second authority.
+      const ufmData={...ufmProjection.fields,caption:data.caption,logistics:data.logistics,anomalies:data.anomalies,extraction_report:data.extraction_report};
       const anomalyWarnings=(data.anomalies||[]).map((item)=>`Review flag: ${item.detail||item.type||"Document anomaly"}${item.action?` — ${item.action}`:""}`);
-      return json(res,200,{...data.setup,keyterms:wire,deepgramArtifact,ufmData,warnings:[...(data.setup.warnings||[]),...(data.extraction_report.low_confidence_spellings||[]).map((term)=>`Low-confidence spelling: ${term}`),...anomalyWarnings],confidence:data.setup.confidence},origin);
+      return json(res,200,{...data.setup,keyterms:deepgramArtifact.wire,masterData,deepgramArtifact,ufmData,warnings:[...(data.setup.warnings||[]),...(data.extraction_report.low_confidence_spellings||[]).map((term)=>`Low-confidence spelling: ${term}`),...anomalyWarnings],confidence:data.setup.confidence},origin);
     }
     if (req.url === "/api/admin/test-keys" && req.method === "POST") {
       const config=loadSecrets();

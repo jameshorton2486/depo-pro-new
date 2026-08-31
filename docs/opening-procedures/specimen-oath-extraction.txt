@@ -1,0 +1,637 @@
+SPECIMEN OATH EXTRACTION
+Sources: .docx word/document.xml, tags stripped, whitespace collapsed, no normalisation.
+Cited by findings F-12 through F-17.
+REGENERATED 2026-08-29. The 2026-08-29 original was removed from Downloads before this run.
+Verification of this regeneration against the findings is in PART 4.
+====================================================================================================
+
+
+****************************************************************************************************
+PART 1 - THE THREE CANONICAL SPECIMENS
+****************************************************************************************************
+
+####################################################################################################
+CANONICAL
+  file: Baier_Jennifer_Deposition_2026-05-04.docx
+  chars: 48624
+
+  [OATH_COLLOQUY] offset 1046
+    raise your right hand, ma'am? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1161
+    MS. BAIER: Yes, ma'am.
+
+  [SETUP_LINE] offset 1305
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1345
+    EXAMINATION
+
+  [STIPULATION] offset 604
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you're currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+CANONICAL
+  file: Etminan_Mohammad_Deposition_2026-04-24.docx
+  chars: 72629
+
+  [OATH_COLLOQUY] offset 1215
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1328
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 1456
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1496
+    EXAMINATION
+
+  [STIPULATION] offset 708
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+CANONICAL
+  file: Thomas_Heath_Deposition_2026-04-30.docx
+  chars: 74521
+
+  [OATH_COLLOQUY] offset 1193
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 1564
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1604
+    EXAMINATION
+
+  [STIPULATION] offset 656
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+
+****************************************************************************************************
+PART 2 - WORD-FOR-WORD COMPARISON OF THE OATH SENTENCE
+****************************************************************************************************
+
+Distinct oath sentences across 21 files: 2
+
+--- VARIANT 1 (17 file(s)) ---
+Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+      Baier_Jennifer_Deposition_2026-05-04 (1).docx
+      Baier_Jennifer_Deposition_2026-05-04.docx <-- CANONICAL
+      Dr. Etminan.docx
+      Dr_Etminan_Transcript (1).docx
+      Dr_Etminan_Transcript.docx
+      Dr_Etminan_TranscriptFullTrans.docx
+      Dr_Etminan_Transcripttest.docx
+      Etminan_Mohammad_Deposition_2026-04-24 (1).docx
+      Etminan_Mohammad_Deposition_2026-04-24 (2).docx
+      Etminan_Mohammad_Deposition_2026-04-24.docx <-- CANONICAL
+      Etminan_Test_Formatted_04-24-2026 (1).docx
+      Etminan_Test_Formatted_04-24-2026.docx
+      Thomas_Deposition_04-30-2026.docx
+      Thomas_Heath_Deposition_2026-04-30 (1).docx
+      Thomas_Heath_Deposition_2026-04-30 (2).docx
+      Thomas_Heath_Deposition_2026-04-30.docx <-- CANONICAL
+      heath_thomas_deposition.docx
+
+--- VARIANT 2 (2 file(s)) ---
+Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth so help you God?
+      Heath_Thomas_Current_DEPO_PRO_Export.docx
+      Thomas_Deposition_Thursday April 30 2026.docx
+
+
+****************************************************************************************************
+PART 3 - ALL OTHER COPIES
+****************************************************************************************************
+
+####################################################################################################
+NON-CANONICAL
+  file: Baier_Jennifer_Deposition_2026-05-04 (1).docx
+  chars: 48622
+
+  [OATH_COLLOQUY] offset 1045
+    raise your right hand, ma'am? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1160
+    MS. BAIER: Yes, ma'am.
+
+  [SETUP_LINE] offset 1304
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1344
+    EXAMINATION
+
+  [STIPULATION] offset 603
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you're currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Dr. Etminan.docx
+  chars: 73246
+
+  [OATH_COLLOQUY] offset 1237
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1351
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 1484
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1524
+    EXAMINATION
+
+  [STIPULATION] offset 717
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Dr_Etminan_Transcript (1).docx
+  chars: 80439
+
+  [OATH_COLLOQUY] offset 3229
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 3342
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 3470
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 3510
+    EXAMINATION
+
+  [STIPULATION] offset 2722
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] offset 78140
+    That the witness, MOHAMMAD ETMINAN, M.D., was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Dr_Etminan_Transcript.docx
+  chars: 78005
+
+  [OATH_COLLOQUY] offset 1223
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1336
+    THE WITNESS: I do.
+
+  [SETUP_LINE] offset 1541
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1581
+    EXAMINATION
+
+  [STIPULATION] offset 716
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] offset 1441
+    (The witness was sworn.)
+
+  [CERT_LINE] offset 75706
+    That the witness, MOHAMMAD ETMINAN, M.D., was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Dr_Etminan_TranscriptFullTrans.docx
+  chars: 80422
+
+  [OATH_COLLOQUY] offset 3221
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 3334
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 3462
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 3502
+    EXAMINATION
+
+  [STIPULATION] offset 2714
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] offset 78123
+    That the witness, MOHAMMAD ETMINAN, M.D., was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Dr_Etminan_Transcripttest.docx
+  chars: 78001
+
+  [OATH_COLLOQUY] offset 1223
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1336
+    THE WITNESS: I do.
+
+  [SETUP_LINE] offset 1541
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1581
+    EXAMINATION
+
+  [STIPULATION] offset 716
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] offset 1441
+    (The witness was sworn.)
+
+  [CERT_LINE] offset 75702
+    That the witness, MOHAMMAD ETMINAN, M.D., was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Etminan_Deposition_Transcript_UFM.docx
+  chars: 16343
+
+  [OATH_COLLOQUY] -- ABSENT --
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 1539
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1579
+    EXAMINATION
+
+  [STIPULATION] -- ABSENT --
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] offset 15112
+    That the witness, MOHAMMAD ETMINAN, M.D., was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Etminan_Mohammad_Deposition_2026-04-24 (1).docx
+  chars: 72630
+
+  [OATH_COLLOQUY] offset 1216
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1329
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 1457
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1497
+    EXAMINATION
+
+  [STIPULATION] offset 709
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Etminan_Mohammad_Deposition_2026-04-24 (2).docx
+  chars: 72629
+
+  [OATH_COLLOQUY] offset 1215
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 1328
+    MR. ETMINAN: I do.
+
+  [SETUP_LINE] offset 1456
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1496
+    EXAMINATION
+
+  [STIPULATION] offset 708
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, and the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Etminan_Test_Formatted_04-24-2026 (1).docx
+  chars: 17355
+
+  [OATH_COLLOQUY] offset 2054
+    raise your right hand, sir? THE REPORTER: Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 2183
+    THE WITNESS: I do.
+
+  [SETUP_LINE] -- ABSENT --
+
+  [EXAM_HEADING] -- ABSENT --
+
+  [STIPULATION] offset 1541
+    state your agreement for this remote deposition and remote swearing of the witness by saying your name, who you are representing, and the name of the city you are currently in, beginning with the noticing attorney.
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Etminan_Test_Formatted_04-24-2026.docx
+  chars: 17355
+
+  [OATH_COLLOQUY] offset 2054
+    raise your right hand, sir? THE REPORTER: Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 2183
+    THE WITNESS: I do.
+
+  [SETUP_LINE] -- ABSENT --
+
+  [EXAM_HEADING] -- ABSENT --
+
+  [STIPULATION] offset 1541
+    state your agreement for this remote deposition and remote swearing of the witness by saying your name, who you are representing, and the name of the city you are currently in, beginning with the noticing attorney.
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Heath_Thomas_Current_DEPO_PRO_Export.docx
+  chars: 96309
+
+  [OATH_COLLOQUY] offset 2788
+    raise your right hand, sir? SPEAKER 0:Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth so help you God?
+
+  [OATH_RESPONSE] offset 2910
+    SPEAKER 0:I'm sorry, sir. I didn't hear you.
+
+  [SETUP_LINE] -- ABSENT --
+
+  [EXAM_HEADING] -- ABSENT --
+
+  [STIPULATION] offset 2241
+    state your agreement for this remote deposition and remote swearing witness by stating your name, who you're representing, the name of the city you're currently in beginning with the notice of an attorney.
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Thomas_Deposition_04-30-2026.docx
+  chars: 31361
+
+  [OATH_COLLOQUY] offset 2026
+    raise your right hand, sir? THE REPORTER: Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] offset 2155
+    THE WITNESS: I do.
+
+  [SETUP_LINE] -- ABSENT --
+
+  [EXAM_HEADING] -- ABSENT --
+
+  [STIPULATION] offset 1528
+    state your agreement for this remote deposition and remote swearing of the witness by stating your name, who you are representing, and the name of the city you are currently in, beginning with the noticing attorney.
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Thomas_Deposition_2026-04-30_partial.docx
+  chars: 17037
+
+  [OATH_COLLOQUY] -- ABSENT --
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 2888
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 2928
+    DIRECT EXAMINATION
+
+  [STIPULATION] -- ABSENT --
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Thomas_Deposition_Thursday April 30 2026.docx
+  chars: 41085
+
+  [OATH_COLLOQUY] offset 3091
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth so help you God?
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 483
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 523
+    EXAMINATION
+
+  [STIPULATION] offset 2451
+    state your agreement for this remote deposition and remote swearing of witness by stating your name, who you're representing, the name of the city you are currently in, beginning with the noticing attorney.
+
+  [PARENTHETICAL] offset 3416
+    (The witness was sworn.)
+
+  [CERT_LINE] offset 39731
+    That the witness, Heath Thomas, was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Thomas_Heath_Deposition_2026-04-30 (1).docx
+  chars: 73722
+
+  [OATH_COLLOQUY] offset 1193
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 1564
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1604
+    EXAMINATION
+
+  [STIPULATION] offset 656
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: Thomas_Heath_Deposition_2026-04-30 (2).docx
+  chars: 73722
+
+  [OATH_COLLOQUY] offset 1193
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 1564
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 1604
+    EXAMINATION
+
+  [STIPULATION] offset 656
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] -- ABSENT --
+
+  [AFFIRM_WORD] -- ABSENT --
+
+####################################################################################################
+NON-CANONICAL
+  file: heath_thomas_deposition.docx
+  chars: 80774
+
+  [OATH_COLLOQUY] offset 3003
+    raise your right hand, sir? Do you solemnly swear to tell the truth, the whole truth, and nothing but the truth, so help you God?
+
+  [OATH_RESPONSE] -- ABSENT --
+
+  [SETUP_LINE] offset 3374
+    having been first duly sworn, testified as follows:
+
+  [EXAM_HEADING] offset 3414
+    EXAMINATION
+
+  [STIPULATION] offset 2466
+    state your agreement for this remote deposition and the remote swearing of the witness by stating your name, who you're representing, the name of the city you are currently in, beginning with the noticing attorney?
+
+  [PARENTHETICAL] -- ABSENT --
+
+  [CERT_LINE] offset 78542
+    That the witness, HEATH THOMAS, was duly sworn by the officer and that the transcript of the oral deposition is a true record of the testimony given by the witness;
+
+  [AFFIRM_WORD] -- ABSENT --
+
+
+****************************************************************************************************
+PART 4 - VERIFICATION OF THIS REGENERATION
+****************************************************************************************************
+
+STRING MATCH -- do the exact strings recorded in F-12 through F-17 still appear?
+A failure here means a finding is now wrong.
+
+  [PASS] F-12 oath string identical in all three canonical               
+  [PASS] F-12 17 of 21 files carry the canonical oath                    
+  [PASS] F-12 preamble 'raise your right hand, ma'am?' in Baier          
+  [PASS] F-12 preamble 'raise your right hand, sir?' in Etminan+Thomas   
+  [PASS] F-12 response 'MR. ETMINAN: I do.'                              
+  [PASS] F-12 response 'MS. BAIER: Yes, ma'am.'                          
+  [PASS] F-13 comma-dropped variant in exactly 2 files                   
+  [PASS] F-13 both variant files are the two named                       
+  [PASS] F-13 ASR export carries 'SPEAKER 0:' inline                     
+  [PASS] F-13 ASR export has no setup line                               
+  [PASS] F-14 stipulation variant in Baier                               
+  [PASS] F-14 stipulation variant in Etminan                             
+  [PASS] F-14 stipulation variant in Thomas                              
+  [PASS] F-14 the three stipulation variants are distinct                
+  [PASS] F-15 parenthetical present in the 3 named non-canonical files   
+  [PASS] F-15 parenthetical absent from all three canonical              
+  [PASS] F-16 certificate line in exactly 7 files                        
+  [PASS] F-16 certificate line in no canonical file                      
+  [PASS] F-16 UFM export has cert line and setup line but no colloquy    
+  [PASS] F-17 'affirm' absent from all 21 files                          
+
+  string match: 20/20
+
+OFFSET DRIFT -- do they appear at the same byte offsets as the 2026-08-29 original?
+A failure here means a source .docx was touched. Findings text may still hold; the offsets
+printed above no longer address the same bytes the original addressed.
+
+  Baier_Jennifer_Deposition_2026-05-04.docx      OATH_COLLOQUY  baseline  1046  now  1046  same
+  Baier_Jennifer_Deposition_2026-05-04.docx      OATH_RESPONSE  baseline  1161  now  1161  same
+  Baier_Jennifer_Deposition_2026-05-04.docx      SETUP_LINE     baseline  1305  now  1305  same
+  Baier_Jennifer_Deposition_2026-05-04.docx      EXAM_HEADING   baseline  1345  now  1345  same
+  Baier_Jennifer_Deposition_2026-05-04.docx      STIPULATION    baseline   604  now   604  same
+  Etminan_Mohammad_Deposition_2026-04-24.docx    OATH_COLLOQUY  baseline  1215  now  1215  same
+  Etminan_Mohammad_Deposition_2026-04-24.docx    OATH_RESPONSE  baseline  1328  now  1328  same
+  Etminan_Mohammad_Deposition_2026-04-24.docx    SETUP_LINE     baseline  1456  now  1456  same
+  Etminan_Mohammad_Deposition_2026-04-24.docx    EXAM_HEADING   baseline  1496  now  1496  same
+  Etminan_Mohammad_Deposition_2026-04-24.docx    STIPULATION    baseline   708  now   708  same
+  Thomas_Heath_Deposition_2026-04-30.docx        OATH_COLLOQUY  baseline  1193  now  1193  same
+  Thomas_Heath_Deposition_2026-04-30.docx        SETUP_LINE     baseline  1564  now  1564  same
+  Thomas_Heath_Deposition_2026-04-30.docx        EXAM_HEADING   baseline  1604  now  1604  same
+  Thomas_Heath_Deposition_2026-04-30.docx        STIPULATION    baseline   656  now   656  same
+
+  offsets unchanged: 14/14

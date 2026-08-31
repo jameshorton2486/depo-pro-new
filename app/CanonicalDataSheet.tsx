@@ -1,44 +1,44 @@
 "use client";
 
-import { logisticsFields } from "./intake-logistics.mjs";
+type Cell={value?:unknown;status?:string;sourceType?:string|null;sourceDocument?:string|null;citation?:string|null;confidence?:string|null};
+type RecordValue=Record<string,unknown>;
+const object=(value:unknown):RecordValue=>value&&typeof value==="object"&&!Array.isArray(value)?value as RecordValue:{};
+const cell=(value:unknown):Cell=>object(value) as Cell;
+const text=(value:unknown)=>typeof value==="string"?value:"";
+const display=(value:unknown)=>Array.isArray(value)?value.join(", "):typeof value==="boolean"?(value?"Yes":"No"):text(value)||"—";
+function Source({value}:{value:Cell}){return <><span className={`field-state ${(value.status||"missing").toLowerCase()}`}>{value.status||"MISSING"}</span><small>{[value.sourceType,value.sourceDocument,value.citation,value.confidence].filter(Boolean).join(" · ")||"No provenance recorded"}</small></>}
+function Row({label,value,children}:{label:string;value:Cell;children?:React.ReactNode}){return <tr><th scope="row">{label}</th><td>{children??display(value.value)}</td><td><Source value={value}/></td></tr>}
+// Three answers, because there are three. A checkbox can only say yes or not-yes, and not-yes was
+// being recorded as "no" -- so a question nobody had answered came out as a stated fact.
+function TriState({name,value}:{name:string;value:Cell}){return <select name={name} defaultValue={value.value===true?"true":value.value===false?"false":""}><option value="">Not stated</option><option value="true">Yes</option><option value="false">No</option></select>}
 
-const futureSections=[
-  ["Counsel & appearances","Attorney attendance and remote participation are confirmed at the deposition."],
-  ["Interpreter, videographer & others","Actual participants and interpreter language are confirmed during the proceeding."],
-  ["Examinations & indexes","Examinations, page references, requested information, and certified questions are transcript-derived."],
-  ["Exhibits","Offering party, marked/admitted status, page, volume, disposition, and custody are transcript-derived and reporter-confirmed."],
-  ["Signature & errata","Signature status, return deadlines, and changes are established during and after the deposition."],
-  ["Certification","Custodial attorney, time used, charges, service, filing, and the Rule 203 variant are completed after the deposition."],
-];
-
-function object(value:unknown):Record<string,unknown>{return value&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:{}}
-function text(value:unknown){return typeof value==="string"?value:""}
-export default function CanonicalDataSheet({seed}:{seed?:Record<string,unknown>}){
-  // Mapped, not read raw: the form's key names and the extractor's are different vocabularies,
-  // and reading `logistics.platform` when the extractor writes `remote_platform` is why a Notice
-  // that stated all of this produced a blank screen. See intake-logistics.mjs for what is
-  // deliberately not mapped -- remote, videotaped and time_zone have no extractor counterpart and
-  // stay MISSING rather than being inferred from prose.
-  const mapped=logisticsFields(seed),caption=object(seed?.caption);
+export default function CanonicalDataSheet({seed}:{seed?:RecordValue}){
+  const master=object(seed),caseData=object(master.case),deposition=object(master.deposition),parties=Array.isArray(master.parties)?master.parties.map(object):[],counsel=Array.isArray(master.counsel)?master.counsel.map(object):[],terminology=Array.isArray(master.terminology)?master.terminology.map(object):[];
   return <section className="canonical-data-sheet">
-    <header><div><span className="eyebrow">CANONICAL DEPOSITION DATA RECORD</span><h3>Reporter Data Sheet</h3></div><span className="data-sheet-phase">Before deposition</span></header>
-    <p>Review extracted fields now. Items marked incomplete are intentionally supplied by the reporter, transcript, or workflow later.</p>
-    <details open><summary>Case and court <span className="field-state extracted">Extracted</span></summary><div className="data-sheet-grid">
-      <label>Court<input name="canonicalCourt" defaultValue={text(seed?.court)||text(caption.court)}/></label>
-      <label>District<input name="canonicalDistrict" defaultValue={text(caption.district)}/></label>
-      <label>Division<input name="canonicalDivision" defaultValue={text(caption.division)}/></label>
-      <label>County<input name="canonicalCounty" defaultValue={text(caption.county)}/></label>
-    </div></details>
-    <details open><summary>Deposition method and schedule <span className="field-state review">Review</span></summary><div className="data-sheet-grid">
-      <label>Scheduled start<input name="canonicalScheduledStart" type="time" defaultValue={mapped.scheduledStart??""}/></label>
-      <label>Time zone<input name="canonicalTimeZone" defaultValue={text(seed?.timeZone)}/></label>
-      <label>Location<input name="canonicalLocation" defaultValue={mapped.location??""}/></label>
-      <label>Remote platform<input name="canonicalRemotePlatform" defaultValue={mapped.remotePlatform??""} placeholder="Zoom, Teams, etc."/></label>
-      <label className="data-sheet-check"><input name="canonicalRemote" type="checkbox" /> Remote</label>
-      <label className="data-sheet-check"><input name="canonicalVideotaped" type="checkbox" /> Videotaped</label>
-      <label className="data-sheet-check"><input name="canonicalInterpreted" type="checkbox" /> Interpreted</label>
-      <label className="data-sheet-check"><input name="canonicalCorporateRepresentative" type="checkbox"/> Corporate representative</label>
-    </div></details>
-    {futureSections.map(([title,note])=><details key={title}><summary>{title} <span className="field-state missing">Incomplete</span></summary><p>{note}</p></details>)}
+    <header><div><span className="eyebrow">MASTER DEPOSITION DATA RECORD</span><h3>Reporter Data Sheet</h3></div><span className="data-sheet-phase">One record · three projections</span></header>
+    <p>Review and correct the document extraction here. Your changes are saved when you choose Save and Create Deposition below; the saved record supplies setup, the applicable template workflow, and Deepgram terminology.</p>
+    <details open><summary>Case and court</summary><table className="master-data-table"><thead><tr><th>Field</th><th>Value</th><th>Evidence</th></tr></thead><tbody>
+      <Row label="Case style" value={cell(caseData.caseStyle)}/><Row label="Cause number" value={cell(caseData.causeNumber)}/>
+      <Row label="Court" value={cell(caseData.court)}><input name="canonicalCourt" defaultValue={text(cell(caseData.court).value)}/></Row>
+      <Row label="District" value={cell(caseData.district)}><input name="canonicalDistrict" defaultValue={text(cell(caseData.district).value)}/></Row>
+      <Row label="Division" value={cell(caseData.division)}><input name="canonicalDivision" defaultValue={text(cell(caseData.division).value)}/></Row>
+      <Row label="County" value={cell(caseData.county)}><input name="canonicalCounty" defaultValue={text(cell(caseData.county).value)}/></Row>
+      <Row label="Judicial district" value={cell(caseData.judicialDistrict)}/>
+    </tbody></table></details>
+    <details open><summary>Proceeding</summary><table className="master-data-table"><thead><tr><th>Field</th><th>Value</th><th>Evidence</th></tr></thead><tbody>
+      <Row label="Witness" value={cell(deposition.witness)}/><Row label="Type of proceeding" value={cell(deposition.proceedingType)}/><Row label="Scheduled date" value={cell(deposition.scheduledDate)}/>
+      <Row label="Scheduled time" value={cell(deposition.scheduledStart)}><input name="canonicalScheduledStart" type="time" defaultValue={text(cell(deposition.scheduledStart).value)}/></Row>
+      <Row label="Time zone" value={cell(deposition.timeZone)}><input name="canonicalTimeZone" defaultValue={text(cell(deposition.timeZone).value)}/></Row>
+      <Row label="Location" value={cell(deposition.location)}><input name="canonicalLocation" defaultValue={typeof cell(deposition.location).value==="string"?text(cell(deposition.location).value):""}/></Row>
+      <Row label="Remote platform" value={cell(deposition.remotePlatform)}><input name="canonicalRemotePlatform" defaultValue={text(cell(deposition.remotePlatform).value)}/></Row>
+      <Row label="Remote" value={cell(deposition.remote)}><TriState name="canonicalRemote" value={cell(deposition.remote)}/></Row>
+      <Row label="Videotaped" value={cell(deposition.videotaped)}><TriState name="canonicalVideotaped" value={cell(deposition.videotaped)}/></Row>
+      <Row label="Interpreted" value={cell(deposition.interpreted)}><TriState name="canonicalInterpreted" value={cell(deposition.interpreted)}/></Row>
+      <Row label="Corporate representative" value={cell(deposition.corporateRepresentative)}><TriState name="canonicalCorporateRepresentative" value={cell(deposition.corporateRepresentative)}/></Row>
+    </tbody></table></details>
+    <details open><summary>Parties ({parties.length})</summary>{parties.length?<table className="master-data-table"><thead><tr><th>Name</th><th>Role</th><th>Evidence</th></tr></thead><tbody>{parties.map((party,index)=><tr key={String(party.id??index)}><th>{display(cell(party.name).value)}</th><td>{display(cell(party.role).value)}</td><td><Source value={cell(party.name)}/></td></tr>)}</tbody></table>:<p>No party records were extracted.</p>}</details>
+    <details open><summary>Known counsel ({counsel.length})</summary>{counsel.length?<table className="master-data-table"><thead><tr><th>Name</th><th>Represents</th><th>Evidence</th></tr></thead><tbody>{counsel.map((attorney,index)=><tr key={String(attorney.id??index)}><th>{display(cell(attorney.fullName).value)}</th><td>{display(cell(attorney.represents).value)}</td><td><Source value={cell(attorney.fullName)}/></td></tr>)}</tbody></table>:<p>No counsel records were extracted.</p>}</details>
+    <details open><summary>Terminology ({terminology.length})</summary><p>One vocabulary table supplies Deepgram and the template workflow. Correct a spelling or exclude a term before saving the deposition.</p>{terminology.length?<table className="master-data-table master-terminology-table"><thead><tr><th>Canonical term</th><th>Category</th><th>Send to Deepgram</th><th>Source</th></tr></thead><tbody>{terminology.map((term,index)=><tr key={`${String(term.canonical)}:${index}`}><th><label className="visually-hidden" htmlFor={`canonical-term-${index}`}>Canonical spelling for {String(term.canonical??`term ${index+1}`)}</label><input id={`canonical-term-${index}`} name={`canonicalTerm:${index}`} defaultValue={text(term.canonical)}/></th><td>{display(term.category)}</td><td><label className="visually-hidden" htmlFor={`canonical-term-eligible-${index}`}>Send {String(term.canonical??`term ${index+1}`)} to Deepgram</label><select id={`canonical-term-eligible-${index}`} name={`canonicalTermEligible:${index}`} defaultValue={term.deepgramEligible===false?"false":"true"}><option value="true">Yes</option><option value="false">No</option></select></td><td>{display(term.source)}</td></tr>)}</tbody></table>:<p>No terminology was extracted.</p>}</details>
+    <details><summary>Later-stage UFM fields</summary><p>Actual appearances, recording method, witness oath, examinations, exhibits, signature/errata, pagination, and certification remain unresolved until their authoritative stage.</p></details>
   </section>
 }

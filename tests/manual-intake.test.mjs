@@ -103,8 +103,8 @@ test("a manually entered deposition carries REPORTER_ENTERED, never NOD_EXTRACTE
 });
 
 test("manual intake supplies no ufmData, which is what keeps the record from citing a Notice", () => {
-  // extractedFieldKeys reads ufmData to decide which keys an extraction produced. A manual
-  // intake that populated it would let sourceFor return NOD_EXTRACTED for typed values.
+  // A legacy sibling of masterData, kept for consumers that have not moved. Provenance no longer
+  // comes from it, but a manual route that populated it would still mislead anything reading it.
   assert.deepEqual(manualIntakeAnalysis(entered()).ufmData, {});
 });
 

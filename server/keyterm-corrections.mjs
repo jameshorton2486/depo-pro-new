@@ -9,6 +9,7 @@
 // test suite imports it to check the transform, so both are looking at the same function
 // rather than at two implementations that agree until they don't.
 import { KEYTERM_API_LIMIT, KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
+import { projectDeepgramKeyterms } from "./master-deposition-data.mjs";
 
 const text = value => String(value ?? "").trim();
 const foldCase = value => text(value).toLocaleLowerCase("en-US");
@@ -35,6 +36,10 @@ export function buildTermRows(intake) {
     seen.add(key);
     rows.push({ term:value, source, flag:flags.get(foldCase(value)) || null, correction:"" });
   };
+  if(intake?.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD"){
+    for(const entry of intake.masterData.terminology||[])push(entry?.canonical,entry?.deepgramEligible===false?"ufm":"keyterm");
+    return rows.sort((a, b) => Number(Boolean(b.flag)) - Number(Boolean(a.flag)));
+  }
   const wire = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
   for (const term of Array.isArray(wire) ? wire : []) push(term, "keyterm");
   for (const entry of intake?.ufmData?.ufm_registry?.entries || intake?.ufmData?.entries || []) push(entry?.term ?? entry?.surface ?? entry, "ufm");
@@ -62,7 +67,8 @@ export function applyTermCorrections(intake, rows) {
 
   const wire = [];
   const byFold = new Map();
-  const source = Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms;
+  const masterMode=intake?.masterData?.recordType==="MASTER_DEPOSITION_DATA_RECORD";
+  const source = masterMode ? projectDeepgramKeyterms(intake.masterData).wire : (Array.isArray(intake?.deepgramArtifact?.wire) ? intake.deepgramArtifact.wire : intake?.keyterms);
   const correctionFor = new Map(corrections.filter(item => item.source === "keyterm").map(item => [foldCase(item.original), item.corrected]));
   for (const value of Array.isArray(source) ? source : []) {
     const original = text(value);
@@ -97,6 +103,14 @@ export function applyTermCorrections(intake, rows) {
     return corrected ? { ...item, term:corrected, extractedTerm:item.extractedTerm ?? item.term } : item;
   });
 
+  if(masterMode){
+    const allCorrections=new Map(corrections.map(item=>[foldCase(item.original),item.corrected]));
+    const terminology=(intake.masterData.terminology||[]).map(entry=>{const corrected=allCorrections.get(foldCase(entry?.canonical));return corrected?{...entry,canonical:corrected,extractedTerm:entry.extractedTerm??entry.canonical}:entry});
+    const next={...intake,masterData:{...intake.masterData,terminology}};
+    const projection=projectDeepgramKeyterms(next.masterData);
+    if(corrections.length)next.reporterTermCorrections=[...(intake?.reporterTermCorrections||[]),...corrections];
+    return {ok:true,problems:[],wire:projection.wire,estimatedTokens:projection.estimated_tokens,corrections,intake:next};
+  }
   const next = {
     ...intake,
     keyterms:wire,

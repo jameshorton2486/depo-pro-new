@@ -12,12 +12,13 @@ import OpeningProceduresScreen from "./OpeningProceduresScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
+import { normalizeCauseNumber } from "../server/cause-number.mjs";
 import { formatDisplayDate } from "./date-format.mjs";
 import type { DepositionCreationMode } from "./intake-types";
 import { apiJson, LOCAL_API_BASE_URL as API, postJson } from "./api-client";
 import { RECOVERED_WORKSPACE_RESTORED, resolveRecoveredWorkspace } from "./workspace-recovery.mjs";
-import { extractedFieldKeys } from "./extracted-fields.mjs";
 import { DEPONENT_TYPES, deponentTypeOption, logisticsFields, parseNoticeDate } from "./intake-logistics.mjs";
+import { reviewedMasterData, triState } from "./master-data-review.mjs";
 
 type Deposition = {
   id: string;
@@ -175,30 +176,30 @@ export default function Home() {
     if(!intakeDraft)return;
     const data = new FormData(event.currentTarget);
     const reporter = reporters.find((item) => item.id === selectedReporterId);
+    const masterData=reviewedMasterData(intakeDraft.masterData,data);
     const item: Deposition = {
       id: makeId(),
       caseStyle: String(data.get("caseStyle")),
       witness: String(data.get("witness")),
-      causeNumber: String(data.get("causeNumber")),
+      causeNumber: normalizeCauseNumber(data.get("causeNumber")),
       deponentType: String(data.get("deponentType")),
       depositionDate: String(data.get("depositionDate")),
       courtReporterId: reporter?.id ?? "",
       courtReporterName: reporter?.name ?? "",
       reporterProfile: reporter ?? undefined,
+      // Values only. `extractedFields` used to be computed here as well, from a second copy of the
+      // extraction, and it won -- it is spread after the master record's own list in
+      // createDeposition. Two lists that could disagree about what the document said is one list too
+      // many, so this one is gone and canonicalInputFromMaster is the single authority.
       canonicalSeed: {
-        ...(intakeDraft?.ufmData||{}),
-        // The keys the extraction genuinely produced. Everything else on this form was typed,
-        // defaulted, or hardcoded, and must not be attributed to the Notice.
-        extractedFields: extractedFieldKeys(intakeDraft?.ufmData, data),
         court:String(data.get("canonicalCourt")||""),district:String(data.get("canonicalDistrict")||""),division:String(data.get("canonicalDivision")||""),county:String(data.get("canonicalCounty")||""),
         scheduledStart:String(data.get("canonicalScheduledStart")||""),timeZone:String(data.get("canonicalTimeZone")||""),location:String(data.get("canonicalLocation")||""),remotePlatform:String(data.get("canonicalRemotePlatform")||""),
-        // An unchecked box is absent from FormData, so `=== "on"` turned "nobody answered" into
-        // "no" before the server could tell them apart, and the record then stated the deposition
-        // was not remote with the Notice named as the source. `|| undefined` keeps absence absent;
-        // the envelope records it as MISSING. A reporter who means "not remote" cannot say so with
-        // a plain checkbox -- that needs a tri-state, and until it exists the honest answer is that
-        // the question is unanswered.
-        remote:data.get("canonicalRemote")==="on"||undefined,videotaped:data.get("canonicalVideotaped")==="on"||undefined,interpreted:data.get("canonicalInterpreted")==="on"||undefined,corporateRepresentative:data.get("canonicalCorporateRepresentative")==="on"||undefined,
+        // Absence and "no" are different answers. A checkbox could not tell them apart -- unchecked
+        // is simply missing from FormData, so `=== "on"` recorded "nobody answered" as "not remote"
+        // and named the Notice as the source for it. These are tri-state selects now: "" means the
+        // question is still unanswered and the cell stays MISSING.
+        remote:triState(data,"canonicalRemote"),videotaped:triState(data,"canonicalVideotaped"),
+        interpreted:triState(data,"canonicalInterpreted"),corporateRepresentative:triState(data,"canonicalCorporateRepresentative"),
       },
       intakeNotes: String(data.get("reporterNotes") || intakeDraft?.notes || ""),
       noticeName: intakeDraft?.notice?.name ?? "",
@@ -216,7 +217,7 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
     setCreating(true);setNotice("");
-    try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,deepgramArtifact:intakeDraft.deepgramArtifact,ufmData:{...intakeDraft.ufmData,cause_number:item.causeNumber},warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved);setShowLiveCapture(item.creationMode==="live")}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
+    try{const response=await fetch(`${API}/api/depositions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({deposition:{...item,masterData,warnings:intakeDraft.warnings},artifacts:{notice:await artifact(intakeDraft.notice),courtOrder:await artifact(intakeDraft.courtOrder),supportingFiles:await Promise.all(intakeDraft.supportingFiles.map(file=>artifact(file)))}})});const saved=await response.json();if(!response.ok)throw new Error(saved.error||"Could not create deposition.");setDepositions(current=>[saved,...current]);setShowModal(false);setIntakeDraft(null);setActive(saved);setShowLiveCapture(item.creationMode==="live")}catch(error){setNotice(error instanceof Error?error.message:"Could not create deposition.")}finally{setCreating(false)}
   }
 
 
@@ -358,15 +359,15 @@ export default function Home() {
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <button className="close-button" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
             <span className="eyebrow">NEW DEPOSITION</span><h2 id="modal-title">Set up the deposition</h2><p>Review the intake details, select the Court Reporter, and create the deposition workspace.</p>
-            <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Claude extraction ready for review</strong><small>{intakeDraft.keyterms.length} Deepgram keyterms and UFM data will be saved with this deposition.</small></div></div>}
+            <form onSubmit={createDeposition}>{intakeDraft && <div className="ai-review-banner"><span>AI</span><div><strong>Master deposition data ready for review</strong><small>One record will supply setup, the applicable template workflow, and {intakeDraft.keyterms.length} Deepgram terms.</small></div></div>}
               <label>Case style<input name="caseStyle" required defaultValue={intakeDraft?.caseStyle ?? ""} placeholder="e.g., Garza v. Home Depot U.S.A., Inc." /></label>
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={deponentTypeOption(intakeDraft?.deponentType) ?? ""}><option value="">Not stated</option>{DEPONENT_TYPES.map(option => <option key={option} value={option}>{option}</option>)}</select></label></div>
-              <label>Cause number <small>Confirm the extracted value or enter it manually</small><input name="causeNumber" required defaultValue={intakeDraft?.causeNumber ?? ""} placeholder="e.g., 25-CV-00598-OLG" /></label>
+              <label>Cause number <small>Letters are saved in uppercase</small><input name="causeNumber" required defaultValue={normalizeCauseNumber(intakeDraft?.causeNumber)} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.toLocaleUpperCase("en-US"); }} placeholder="e.g., 25-CV-00598-OLG" /></label>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={parseNoticeDate(intakeDraft?.depositionDate) ?? logisticsFields(intakeDraft?.ufmData).depositionDate ?? ""} /></label><label>Court Reporter <small>{reporters.length ? "Required for local filing" : "Required — no court reporter is saved on this computer yet. Add one below before creating the deposition."}</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
               <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
-              <CanonicalDataSheet seed={intakeDraft?.ufmData}/>
+              <CanonicalDataSheet seed={intakeDraft?.masterData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
-              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":intakeDraft?.creationMode==="live"?"Create and Continue to Recording Setup":"Create Deposition"}</button></div>
+              <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":intakeDraft?.creationMode==="live"?"Save, Create, and Continue to Recording Setup":"Save and Create Deposition"}</button></div>
             </form>
           </section>
         </div>

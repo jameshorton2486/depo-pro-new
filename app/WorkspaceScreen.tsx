@@ -82,6 +82,9 @@ type Operation = Record<string,unknown>;
 type Bucket = { key:string; jobIdentity:string; deepgramSpeaker:number; words:number; sample:string };
 type Audit = { uploadId:string; originalName:string; selectedSource:string };
 type Job = { jobId:string; uploadId:string; startedAt?:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
+type NameProposal = { wordId:string; proposedValue:string; confidenceScore:number; evidenceSource:string };
+type SpeakerSuggestion = { sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string|null; missingParticipantName:string|null; transcriptRole:string|null; confidence:number; evidence:string };
+type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; errors:string[] };
 export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
 const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
@@ -125,6 +128,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const player = useRef<HTMLAudioElement|null>(null);
   const playbackEnd = useRef<number|null>(null);
   const [playbackTime,setPlaybackTime]=useState<number|null>(null);
+  const [playbackError,setPlaybackError]=useState("");
+  const [correctionOpen,setCorrectionOpen]=useState(false);
+  const [correctionInstructions,setCorrectionInstructions]=useState("");
+  const [correcting,setCorrecting]=useState(false);
+  const [correctionResult,setCorrectionResult]=useState<CorrectionResult|null>(null);
+  const [selectedCorrections,setSelectedCorrections]=useState<Set<string>>(new Set());
 
   // A token rather than a callback, so the effect owns the fetch and every setState happens
   // inside the promise rather than in the effect body -- which also gives the cancellation the
@@ -299,8 +308,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // MULTI_VOLUME_UNSUPPORTED when it does not. Seeking anyway would play confident, wrong audio
   // against the right text -- the failure a reporter is least able to catch by reading.
   const multiVolume = useMemo(()=>(rendered?.findings ?? []).some(finding=>finding.code==="MULTI_VOLUME_UNSUPPORTED"),[rendered]);
-  const seek = useCallback((seconds:number|null)=>{ if(seconds===null||multiVolume||!player.current)return; player.current.currentTime=seconds; void player.current.play().catch(()=>{}); },[multiVolume]);
-  const playParagraph = useCallback((paragraph:Paragraph|null)=>{if(!paragraph||paragraph.start===null||multiVolume||!player.current)return;playbackEnd.current=null;player.current.currentTime=Math.max(0,paragraph.start-.5);void player.current.play().catch(()=>{})},[multiVolume]);
+  const playAt = useCallback(async(seconds:number|null)=>{
+    if(seconds===null||multiVolume){setPlaybackError(multiVolume?"Playback by transcript timestamp is unavailable for a multi-volume transcript.":"This transcript position has no audio timestamp.");return}
+    const audio=player.current;if(!audio||!playbackSource){setPlaybackError("No playable audio source is available. Prepare the playback copy if offered.");return}
+    setPlaybackError("");
+    try{audio.currentTime=Math.max(0,seconds);await audio.play()}catch(reason){setPlaybackError(reason instanceof Error?`Audio could not play: ${reason.message}`:"Audio could not play. Check the preserved source or prepare a playback copy.")}
+  },[multiVolume,playbackSource]);
+  // Keep the refusal at this public seek boundary as well as inside playAt. Besides documenting
+  // the invariant where timestamp clicks enter, this prevents a future playAt refactor from
+  // silently enabling index-zero audio against a multi-volume transcript.
+  const seek = useCallback((seconds:number|null)=>{if(multiVolume){setPlaybackError("Playback by transcript timestamp is unavailable for a multi-volume transcript.");return}void playAt(seconds)},[multiVolume,playAt]);
+  const playParagraph = useCallback((paragraph:Paragraph|null)=>{if(!paragraph)return;playbackEnd.current=null;void playAt(paragraph.start===null?null:Math.max(0,paragraph.start-.5))},[playAt]);
   // The functional form of setSelected is what keeps this stable: reading `selected` directly would
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.
@@ -378,6 +396,47 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     // than falling through to it, or the reporter could never clear an assignment.
     return { speakerIdentity: local?.speakerIdentity ?? saved?.speakerIdentity ?? "", transcriptRole: local?.transcriptRole ?? saved?.transcriptRole ?? "" };
   },[assignments,savedAssignment]);
+  const speakerOptions = useMemo(()=>buckets.map(bucket=>({key:bucket.key,label:`Speaker ${bucket.deepgramSpeaker}${buckets.some(other=>other.deepgramSpeaker===bucket.deepgramSpeaker&&other.key!==bucket.key)?` · job ${bucket.jobIdentity.slice(0,8)}`:""} · ${bucket.words} words`})),[buckets]);
+  const speakerAssignmentForCounsel = useCallback((counselId:string)=>buckets.find(bucket=>effectiveAssignment(bucket).speakerIdentity===counselId)?.key??"",[buckets,effectiveAssignment]);
+  const assignCounselSpeaker = useCallback((counselId:string,bucketKey:string,transcriptRole:string)=>{
+    setSavedNote("");
+    setAssignments(current=>{
+      const next={...current};
+      for(const bucket of buckets){
+        const saved=savedAssignment(bucket),local=current[bucket.key];
+        const effective={speakerIdentity:local?.speakerIdentity??saved?.speakerIdentity??"",transcriptRole:local?.transcriptRole??saved?.transcriptRole??""};
+        if(effective.speakerIdentity===counselId)next[bucket.key]={speakerIdentity:"",transcriptRole:""};
+      }
+      if(bucketKey)next[bucketKey]={speakerIdentity:counselId,transcriptRole};
+      return next;
+    });
+  },[buckets,savedAssignment]);
+
+  async function correctTranscript(){
+    setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setError("");
+    const request=(path:string)=>fetch(`${API}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,additionalInstructions:correctionInstructions})}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"The AI correction check failed.");return payload});
+    const [names,speakers]=await Promise.allSettled([request("/api/correction/entity-pass"),request("/api/transcript/speaker-suggestions")]);
+    const errors:string[]=[];
+    if(names.status==="rejected")errors.push(`Names: ${names.reason instanceof Error?names.reason.message:String(names.reason)}`);
+    if(speakers.status==="rejected")errors.push(`Speakers: ${speakers.reason instanceof Error?speakers.reason.message:String(speakers.reason)}`);
+    const result:CorrectionResult={names:names.status==="fulfilled"?names.value:null,speakers:speakers.status==="fulfilled"?speakers.value:null,errors};
+    setCorrectionResult(result);setSelectedCorrections(new Set(result.names?.accepted.map(item=>item.wordId)??[]));setCorrecting(false);
+  }
+  function proposalOriginal(proposal:NameProposal){for(const paragraph of rendered?.paragraphs??[]){const word=paragraph.words.find(item=>item.id===proposal.wordId);if(word)return word.text}return "(word unavailable)"}
+  async function applySelectedCorrections(){
+    const proposals=(correctionResult?.names?.accepted??[]).filter(item=>selectedCorrections.has(item.wordId));
+    if(!proposals.length)return;
+    if(await structuralTransaction(proposals.map(item=>({op:"replace",wordId:item.wordId,text:item.proposedValue})))){
+      setCorrectionResult(current=>current?{...current,names:current.names?{...current.names,accepted:current.names.accepted.filter(item=>!selectedCorrections.has(item.wordId))}:null}:null);
+      setSelectedCorrections(new Set());
+    }
+  }
+  function acceptSpeakerSuggestion(suggestion:SpeakerSuggestion){
+    const key=`${suggestion.sourceJobIdentity}:${suggestion.deepgramSpeaker}`;
+    if(!suggestion.speakerIdentity)return;
+    setSavedNote("");setShowSpeakers(true);
+    setAssignments(current=>({...current,[key]:{speakerIdentity:suggestion.speakerIdentity!,transcriptRole:suggestion.transcriptRole??candidates.find(item=>item.id===suggestion.speakerIdentity)?.defaultRole??""}}));
+  }
 
   // Transcript order across every paragraph, so a range can be resolved without caring which
   // paragraph either end lives in. Rebuilt only when the render changes.
@@ -459,7 +518,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             without one -- the element then reports MEDIA_ERR_SRC_NOT_SUPPORTED, which reads as
             "this audio is the wrong format" and sent an entire investigation down a codec path.
             With it the request is CORS and carries the Origin the gate expects. */}
-        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined} onTimeUpdate={()=>{if(player.current){setPlaybackTime(player.current.currentTime);if(playbackEnd.current!==null&&player.current.currentTime>=playbackEnd.current){player.current.pause();playbackEnd.current=null}}}} onEnded={()=>setPlaybackTime(null)}>
+        <audio ref={player} controls preload="metadata" crossOrigin="anonymous" src={playbackSource ?? undefined} onLoadedMetadata={()=>setPlaybackError("")} onError={()=>{const code=player.current?.error?.code;setPlaybackError(code?`The browser could not load this audio (media error ${code}). Prepare a playback copy or verify the preserved source.`:"The browser could not load this audio.")}} onTimeUpdate={()=>{if(player.current){setPlaybackTime(player.current.currentTime);if(playbackEnd.current!==null&&player.current.currentTime>=playbackEnd.current){player.current.pause();playbackEnd.current=null}}}} onEnded={()=>setPlaybackTime(null)}>
           <track kind="captions" label="No captions" src="data:text/vtt,WEBVTT" default />
         </audio>
         <button type="button" disabled={!playbackSource} onClick={()=>{if(!player.current)return;player.current.pause();player.current.currentTime=0;setPlaybackTime(null)}}>Stop</button>
@@ -468,6 +527,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             {building ? "Preparing audio… (about a minute)" : "Prepare audio for playback"}
           </button>
         )}
+        {playbackError&&<span className="workspace-audio-error" role="alert">{playbackError}</span>}
         <span className="workspace-counts">
           {rendered ? `${rendered.counts.paragraphs} paragraphs · ${rendered.counts.words} words · ${rendered.counts.operations} edits and marks` : "Loading…"}
           {busy && " · saving…"}
@@ -486,8 +546,36 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
         <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId })} disabled={busy||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
+        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
       </header>
+
+      {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
+        <div><h2>Correct Transcript</h2><p>AI checks proper-name spellings and proposes speaker identities and Q./A./colloquy roles. Nothing changes until you review and apply it.</p></div>
+        <label htmlFor="workspace-correction-instructions">Additional things AI should check</label>
+        <textarea id="workspace-correction-instructions" value={correctionInstructions} onChange={event=>setCorrectionInstructions(event.target.value)} placeholder="Example: Check whether Lucia Zahn self-identifies as Speaker 3. Check a recurring phrase that may have been misheard." />
+        <p className="workspace-hint">These instructions guide the enabled checks. Future correction types can be added as separate validated passes without changing this review workflow.</p>
+        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void correctTranscript()}>{correcting?"Sending transcript evidence to AI…":"Run AI correction check"}</button>
+        {correctionResult?.errors.map(message=><p className="analysis-error" role="alert" key={message}>{message}</p>)}
+        {correctionResult&&<div className="workspace-correction-results">
+          <section><h3>Word corrections ({correctionResult.names?.accepted.length??0})</h3>
+            {!correctionResult.names?.accepted.length&&<p>No supported proper-name corrections were proposed.</p>}
+            {correctionResult.names?.accepted.map(proposal=><div className="workspace-correction-proposal" key={proposal.wordId}>
+              <input type="checkbox" aria-label={`Apply correction from ${proposalOriginal(proposal)} to ${proposal.proposedValue}`} checked={selectedCorrections.has(proposal.wordId)} onChange={event=>setSelectedCorrections(current=>{const next=new Set(current);if(event.target.checked)next.add(proposal.wordId);else next.delete(proposal.wordId);return next})}/>
+              <span><strong>{proposalOriginal(proposal)} → {proposal.proposedValue}</strong><small>{Math.round(proposal.confidenceScore*100)}% confidence · {proposal.evidenceSource}</small></span>
+            </div>)}
+            <button type="button" disabled={!selectedCorrections.size||busy} onClick={()=>void applySelectedCorrections()}>Apply selected word corrections ({selectedCorrections.size})</button>
+          </section>
+          <section><h3>Speaker and label proposals ({correctionResult.speakers?.proposals.length??0})</h3>
+            {correctionResult.speakers?.proposals.map(proposal=>{const candidate=candidates.find(item=>item.id===proposal.speakerIdentity);return <div className="workspace-speaker-proposal" key={`${proposal.sourceJobIdentity}:${proposal.deepgramSpeaker}`}>
+              <p><strong>Speaker {proposal.deepgramSpeaker}: {candidate?.label??proposal.missingParticipantName??"Unresolved"}</strong>{proposal.transcriptRole?` · ${ROLE_FOR(proposal.transcriptRole)}`:""}</p>
+              <small>{Math.round(proposal.confidence*100)}% confidence · {proposal.evidence}</small>
+              {proposal.speakerIdentity?<button type="button" onClick={()=>acceptSpeakerSuggestion(proposal)}>Use this assignment</button>:proposal.missingParticipantName?<button type="button" onClick={()=>{document.getElementById("workspace-add-missing-counsel")?.click();document.getElementById("workspace-counsel-editor")?.scrollIntoView({behavior:"smooth",block:"start"})}}>Add {proposal.missingParticipantName} to participants</button>:null}
+            </div>})}
+            <p className="workspace-hint">Speaker proposals update the unsaved speaker-map controls. Review them there, then select Save speaker map.</p>
+          </section>
+        </div>}
+      </section>}
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The
           render endpoint reports a missing working transcript as an error because for every
@@ -579,7 +667,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onEditingChange={editingChange}/>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onPlayAt={seconds=>{void playAt(seconds)}} onEditingChange={editingChange}/>
           :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
@@ -693,9 +781,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               in the room. Correcting a name here and mapping a voice to it are the same task seen
               from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
-          <CounselEditor depositionId={depositionId} onSaved={reload} />
+          <CounselEditor depositionId={depositionId} onSaved={reload} speakerOptions={speakerOptions} speakerAssignmentForCounsel={speakerAssignmentForCounsel} onSpeakerAssignment={assignCounselSpeaker} />
 
           <h2>Speakers</h2>
+          <button type="button" className="secondary-button" onClick={()=>{
+            document.getElementById("workspace-add-missing-counsel")?.click();
+            document.getElementById("workspace-counsel-editor")?.scrollIntoView({behavior:"smooth",block:"start"});
+          }}>Add a missing counsel speaker</button>
           <button type="button" onClick={()=>setShowSpeakers(value=>!value)} aria-expanded={showSpeakers} aria-controls="workspace-speakers">
             {rendered?.speakerMap?.status==="reconciled" ? "Speakers assigned" : "Assign Deepgram speakers"}
           </button>

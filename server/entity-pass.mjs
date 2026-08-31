@@ -108,13 +108,14 @@ export const ENTITY_PASS_SYSTEM = [
 ].join("\n");
 
 /** The chunk as the model sees it: editable words with their ids, context marked as unusable. */
-export function buildChunkPrompt(chunk, lexicon) {
+export function buildChunkPrompt(chunk, lexicon, additionalInstructions = "") {
   const lines = [`chunkId: ${chunk.chunkId}`, "", "Authoritative names:", lexicon.join(", "), "", "Transcript chunk:"];
   for (const utterance of chunk.utterances) {
     const speaker = utterance.transcriptRole ? `${utterance.transcriptRole}` : "UNLABELLED";
     lines.push("", `[${utterance.editable ? "EDITABLE" : "CONTEXT ONLY -- cannot be corrected"}] ${speaker}`);
     lines.push(utterance.words.map(word => (word.editable ? `${word.text}⟨${word.id}⟩` : word.text)).join(" "));
   }
+  if (String(additionalInstructions).trim()) lines.push("", "Reporter-requested checks (these do not expand the allowed correction types or authoritative name list):", String(additionalInstructions).trim());
   return lines.join("\n");
 }
 
@@ -142,7 +143,7 @@ async function submitToClaude({ apiKey, model, prompt }) {
  * test of it runs. A chunk that fails is recorded and the pass continues: one bad response should
  * not discard the corrections found in the rest of the transcript.
  */
-export async function runEntityPass(root, { depositionId, storageRoot, apiKey, model, passStartedAt, submit = submitToClaude, limitChunks = null } = {}) {
+export async function runEntityPass(root, { depositionId, storageRoot, apiKey, model, passStartedAt, submit = submitToClaude, limitChunks = null, additionalInstructions = "" } = {}) {
   if (!apiKey) throw new Error("Add the Anthropic API key in Administrator Settings before running a correction pass.");
   if (!model) throw new Error("A correction pass requires an explicit model.");
   if (!passStartedAt) throw new Error("A correction pass requires an explicit start time, so its pass id is reproducible.");
@@ -166,7 +167,7 @@ export async function runEntityPass(root, { depositionId, storageRoot, apiKey, m
   const accepted = [], declined = [], failures = [];
   for (const chunk of selected) {
     try {
-      const response = await submit({ apiKey, model, prompt: buildChunkPrompt(chunk, lexicon), chunk });
+      const response = await submit({ apiKey, model, prompt: buildChunkPrompt(chunk, lexicon, additionalInstructions), chunk });
       const verdict = validateProposals(response, { chunk, roster, allowedCorrectionTypes: ENTITY_PASS_CORRECTION_TYPES, lexicon });
       if (verdict.rejected) { failures.push({ chunkId: chunk.chunkId, ...verdict.rejected }); continue; }
       for (const proposal of verdict.accepted) accepted.push({ ...proposal, chunkId: chunk.chunkId, reviewStateHash });
@@ -181,7 +182,7 @@ export async function runEntityPass(root, { depositionId, storageRoot, apiKey, m
     recordType: "CORRECTION_PROPOSALS",
     passType: "entity-resolution",
     passVersion: ENTITY_PASS_VERSION,
-    passId, depositionId, model, passStartedAt,
+    passId, depositionId, model, passStartedAt, additionalInstructions:String(additionalInstructions).trim(),
     transcriptContentHash, reviewStateHash,
     // Stated so nobody downstream has to infer it: these are proposals, and they change nothing
     // until a reporter accepts them.
