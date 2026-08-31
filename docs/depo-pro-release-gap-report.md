@@ -94,6 +94,13 @@ It does not invalidate the 219/219 Word-parity result. That result proves the en
 
 ## 3. Second principal finding — the DOCX boundary has no automated coverage
 
+> **CLOSED 2026-08-31.** This finding was true when written and is no longer true. `ca05735`
+> added `tests/fixed-page-docx-renders.test.mjs`, which spawns the Python renderer, writes a
+> `.docx` and reopens it to count physical line positions; it runs by default and is not among
+> the suite's skips. `tests/qualify-one-transcript-end-to-end.test.mjs` now also renders a
+> 221-page document and compares it to the print model line for line. The paragraphs below are
+> retained as the historical record of the gap, not as a current description of the suite.
+
 **[measured]** — not identified in either earlier report.
 
 `tests/final-document-docx.test.mjs` exercises only `createFixedPageDocxSpec`, the pure JavaScript spec builder. It never calls `createTranscriptDocxArtifact`, never spawns Python, and never produces a `.docx` byte. **A green `npm run verify` does not render a single Word file.**
