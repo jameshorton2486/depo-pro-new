@@ -6,6 +6,17 @@ import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-page
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 // The appearance page used to print `FOR ` plus whatever was in `represents`, verbatim. So
 // "FOR THE PLAINTIFF:" on a certified page only ever appeared because somebody typed a side into a
 // field holding party names. It now prints the phrase the record was asked for.
@@ -13,7 +24,7 @@ import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 // These generate the page and read the produced line, rather than calling appearancePhrase. A test
 // of the helper would pass with the print site still joining party names.
 async function generated(attorneys, parties = [{ name: "Alex Plaintiff", role: "Plaintiff" }, { name: "Delta Company", role: "Defendant" }]) {
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS", causeNumber: "2026-CI-10001",
     witness: "Jordan Example", depositionDate: "2026-08-01", remote: true, remotePlatform: "Zoom",
     parties,

@@ -11,6 +11,17 @@ import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-page
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 // Two fields a certified page requires that the reporter had no way to supply.
 //
 // The waiver: validateFields has honoured a recorded waiver since the fix this evening, but the
@@ -41,7 +52,7 @@ function stored(t, extra) {
 }
 
 function render(reporterProfile) {
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     court: "In the 285th Judicial District Court", causeNumber: "2024-CI-11223",
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
     parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Delta LLC", role: "Defendant" }],

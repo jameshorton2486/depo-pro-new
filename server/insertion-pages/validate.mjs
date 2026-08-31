@@ -42,20 +42,37 @@ const isBlank = (value) => value == null || value === "" || (Array.isArray(value
 // officer". When the record carries an attestation that the witness did not swear, that sentence is
 // false and it goes out under the reporter's name and CSR number. Refuse rather than print it.
 //
-// Only an explicit false refuses. null is MISSING -- nobody has attested -- and still generates.
-// That is a scoping decision, not an oversight: MISSING is the common state and an unattested
-// certificate is a gap in the record rather than a false statement, which is what this application
-// has always produced. Refusing on MISSING is phase 2 and is gated on the existing library being
-// attested first. See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
+// Phase 2, and the reason it waited. MISSING used to generate: nobody had attested, and an
+// unattested certificate was treated as a gap in the record rather than a false statement. But the
+// sentence is a literal in both templates, so an unattested certificate does not omit the claim --
+// it makes it, under the reporter's name and CSR number, resting on nothing the record holds.
 //
-// There is no approved affirmation certificate wording to substitute -- no Texas authority
-// publishes one and no certified specimen contains one -- so refusal is the whole remedy.
-// Do not "fix" this by authoring that sentence.
+// Two codes, because the remedies are not the same and a reporter must be able to tell them apart:
+//
+//   MISSING   nobody has said what happened. The remedy is to attest, in Opening -> Scripts &
+//             Oaths, from actual knowledge. The record can be completed.
+//   false     the record says the witness affirmed. There is nothing to complete. No Texas
+//             authority publishes affirmation certificate wording and no certified specimen
+//             contains any, so refusal is the whole remedy -- do not "fix" this by writing that
+//             sentence.
+//
+// FALSE is not MISSING. Collapsing them would tell a reporter whose witness affirmed to go and
+// attest something they have already correctly attested.
+//
+// See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
 function validateOathBasis(input, findings) {
-  if (input.deposition?.witnessSworn !== false) return;
+  const sworn = input.deposition?.witnessSworn;
+  if (sworn === true) return;
+  if (sworn === false) {
+    findings.push(blocking(
+      "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",
+      "The record attests that this witness was not sworn, and the certification page states the witness was duly sworn by the officer. No approved wording exists for a witness who affirmed, so the page cannot be generated.",
+    ));
+    return;
+  }
   findings.push(blocking(
-    "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",
-    "The record attests that this witness was not sworn, and the certification page states the witness was duly sworn by the officer. No approved wording exists for a witness who affirmed, so the page cannot be generated.",
+    "CERT_OATH_BASIS_UNRESOLVED", "deposition.witnessSworn",
+    "The certification page states that the witness was duly sworn by the officer, and nothing on this record establishes that. Record the oath attestation in Opening, under Scripts & Oaths, before generating the certificate.",
   ));
 }
 

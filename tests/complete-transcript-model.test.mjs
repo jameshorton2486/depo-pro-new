@@ -5,10 +5,21 @@ import { buildCompleteTranscriptModel } from "../server/complete-transcript-mode
 import { createFixedPageDocxSpec } from "../server/final-document-docx.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../server/texas-freelance-deposition-profile.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 const lines=(page)=>Array.from({length:25},(_,index)=>({position:index+1,content:index===0?`    Q.    Synthetic testimony page ${page}.`:"",occupied:index===0,paragraphId:index===0?`p${page}`:null,fragments:index===0?[{id:`f${page}`,kind:"evidence",role:"word",text:`Synthetic testimony page ${page}.`,sourceWordId:`w${page}`}]:[]}));
 const printModel={recordType:"TRANSCRIPT_PRINT_MODEL",modelHash:"testimony-hash",source:{reviewStateHash:"review-hash"},deposition:{id:"DEP-20260826-M2FIX",caseStyle:"Alex Plaintiff v. Delta Company",witness:"Jordan Example",causeNumber:"2026-CI-10001",depositionDate:"2026-08-01"},layoutProfile:TEXAS_FREELANCE_DEPOSITION_V1,paragraphs:[{id:"p1",text:"Synthetic testimony"}],pages:[{id:"body-1",pageNumber:1,lines:lines(1)},{id:"body-2",pageNumber:2,lines:lines(2)}],findings:{transcript:[],print:[]}};
 
-function canonicalRecord(){return createCanonicalDepositionRecord({jurisdictionType:"texas-state",court:"45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS",causeNumber:"2026-CI-10001",caseStyle:"Alex Plaintiff v. Delta Company",witness:"Jordan Example",depositionDate:"2026-08-01",remote:false,location:"San Antonio, Texas",parties:[{name:"Alex Plaintiff",role:"Plaintiff"},{name:"Delta Company",role:"Defendant"}],attorneys:[{name:"Pat Counsel",firm:"Plaintiff Firm",address:"100 Main, San Antonio, Texas",phone:"210-555-0101",represents:["Alex Plaintiff"],side:"PLAINTIFF",actualAppearance:true},{name:"Dana Counsel",firm:"Defense Firm",address:"200 Main, San Antonio, Texas",phone:"210-555-0102",represents:["Delta Company"],side:"DEFENDANT",actualAppearance:true}],reporterProfile:{name:"Riley Reporter",licenseNumber:"1234",csrExpiration:"2027-12-31",company:"Reporter Firm",firmRegistrationNumber:"5678",address:"300 Main, San Antonio, Texas",phone:"210-555-0103"}})}
+function canonicalRecord(){return attested({jurisdictionType:"texas-state",court:"45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS",causeNumber:"2026-CI-10001",caseStyle:"Alex Plaintiff v. Delta Company",witness:"Jordan Example",depositionDate:"2026-08-01",remote:false,location:"San Antonio, Texas",parties:[{name:"Alex Plaintiff",role:"Plaintiff"},{name:"Delta Company",role:"Defendant"}],attorneys:[{name:"Pat Counsel",firm:"Plaintiff Firm",address:"100 Main, San Antonio, Texas",phone:"210-555-0101",represents:["Alex Plaintiff"],side:"PLAINTIFF",actualAppearance:true},{name:"Dana Counsel",firm:"Defense Firm",address:"200 Main, San Antonio, Texas",phone:"210-555-0102",represents:["Delta Company"],side:"DEFENDANT",actualAppearance:true}],reporterProfile:{name:"Riley Reporter",licenseNumber:"1234",csrExpiration:"2027-12-31",company:"Reporter Firm",firmRegistrationNumber:"5678",address:"300 Main, San Antonio, Texas",phone:"210-555-0103"}})}
 
 const operator={jurisdiction:"texas-state",signatureDisposition:"requested",signatureDispositionBasis:"Stated on the record",courtHeadingLine:"IN THE DISTRICT COURT OF",countyCourtLine:"BEXAR COUNTY, TEXAS",judicialDistrictLine:"45TH JUDICIAL DISTRICT",proceedingHeading:"ORAL DEPOSITION OF",titleNarrative:["Jordan Example, produced as a witness and duly sworn,","was taken remotely before Riley Reporter,","Certified Shorthand Reporter in and for Texas."],certification:{custodialAttorney:"Pat Counsel",charges:"500.00",chargesResponsibleParty:"Plaintiff",submissionDate:"2026-08-14",returnDeadline:"2026-08-28",serviceDate:"2026-08-30",certificationDate:"2026-08-14",furtherCertificationDate:"2026-08-30",returnStatus:"2026-08-28"},timeUsed:{totalOnRecordMinutes:120,parties:[{name:"Pat Counsel",minutes:60},{name:"Dana Counsel",minutes:60}]},examinations:[{examiner:"Pat Counsel"}]};
 

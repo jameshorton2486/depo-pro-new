@@ -30,6 +30,17 @@ import { renderTranscript } from "../server/transcript-render.mjs";
 import { buildTranscriptPrintModel } from "../server/transcript-print-model.mjs";
 import { EVIDENCE, SCALE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/long-deposition.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  return rec;
+};
+
+
 const python = process.env.DEPO_PRO_PYTHON ?? "python";
 
 function rendererAvailability() {
@@ -65,7 +76,7 @@ async function timedAsync(label, work) {
 }
 
 function canonicalRecord() {
-  return createCanonicalDepositionRecord({
+  return attested({
     jurisdictionType: "texas-state", court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS",
     causeNumber: "2026-CI-40881", caseStyle: "Alan Prentice v. Meridian Freight Company",
     witness: "Alan Prentice", depositionDate: "2026-08-31", remote: false, location: "San Antonio, Texas",
