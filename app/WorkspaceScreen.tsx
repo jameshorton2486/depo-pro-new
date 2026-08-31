@@ -544,8 +544,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           {rendered?.transcriptContentHash && <span className="workspace-hash" title={rendered.transcriptContentHash}> · {rendered.transcriptContentHash.slice(0,12)}</span>}
         </span>
         <button type="button" onClick={nextFlag} disabled={!rendered?.counts.flags}>Next marked passage</button>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId })} disabled={busy||!rendered?.counts.operations}>Undo last edit or mark</button>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId })} disabled={busy||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
+        {/* The hash sent is the one from the model on screen -- the state the reporter is looking
+            at when they press the button. Fetching a fresh hash here would satisfy the server and
+            defeat the check: a stale tab would undo an edit it had never displayed. For the same
+            reason both controls are inert without a model: there is no observed state to act on. */}
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
       </header>

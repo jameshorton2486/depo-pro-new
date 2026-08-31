@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendReporterOperations, readReporterOverlay, redoReporterOperation, STALE_REPORTER_TRANSACTION, undoReporterOperation, writeReporterOverlay } from "../server/transcription-jobs.mjs";
+import { appendReporterOperations, getWorkingTranscript, readReporterOverlay, redoReporterOperation, STALE_REPORTER_TRANSACTION, undoReporterOperation, writeReporterOverlay } from "../server/transcription-jobs.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 
 // A throwaway deposition workspace. The overlay is the only thing written here, which is the
@@ -28,6 +28,15 @@ function workspace(t) {
 }
 const ROOT = process.cwd();
 
+// Every authoritative mutation now has to say which transcript it was made against. These cases
+// are about what the overlay stores, not about currency, so they read the state they are about to
+// act on -- which is what a caller holding a freshly rendered transcript would carry.
+const current = w => computeReviewStateHash({
+  transcript: getWorkingTranscript(ROOT, { depositionId:w.depositionId, storageRoot:w.storageRoot }),
+  overlay: readReporterOverlay(ROOT, { depositionId:w.depositionId, storageRoot:w.storageRoot }),
+});
+
+
 test("a deposition with no edits has no overlay file and reads as empty",t=>{
   const w = workspace(t);
   assert.equal(fs.existsSync(w.overlayFile),false);
@@ -39,7 +48,7 @@ test("a deposition with no edits has no overlay file and reads as empty",t=>{
 test("appending writes only the overlay, never the projection or the evidence",t=>{
   const w = workspace(t);
   const workingBefore = w.digest(w.workingFile), evidenceBefore = w.digest(w.evidenceFile);
-  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"replace", wordId:"job1:word:2", text:"too." }] });
+  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"replace", wordId:"job1:word:2", text:"too." }] ,expectedReviewStateHash:current(w) });
   assert.ok(fs.existsSync(w.overlayFile));
   assert.equal(w.digest(w.workingFile), workingBefore,"working.json must be byte-identical after an edit");
   assert.equal(w.digest(w.evidenceFile), evidenceBefore,"asr-evidence.json must be byte-identical after an edit");
@@ -47,27 +56,27 @@ test("appending writes only the overlay, never the projection or the evidence",t
 
 test("operations accumulate in order and survive a reread",t=>{
   const w = workspace(t);
-  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"delete", wordId:"job1:word:1" }] });
-  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"replace", wordId:"job1:word:2", text:"two" }] });
+  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"delete", wordId:"job1:word:1" }] ,expectedReviewStateHash:current(w) });
+  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"replace", wordId:"job1:word:2", text:"two" }] ,expectedReviewStateHash:current(w) });
   const overlay = readReporterOverlay(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot });
   assert.deepEqual(overlay.operations.map(operation => operation.op),["delete","replace"]);
 });
 
 test("undo removes the last atomic reporter transaction from disk",t=>{
   const w = workspace(t);
-  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"delete", wordId:"job1:word:1" },{ op:"delete", wordId:"job1:word:2" }] });
-  const { removed } = undoReporterOperation(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot });
+  appendReporterOperations(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot, operations:[{ op:"delete", wordId:"job1:word:1" },{ op:"delete", wordId:"job1:word:2" }] ,expectedReviewStateHash:current(w) });
+  const { removed } = undoReporterOperation(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot ,expectedReviewStateHash:current(w) });
   assert.deepEqual(removed.map(operation=>operation.wordId),["job1:word:1","job1:word:2"]);
   assert.equal(readReporterOverlay(ROOT,{ depositionId:w.depositionId, storageRoot:w.storageRoot }).operations.length,0);
 });
 
 test("atomic undo and redo survive save and reopen",t=>{
   const w=workspace(t);
-  appendReporterOperations(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,operations:[{op:"split",beforeWordId:"job1:word:2"},{op:"label",wordId:"job1:word:2",speakerIdentity:"witness",transcriptRole:"WITNESS"}]});
+  appendReporterOperations(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,operations:[{op:"split",beforeWordId:"job1:word:2"},{op:"label",wordId:"job1:word:2",speakerIdentity:"witness",transcriptRole:"WITNESS"}],expectedReviewStateHash:current(w) });
   assert.deepEqual(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).transactionSizes,[2]);
-  undoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot});
+  undoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,expectedReviewStateHash:current(w) });
   assert.equal(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).operations.length,0);
-  redoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot});
+  redoReporterOperation(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot,expectedReviewStateHash:current(w) });
   assert.deepEqual(readReporterOverlay(ROOT,{depositionId:w.depositionId,storageRoot:w.storageRoot}).operations.map(item=>item.op),["split","label"]);
 });
 
