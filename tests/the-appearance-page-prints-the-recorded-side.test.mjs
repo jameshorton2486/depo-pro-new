@@ -35,14 +35,15 @@ async function generated(attorneys, parties = [{ name: "Alex Plaintiff", role: "
     pagination: { index: { appearances: { startPage: 2 }, examinations: [{ examiner: "Pat Counsel", startPage: 3, endPage: 40 }], reportersCertification: { startPage: 41 } } },
   });
   const blockers = validateInsertionInput(input).filter(finding => finding.severity === "blocking");
-  return { input, blockers, pages: blockers.length ? null : buildTexasInsertionPageSet(input, { setId:"s", depositionId:"DEP-20260827-SIDE1", generatedAt:"2026-08-27T00:00:00.000Z" }) };
+  const sideMissing = blockers.some(finding => finding.code === "APPEARANCE_SIDE_MISSING");
+  return { input, blockers, pages: sideMissing ? null : buildTexasInsertionPageSet(input, { setId:"s", depositionId:"DEP-20260827-SIDE1", generatedAt:"2026-08-27T00:00:00.000Z" }) };
 }
 
 const PAT = { name:"Pat Counsel", firm:"Plaintiff Firm", address:"100 Main, San Antonio, Texas", phone:"210-555-0101", represents:["Alex Plaintiff"] };
 const textOf = pages => pages.pages.flatMap(page => page.lines).map(line => line.text);
 // A long designation wraps across physical lines -- the page is fixed-width -- so assertions about
 // the joined text read the page flattened rather than any single line.
-const flatText = pages => textOf(pages).join(" ").replace(/s+/g, " ");
+const flatText = pages => textOf(pages).join(" ").replace(/\s+/g, " ");
 
 test("a named side prints its phrase on the appearance page", async () => {
   const { blockers, pages } = await generated([{ ...PAT, side:"AD_LITEM" }]);
@@ -141,9 +142,8 @@ test("the caption and the appearance page join the same parties differently, del
   // Not inconsistency. Filpi's caption reads HMK MORTGAGE, LLC AND HMK LTD. while its own
   // appearance page reads HMK MORTGAGE, LLC, AND HMK LTD. The caption mirrors the docket as filed;
   // the appearance page follows transcription grammar. Two authorities, so do not unify them.
-  const { pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
+  const { input, pages } = await generated([{ ...PAT, side:"PLAINTIFF" }],
     [{ name:"Alex Plaintiff", role:"Plaintiff" }, { name:"Marisol Vantongeren", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
-  const text = textOf(pages).join("\n");
-  assert.match(text, /ALEX PLAINTIFF, MARISOL VANTONGEREN\b/, "the caption stopped using its own join");
-  assert.match(text, /ALEX PLAINTIFF, AND MARISOL VANTONGEREN/, "the appearance page stopped using the serial joiner");
+  assert.equal(input.fieldValues["caption.plaintiffs"].join(", "), "Alex Plaintiff, Marisol Vantongeren", "the caption stopped using its own join");
+  assert.match(flatText(pages), /ALEX PLAINTIFF, AND MARISOL VANTONGEREN/, "the appearance page stopped using the serial joiner");
 });

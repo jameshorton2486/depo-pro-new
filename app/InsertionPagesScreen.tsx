@@ -28,20 +28,27 @@ const DISPOSITIONS = [
 // because a reporter answering "charges billed to" needs to know it prints inside "charges to the
 // ___ for preparing the original deposition transcript".
 //
-// Six, not the nine the certificate prints. cert.submissionDate, cert.returnDeadline and
-// cert.serviceDate are WORKFLOW_DERIVED -- facts about what the system did, and no workflow
-// produces them yet. Asking a reporter to type one would record a guess as a derivation.
+// Reporter-attested certificate facts stay separate from the workflow event dates below. That
+// keeps the provenance honest: typing a certificate answer cannot masquerade as a system event.
 const CERTIFICATE_FIELDS = [
   { key: "custodialAttorney", label: "Custodial attorney", clause: "The original deposition was delivered to ___", requestedOnly: false },
   { key: "officerCharges", label: "Deposition officer's charges (amount only)", clause: "That $___ is the deposition officer's charges", requestedOnly: false },
   { key: "chargesResponsibleParty", label: "Charges billed to", clause: "charges to the ___ for preparing the original transcript", requestedOnly: false },
-  { key: "certificationDate", label: "Certification date", clause: "Certified to by me this ___ (certificate page)", requestedOnly: false },
-  { key: "returnedDate", label: "Transcript returned on", clause: "returned to the deposition officer on ___", requestedOnly: true },
-  { key: "furtherCertificationDate", label: "Further certification date", clause: "Certified to by me this ___ (Rule 203 page, after return and service)", requestedOnly: true },
+  { key: "certificationDate", label: "Certification date", clause: "Certified to by me this ___ (certificate page)", requestedOnly: false, inputType: "date" },
+  { key: "returnedDate", label: "Transcript returned on", clause: "returned to the deposition officer on ___", requestedOnly: true, inputType: "date" },
+  { key: "furtherCertificationDate", label: "Further certification date", clause: "Certified to by me this ___ (Rule 203 page, after return and service)", requestedOnly: true, inputType: "date" },
 ] as const;
 
 type CertificateKey = (typeof CERTIFICATE_FIELDS)[number]["key"];
 const EMPTY_CERTIFICATE = Object.fromEntries(CERTIFICATE_FIELDS.map((item) => [item.key, ""])) as Record<CertificateKey, string>;
+type CertificateWorkflow = { submissionDate: string; returnDeadline: string; serviceDate: string };
+const EMPTY_WORKFLOW: CertificateWorkflow = { submissionDate: "", returnDeadline: "", serviceDate: "" };
+function dateInputValue(value: string) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? "" : `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth()+1).padStart(2,"0")}-${String(parsed.getUTCDate()).padStart(2,"0")}`;
+}
 
 export default function InsertionPagesScreen({ deposition, onBack }: { deposition: Deposition; onBack: () => void }) {
   const [jurisdiction, setJurisdiction] = useState<string>("texas-state");
@@ -52,6 +59,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [busy, setBusy] = useState(false);
   const [certificate, setCertificate] = useState<Record<CertificateKey, string>>(EMPTY_CERTIFICATE);
+  const [certificateWorkflow, setCertificateWorkflow] = useState<CertificateWorkflow>(EMPTY_WORKFLOW);
   const [attorneyTime, setAttorneyTime] = useState<AttorneyTime[]>([]);
   const [videographers, setVideographers] = useState<Array<{ id?: string; fullName: string }>>([]);
   const [catalog, setCatalog] = useState<CatalogVariant[]>([]);
@@ -66,8 +74,9 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
     let cancelled = false;
     void (async () => {
       try {
-        const [certResponse, timeResponse, videographerResponse, catalogResponse] = await Promise.all([
+        const [certResponse, workflowResponse, timeResponse, videographerResponse, catalogResponse] = await Promise.all([
           fetch(`${API}/api/deposition/certification?depositionId=${encodeURIComponent(deposition.id)}`),
+          fetch(`${API}/api/deposition/certificate-workflow?depositionId=${encodeURIComponent(deposition.id)}`),
           fetch(`${API}/api/deposition/attorney-time?depositionId=${encodeURIComponent(deposition.id)}`),
           fetch(`${API}/api/deposition/videographers?depositionId=${encodeURIComponent(deposition.id)}`),
           fetch(`${API}/api/insertion-pages/catalog`),
@@ -75,7 +84,15 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
         if (cancelled) return;
         if (certResponse.ok) {
           const body = (await certResponse.json()) as { certification?: Partial<Record<CertificateKey, string>> };
-          if (body.certification) setCertificate((current) => ({ ...current, ...body.certification }));
+          if (body.certification) setCertificate((current) => ({ ...current, ...body.certification,
+            certificationDate:dateInputValue(body.certification?.certificationDate??""),
+            returnedDate:dateInputValue(body.certification?.returnedDate??""),
+            furtherCertificationDate:dateInputValue(body.certification?.furtherCertificationDate??""),
+          }));
+        }
+        if (workflowResponse.ok) {
+          const body = (await workflowResponse.json()) as { workflow?: Partial<CertificateWorkflow> };
+          if (body.workflow) setCertificateWorkflow((current) => ({ ...current, ...body.workflow }));
         }
         if (timeResponse.ok) {
           const body = (await timeResponse.json()) as { attorneyTime?: Array<{ name: string; minutes: number | null }> };
@@ -112,6 +129,7 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
       // have to arrive carrying REPORTER_ENTERED provenance, and a field left alone is recorded
       // MISSING rather than as an empty string somebody could mistake for an answer.
       await post("/api/deposition/certification", { depositionId: deposition.id, certification: certificate });
+      await post("/api/deposition/certificate-workflow", { depositionId: deposition.id, workflow: certificateWorkflow });
       await post("/api/deposition/attorney-time", {
         depositionId: deposition.id,
         attorneyTime: attorneyTime.map((item) => ({ name: item.name, minutes: item.minutes })),
@@ -214,12 +232,23 @@ export default function InsertionPagesScreen({ deposition, onBack }: { depositio
           {CERTIFICATE_FIELDS.filter((item) => !item.requestedOnly || signatureDisposition === "requested").map((item) => (
             <label key={item.key} className="insertion-field">
               <span>{item.label}</span>
-              <input type="text" value={certificate[item.key]}
+              <input type={"inputType" in item ? item.inputType : "text"} value={certificate[item.key]}
                 onChange={(event) => { setCertificate((current) => ({ ...current, [item.key]: event.target.value })); setPreview(null); setArtifact(null); }} />
               <small>{item.clause}</small>
             </label>
           ))}
           <p className="insertion-message">Left blank, each of these blocks the certificate rather than printing a sentence with nothing after it.</p>
+        </fieldset>
+
+        <fieldset className="insertion-field">
+          <legend>Certificate workflow events</legend>
+          <p className="insertion-help">Record these only after the corresponding workflow event occurred. They are stored as workflow-derived facts and print in the certificate&apos;s date format.</p>
+          {signatureDisposition === "requested" && <>
+            <label className="insertion-field"><span>Transcript submitted to witness or attorney</span><input type="date" value={certificateWorkflow.submissionDate} onChange={event=>{setCertificateWorkflow(current=>({...current,submissionDate:event.target.value}));setPreview(null);setArtifact(null)}}/><small>Completes “submitted on ___ to the witness or attorney.”</small></label>
+            <label className="insertion-field"><span>Witness return deadline</span><input type="date" value={certificateWorkflow.returnDeadline} onChange={event=>{setCertificateWorkflow(current=>({...current,returnDeadline:event.target.value}));setPreview(null);setArtifact(null)}}/><small>Completes “returned to me by ___.”</small></label>
+          </>}
+          <label className="insertion-field"><span>Certificate served and filed</span><input type="date" value={certificateWorkflow.serviceDate} onChange={event=>{setCertificateWorkflow(current=>({...current,serviceDate:event.target.value}));setPreview(null);setArtifact(null)}}/><small>Record the date the certificate was served on the parties and filed with the clerk.</small></label>
+          <p className="insertion-message">An applicable event left blank blocks generation; the renderer no longer deletes the clause and certifies around it.</p>
         </fieldset>
 
         <fieldset className="insertion-field">

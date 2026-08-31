@@ -83,7 +83,7 @@ const operator = {
   courtHeadingLine: "IN THE DISTRICT COURT OF", countyCourtLine: "BEXAR COUNTY, TEXAS", judicialDistrictLine: "45TH JUDICIAL DISTRICT",
   proceedingHeading: "ORAL DEPOSITION OF",
   titleNarrative: ["Alan Prentice, produced as a witness and duly sworn,", "was taken before Sarah Jenkins,", "Certified Shorthand Reporter in and for Texas."],
-  certification: { custodialAttorney: "Michael Alvarez", charges: "500.00", chargesResponsibleParty: "Plaintiff", serviceDate: "September 14, 2026", certificationDate: "September 14, 2026", furtherCertificationDate: "September 30, 2026", returnStatus: "Returned September 28, 2026" },
+  certification: { custodialAttorney: "Michael Alvarez", charges: "500.00", chargesResponsibleParty: "Plaintiff", submissionDate: "2026-09-14", returnDeadline: "2026-09-28", serviceDate: "2026-09-30", certificationDate: "2026-09-14", furtherCertificationDate: "2026-09-30", returnStatus: "2026-09-28" },
   timeUsed: { totalOnRecordMinutes: 240, parties: [{ name: "Michael Alvarez", minutes: 160 }, { name: "Grace Whitfield", minutes: 80 }] },
   examinations: [{ examiner: "Michael Alvarez", startPage: 4, endPage: 5 }],
 };

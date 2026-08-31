@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
-import { writeDepositionAttorneyTime, writeDepositionCertification } from "../server/deposition-store.mjs";
+import { writeDepositionAttorneyTime, writeDepositionCertificateWorkflow, writeDepositionCertification } from "../server/deposition-store.mjs";
 import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/word-service.mjs";
 
 // The test that was missing.
@@ -43,7 +43,7 @@ function scratch(t) {
       depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
       // caption.plaintiffs and caption.defendants are guarded now, so a record with no parties
       // in either role cannot render a caption at all.
-      parties: [{ name: "Maria Elena Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
+      parties: [{ name: "Maria Vasquez", role: "Plaintiff" }, { name: "Delta LLC", role: "Defendant" }],
       attorneys: [{ name: "Pat Counsel", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
       reporterProfile: {
         name: "Miah Bardot", licenseNumber: "12129", csrState: "Texas", csrExpiration: "2027-06-30",
@@ -88,6 +88,8 @@ test("without the form the certificate is refused, not rendered short", async (t
 test("the form's values reach the page through the record, not the render request", async (t) => {
   const s = scratch(t);
   writeDepositionCertification(null, { depositionId: s.depositionId, certification: CERTIFICATE, storageRoot: s.storageRoot });
+  writeDepositionCertificateWorkflow(null, { depositionId: s.depositionId, storageRoot: s.storageRoot,
+    workflow: { serviceDate: "2026-08-14" } });
 
   const rendered = await renderAsTheScreenDoes(s, "waived");
   assert.deepEqual(rendered.findings.filter((finding) => finding.severity === "blocking"), [],
@@ -103,6 +105,8 @@ test("the form's values reach the page through the record, not the render reques
 test("the requested variant's two extra dates are collected and print separately", async (t) => {
   const s = scratch(t);
   writeDepositionCertification(null, { depositionId: s.depositionId, certification: CERTIFICATE, storageRoot: s.storageRoot });
+  writeDepositionCertificateWorkflow(null, { depositionId: s.depositionId, storageRoot: s.storageRoot,
+    workflow: { submissionDate: "2026-08-14", returnDeadline: "2026-08-28", serviceDate: "2026-08-30" } });
   const rendered = await renderAsTheScreenDoes(s, "requested");
   const blob = JSON.stringify(rendered.pageSet);
   assert.ok(blob.includes("August 14, 2026"), "the certificate date prints");

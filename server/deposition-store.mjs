@@ -230,10 +230,9 @@ export function writeDepositionCounsel(root, { depositionId, counsel, storageRoo
  * named keys across two blocks, and writes it back. It cannot touch the transcript, the audio
  * audit, or any certification field it does not name.
  *
- * Six, not the nine the certificate prints. submittedToWitnessDate, dueDate and serviceDate are
- * declared WORKFLOW_DERIVED -- they are facts about what the system did, and no workflow produces
- * them yet. A reporter typing one and the record answering NOD-style that a workflow derived it is
- * the provenance defect this application already fixed once. They stay MISSING and keep blocking.
+ * The three event dates printed by the certificate are owned by the separate certificate-workflow
+ * writer below. A reporter typing one here and the record claiming that a workflow derived it
+ * would be a provenance defect, so this writer deliberately cannot accept those fields.
  *
  * An untouched control is MISSING, not "". A blank string would be an answer nobody gave, and
  * validateFields cannot tell it from an omission -- isBlank collapses them, so the certificate
@@ -289,6 +288,53 @@ export function writeDepositionCertification(root, { depositionId, certification
 
   atomicJson(file, { ...record, certification: certified, signature });
   return { depositionId, certification: certified, signature: { returnedDate: signature.returnedDate } };
+}
+
+// Dates created by the certificate workflow, not facts attributed to the Notice or free-form
+// certificate testimony. Keeping this writer separate prevents a reporter-entered certificate
+// field from claiming WORKFLOW_DERIVED provenance merely because both appear on the same page.
+const CERTIFICATE_WORKFLOW_FIELDS = Object.freeze(["submissionDate", "returnDeadline", "serviceDate"]);
+const isoDate = (value) => {
+  const text = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+  if (!text) return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error(`Certificate workflow date must use YYYY-MM-DD: ${text}`);
+  const [year, month, day] = text.split("-").map(Number), date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) throw new Error(`Certificate workflow date is invalid: ${text}`);
+  return text;
+};
+const workflowDate = (value) => value
+  ? field(value, { source: "WORKFLOW_DERIVED", state: "DERIVED" })
+  : field(null, { source: "WORKFLOW_DERIVED", state: "MISSING" });
+
+export function readDepositionCertificateWorkflow(root, { depositionId, storageRoot } = {}) {
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const text = envelope => envelope?.value == null ? "" : String(envelope.value);
+  return { depositionId, workflow: {
+    submissionDate: text(record.signature?.submittedToWitnessDate),
+    returnDeadline: text(record.signature?.dueDate),
+    serviceDate: text(record.certification?.serviceDate),
+  } };
+}
+
+export function writeDepositionCertificateWorkflow(root, { depositionId, workflow = {}, storageRoot } = {}) {
+  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) throw new Error("Certificate workflow must be an object.");
+  const unknown = Object.keys(workflow).filter(key => !CERTIFICATE_WORKFLOW_FIELDS.includes(key));
+  if (unknown.length) throw new Error(`Unsupported certificate workflow field: ${unknown.join(", ")}`);
+  const directory = depositionDirectory(root, depositionId, { storageRoot });
+  const file = path.join(directory, "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const values = Object.fromEntries(CERTIFICATE_WORKFLOW_FIELDS.map(key => [key, isoDate(workflow[key])]));
+  const signature = { ...record.signature,
+    submittedToWitnessDate: workflowDate(values.submissionDate),
+    dueDate: workflowDate(values.returnDeadline),
+  };
+  const certification = { ...record.certification, serviceDate: workflowDate(values.serviceDate) };
+  atomicJson(file, { ...record, signature, certification });
+  return readDepositionCertificateWorkflow(root, { depositionId, storageRoot });
 }
 
 /**

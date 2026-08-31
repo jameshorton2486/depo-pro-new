@@ -38,12 +38,12 @@ function scratch(t, { reporter = {}, court = "In the 285th Judicial District Cou
       createCanonicalDepositionRecord({
         court,
         causeNumber: "2024-CI-11223",
-        caseStyle: "Mohammad Etminan, M.D. v. Baptist Health System",
+        caseStyle: "Etminan v. Baptist",
         // The caption block on the title page and on certification-1 prints these by name, so a
         // fixture that renders a certificate has to have them.
         parties: [
-          { name: "Mohammad Etminan, M.D.", role: "Plaintiff" },
-          { name: "Baptist Health System", role: "Defendant" },
+          { name: "M. Etminan", role: "Plaintiff" },
+          { name: "Baptist", role: "Defendant" },
         ],
         witness: "Mohammad Etminan, M.D.",
         depositionDate: "2026-04-24",
@@ -76,7 +76,8 @@ const render = (s, operatorExtra = {}) =>
       // and cert.furtherCertificationDate now reach the guard and nothing collects them yet.
       operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
         certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+          certificationDate: "2026-08-14", returnStatus: "2026-08-28", furtherCertificationDate: "2026-08-30",
+          submissionDate: "2026-08-14", returnDeadline: "2026-08-28", serviceDate: "2026-08-30" },
         // The certificate states the time each party used and now refuses to state it over
         // nothing. Handed in here for the same reason the certification block above is.
         timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] }, ...operatorExtra },
