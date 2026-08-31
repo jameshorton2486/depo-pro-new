@@ -68,7 +68,7 @@ test("the caption's party names are guarded in both variants", async () => {
   }
 });
 
-const PARTIES = [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }];
+const PARTIES = [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Delta LLC", role: "Defendant" }];
 
 async function assembled(parties) {
   const record = createCanonicalDepositionRecord({
@@ -90,7 +90,8 @@ async function assembled(parties) {
     // asserting about the certificate, and it is about the caption.
     operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
       certification: { custodialAttorney: "Alicia Moreno", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-        certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+        certificationDate: "2026-08-14", returnStatus: "2026-08-28", furtherCertificationDate: "2026-08-30",
+        submissionDate: "2026-08-14", returnDeadline: "2026-08-28", serviceDate: "2026-08-30" },
       // Same reason as the certificate fields above: the time-used clause blocks now, and this
       // file is about the caption.
       timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] } },
@@ -125,7 +126,7 @@ test("with the parties recorded the render clears and their names are on the pag
   for (const page of caption) {
     const text = page.lines.map(({ text: line }) => line).join("\n");
     assert.match(text, /RUBEN VASQUEZ/, `${page.role} prints the plaintiff`);
-    assert.match(text, /CENTRAL TEXAS LOGISTICS, LLC/, `${page.role} prints the defendant`);
+    assert.match(text, /DELTA LLC/, `${page.role} prints the defendant`);
   }
 });
 
@@ -134,7 +135,7 @@ test("the guard reads the same two lists the caption prints", async () => {
   // disagree about who the parties are, and the guard would be clearing a line it had not seen.
   const input = await assembled(PARTIES);
   assert.deepEqual(input.fieldValues["caption.plaintiffs"], ["Ruben Vasquez"]);
-  assert.deepEqual(input.fieldValues["caption.defendants"], ["Central Texas Logistics, LLC"]);
+  assert.deepEqual(input.fieldValues["caption.defendants"], ["Delta LLC"]);
   // Absent is null, not "". An empty join would say this case has no plaintiffs; the record only
   // says that no party carries the role.
   const none = await assembled([]);

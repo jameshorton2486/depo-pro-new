@@ -73,5 +73,5 @@ test("the route still clears a value the reporter deliberately empties", () => {
 test("the certification screen loads the stored certificate before it can overwrite it", () => {
   const source = fs.readFileSync(new URL("../app/InsertionPagesScreen.tsx", import.meta.url), "utf8");
   assert.match(source, /api\/deposition\/certification\?depositionId=/, "the screen must read what it is about to overwrite");
-  assert.match(source, /setCertificate\(\(current\) => \(\{ \.\.\.current, \.\.\.body\.certification \}\)\)/);
+  assert.match(source, /setCertificate\(\(current\) => \(\{ \.\.\.current, \.\.\.body\.certification,/);
 });

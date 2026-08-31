@@ -251,8 +251,8 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "index.examinations": pagination.index?.examinations ?? null,
       "index.changesAndSignature": pagination.index?.changesAndSignature?.startPage ?? null,
       "index.reportersCertification": pagination.index?.reportersCertification?.startPage ?? null,
-      "cert.submissionDate": operator.certification?.submissionDate ?? null,
-      "cert.returnDeadline": operator.certification?.returnDeadline ?? null,
+      "cert.submissionDate": canonicalValue(record.signature?.submittedToWitnessDate) ?? operator.certification?.submissionDate ?? null,
+      "cert.returnDeadline": canonicalValue(record.signature?.dueDate) ?? operator.certification?.returnDeadline ?? null,
       "cert.returnStatus": operator.certification?.returnStatus ?? canonicalValue(record.signature?.returnedDate) ?? null,
       "cert.custodialAttorney": operator.certification?.custodialAttorney ?? canonicalValue(record.certification?.custodialAttorney) ?? null,
       // The template writes the dollar sign -- "That $^cert.charges^ is the deposition officer's" --
@@ -261,7 +261,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       // keeps what the reporter typed, and the page prints what the sentence needs.
       "cert.charges": stripLeadingCurrency(operator.certification?.charges ?? canonicalValue(record.certification?.officerCharges) ?? null),
       "cert.chargesResponsibleParty": operator.certification?.chargesResponsibleParty ?? canonicalValue(record.certification?.chargesResponsibleParty) ?? null,
-      "cert.serviceDate": operator.certification?.serviceDate ?? null,
+      "cert.serviceDate": canonicalValue(record.certification?.serviceDate) ?? operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,
       "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? canonicalValue(record.certification?.furtherCertificationDate) ?? null,
       "reporter.name": reporter.name,
