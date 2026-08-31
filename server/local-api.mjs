@@ -7,7 +7,7 @@ import {allowedApiOrigins,localApiPort} from "./api-origins.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
 import { saveAndAnalyzeAudio, saveAudioForTools, readAudioAudit, readAudioAuditIfPresent, publicAudit, selectAudioSource, resolveAudioPath, createDeepgramCompatibilityDerivative, readStoredTranscript, recordComparison, selectAsrSource, mutateAudioAudit, writeAudioAudit } from "./audio-pipeline.mjs";
 import { DeepgramRequestError, transcribeWithDeepgram, isDeepgramMediaError } from "./deepgram-service.mjs";
-import { appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
+import { STALE_REPORTER_TRANSACTION, appendReporterOperations, getSpeakerCandidates, getTranscriptionJob, getWorkingTranscript, listTranscriptionJobs, readAsrEvidence, readReporterOverlay, reconcileDepositionSpeakers, redoReporterOperation, runTranscriptionJob, undoReporterOperation } from "./transcription-jobs.mjs";
 import { renderTranscript } from "./transcript-render.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
@@ -392,12 +392,12 @@ const server = http.createServer(async (req,res) => {
     }
     if(req.url==="/api/transcript/overlay/undo"&&req.method==="POST"){
       const input=await body(req,64*1024);
-      const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const {overlay,removed}=undoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,expectedReviewStateHash:input.expectedReviewStateHash??null});
       return json(res,200,{overlay,removed},origin);
     }
     if(req.url==="/api/transcript/overlay/redo"&&req.method==="POST"){
       const input=await body(req,64*1024);
-      const {overlay,restored}=redoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const {overlay,restored}=redoReporterOperation(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,expectedReviewStateHash:input.expectedReviewStateHash??null});
       return json(res,200,{overlay,restored},origin);
     }
     // Counsel only. The one write the canonical record has outside intake, and it stays narrow
@@ -543,7 +543,12 @@ const server = http.createServer(async (req,res) => {
       }
       return json(res,200,results,origin);
     }    return json(res,404,{error:"Not found."},origin);
-  } catch(error) {if(error?.code==="WORKING_TRANSCRIPT_NOT_CREATED")return json(res,404,{error:error.message,code:error.code},origin);const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
+  } catch(error) {if(error?.code==="WORKING_TRANSCRIPT_NOT_CREATED")return json(res,404,{error:error.message,code:error.code},origin);
+    // A refused stale mutation is a conflict, not a server fault. Falling through to the
+    // generic handler below reported it as a 500 -- which tells the reporter the application
+    // broke, when in fact it protected their transcript.
+    if(error?.code===STALE_REPORTER_TRANSACTION)return json(res,409,{error:error.message,code:error.code,expected:error.expected,carried:error.carried},origin);
+    const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
 // Binding a port is a side effect of RUNNING this file, not of reading a value out of it.
 //

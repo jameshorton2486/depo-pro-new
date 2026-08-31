@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createCanonicalDepositionRecord, field } from "../server/canonical-deposition-record.mjs";
-import { appendReporterOperations } from "../server/transcription-jobs.mjs";
+import { appendReporterOperations, getWorkingTranscript, readReporterOverlay } from "../server/transcription-jobs.mjs";
+import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 import { ASSEMBLY_SCHEMA_VERSION, writeAssembly } from "../server/complete-transcript-assembly.mjs";
 import { EVIDENCE, WORKING } from "../tests/fixtures/etminan-evidence.mjs";
 
@@ -27,7 +28,10 @@ const audio=[{uploadId,source:"original",operationId:null,sha256:audioSha256,pat
 fs.writeFileSync(path.join(directory,"deposition.json"),JSON.stringify(deposition,null,2));fs.writeFileSync(path.join(directory,"intake","intake.json"),JSON.stringify({schemaVersion:"1.0.0",counselOfRecord:["Dennis J. Bentley","Christian R. Ramon"],keyterms:[],deepgramArtifact:{wire:[]},audio},null,2));fs.writeFileSync(path.join(directory,"intake","canonical-deposition-record.json"),JSON.stringify(record,null,2));fs.writeFileSync(path.join(directory,"transcript","working.json"),JSON.stringify(working,null,2));fs.writeFileSync(path.join(directory,"deepgram","jobs",EVIDENCE.jobIdentity,"asr-evidence.json"),JSON.stringify(evidence,null,2));
 const doctor=words.find(word=>word.punctuatedWord==="Doctor."),can=words.find((word,index)=>word.punctuatedWord==="Can"&&words[index-1]?.id===doctor?.id);
 if(!doctor||!can)throw new Error("Synthetic correction anchors were not found.");
-appendReporterOperations(process.cwd(),{depositionId:id,storageRoot:root,operations:[{op:"replace",wordId:doctor.id,text:"Doctor,"},{op:"replace",wordId:can.id,text:"can"}]});
+// The mutation boundary requires the state the caller observed. The fixture has just written
+// the transcript it is about to correct, so it reads that state rather than being exempted.
+const observed=computeReviewStateHash({transcript:getWorkingTranscript(process.cwd(),{depositionId:id,storageRoot:root}),overlay:readReporterOverlay(process.cwd(),{depositionId:id,storageRoot:root})});
+appendReporterOperations(process.cwd(),{depositionId:id,storageRoot:root,operations:[{op:"replace",wordId:doctor.id,text:"Doctor,"},{op:"replace",wordId:can.id,text:"can"}],expectedReviewStateHash:observed});
 // The assembly authority goes through the one writer, not around it.
 //
 // This script used to write intake/complete-transcript-assembly.json with fs directly, which made

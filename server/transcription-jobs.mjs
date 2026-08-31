@@ -82,17 +82,56 @@ function overlayFile(root,depositionId,storageRoot){return path.join(depositionD
 export function readReporterOverlay(root,{depositionId,storageRoot}){const file=overlayFile(root,depositionId,storageRoot);return validateOverlay(fs.existsSync(file)?readJson(file):null,depositionId)}
 export function writeReporterOverlay(root,{depositionId,storageRoot,overlay}){const validated=validateOverlay(overlay,depositionId);atomic(overlayFile(root,depositionId,storageRoot),jsonBytes(validated));return validated}
 export const STALE_REPORTER_TRANSACTION="STALE_REPORTER_TRANSACTION";
+/**
+ * Refuses a mutation that cannot prove which transcript it was made against.
+ *
+ * This used to be `if(expectedReviewStateHash){...}` on the append path only, which made currency
+ * a courtesy: a caller that sent nothing was not checked, it was waved through. The Workspace did
+ * send one, so the invariant appeared to hold -- but it held because one client cooperated, and
+ * undo and redo did not ask for a hash at all. Two tabs on one deposition were enough to pop a
+ * transaction the other tab had just committed.
+ *
+ * Absence is therefore a refusal, not a skip. Every caller of these three functions inherits it,
+ * which is the point of putting it here rather than in the routes: a check in a route is a check
+ * the next route can forget.
+ *
+ * One code for both cases. To the reporter, "you did not say what you were looking at" and "what
+ * you were looking at has moved" have the same remedy -- reload and try again -- and a second code
+ * would be taxonomy the caller has to learn without being able to act on it differently.
+ */
+function assertCurrent(root,{depositionId,storageRoot},overlay,expectedReviewStateHash){
+  if(!expectedReviewStateHash){
+    const error=new Error("This edit did not say which version of the transcript it was made against, so it cannot be saved. Reload the current record and try again.");
+    error.code=STALE_REPORTER_TRANSACTION;error.expected=null;error.carried=null;throw error;
+  }
+  const transcript=getWorkingTranscript(root,{depositionId,storageRoot});
+  const current=computeReviewStateHash({transcript,overlay});
+  if(current!==expectedReviewStateHash){
+    const error=new Error("The transcript changed before this edit could be saved. Reload the current record and try again.");
+    error.code=STALE_REPORTER_TRANSACTION;error.expected=current;error.carried=expectedReviewStateHash;throw error;
+  }
+}
 export function appendReporterOperations(root,{depositionId,storageRoot,operations,expectedReviewStateHash=null}){
   const overlay=readReporterOverlay(root,{depositionId,storageRoot});
-  if(expectedReviewStateHash){
-    const transcript=getWorkingTranscript(root,{depositionId,storageRoot});
-    const current=computeReviewStateHash({transcript,overlay});
-    if(current!==expectedReviewStateHash){const error=new Error("The transcript changed before this edit could be saved. Reload the current record and try again.");error.code=STALE_REPORTER_TRANSACTION;error.expected=current;error.carried=expectedReviewStateHash;throw error}
-  }
+  assertCurrent(root,{depositionId,storageRoot},overlay,expectedReviewStateHash);
   return writeReporterOverlay(root,{depositionId,storageRoot,overlay:appendTransaction(overlay,operations)});
 }
-export function undoReporterOperation(root,{depositionId,storageRoot}){const {overlay,removed}=undoLastTransaction(readReporterOverlay(root,{depositionId,storageRoot}));return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),removed}}
-export function redoReporterOperation(root,{depositionId,storageRoot}){const {overlay,restored}=redoLastTransaction(readReporterOverlay(root,{depositionId,storageRoot}));return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),restored}}
+// Undo and redo are authoritative mutations, not navigation. They rewrite the transaction history
+// the certified transcript is reconstructed from, so they carry the same burden of proof an edit
+// does -- and the hash must be the one the reporter was looking at when they invoked the command,
+// never one fetched a moment beforehand, which would satisfy the check while defeating it.
+export function undoReporterOperation(root,{depositionId,storageRoot,expectedReviewStateHash=null}){
+  const existing=readReporterOverlay(root,{depositionId,storageRoot});
+  assertCurrent(root,{depositionId,storageRoot},existing,expectedReviewStateHash);
+  const {overlay,removed}=undoLastTransaction(existing);
+  return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),removed};
+}
+export function redoReporterOperation(root,{depositionId,storageRoot,expectedReviewStateHash=null}){
+  const existing=readReporterOverlay(root,{depositionId,storageRoot});
+  assertCurrent(root,{depositionId,storageRoot},existing,expectedReviewStateHash);
+  const {overlay,restored}=redoLastTransaction(existing);
+  return{overlay:writeReporterOverlay(root,{depositionId,storageRoot,overlay}),restored};
+}
 
 export function readAsrEvidence(root,{depositionId,storageRoot}){const directory=depositionDirectory(root,depositionId,{storageRoot}),jobsDirectory=path.join(directory,"deepgram","jobs");if(!fs.existsSync(jobsDirectory))return[];return fs.readdirSync(jobsDirectory,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>{const file=path.join(jobsDirectory,item.name,"asr-evidence.json");try{return fs.existsSync(file)?readJson(file):null}catch{return null}}).filter(Boolean)}
 // Three rules here, and all three are about what a missing value must NOT become.
