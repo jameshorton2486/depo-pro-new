@@ -85,7 +85,9 @@ const operator = {
   titleNarrative: ["Alan Prentice, produced as a witness and duly sworn,", "was taken before Sarah Jenkins,", "Certified Shorthand Reporter in and for Texas."],
   certification: { custodialAttorney: "Michael Alvarez", charges: "500.00", chargesResponsibleParty: "Plaintiff", submissionDate: "2026-09-14", returnDeadline: "2026-09-28", serviceDate: "2026-09-30", certificationDate: "2026-09-14", furtherCertificationDate: "2026-09-30", returnStatus: "2026-09-28" },
   timeUsed: { totalOnRecordMinutes: 240, parties: [{ name: "Michael Alvarez", minutes: 160 }, { name: "Grace Whitfield", minutes: 80 }] },
-  examinations: [{ examiner: "Michael Alvarez", startPage: 4, endPage: 5 }],
+  // Page numbers are the paginator's. Supplying them here is what printed "4-5" on the index of
+  // a 213-page body; completePagination now refuses them outright.
+  examinations: [{ examiner: "Michael Alvarez" }],
 };
 
 function buildChain() {

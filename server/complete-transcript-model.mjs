@@ -55,17 +55,43 @@ function examinerName(record, operator) {
   return honorific ? `${honorific} ${name}` : name;
 }
 
+/**
+ * Places supplied examinations against the testimony the paginator actually laid out.
+ *
+ * Two refusals rather than a guess. A caller-supplied page number is rejected outright: it is not
+ * information this function needs and accepting it is how a wrong citation reached a certified
+ * index. And more than one examination cannot be placed at all -- where one examiner stops and the
+ * next begins lives in the transcript, in BY-lines and examination headings, not in a page count.
+ * Splitting the range down the middle would put a fabricated boundary on the index and look exactly
+ * like a real one.
+ */
+function placeExaminations(examinations,testimonyStart,testimonyEnd){
+  if(examinations.some(exam=>exam.startPage!==undefined||exam.endPage!==undefined))
+    throw new Error("COMPLETE_TRANSCRIPT_EXAMINATION_PAGES_NOT_ACCEPTED: page numbers on the index are derived from the transcript, never supplied.");
+  if(examinations.length>1)
+    throw new Error("COMPLETE_TRANSCRIPT_MULTIPLE_EXAMINATIONS_UNPLACEABLE: nothing here knows where one examination ends and the next begins.");
+  return examinations.map(exam=>({...exam,startPage:testimonyStart,endPage:testimonyEnd}));
+}
 export function completePagination({testimonyPages,signatureDisposition,examinations=[],examiner=null,frontPages=3,preCertificationPages=null,certificationPages=null}){
   const testimonyStart=frontPages+1,testimonyEnd=testimonyStart+testimonyPages-1;
   const requested=signatureDisposition==="requested",beforeCertificate=preCertificationPages??(requested?2:0),certificateCount=certificationPages??(requested?3:2),changesStart=requested?testimonyEnd+1:null,certificateStart=testimonyEnd+1+beforeCertificate;
-  const pageShift=frontPages-3;
   // The reporter never enters page ranges. A single examination spans the testimony, and its bounds
   // come from the paginator that already knows where testimony starts and ends.
+  //
+  // That was the comment before this function enforced it. The other branch took a caller's
+  // startPage and endPage verbatim, offset only by front-matter depth, and nothing compared them to
+  // the transcript -- so a supplied 4-5 printed "Examination by ... 4-5" on the index of a body
+  // running to 216. Latent, because only fixtures ever supplied that array, but the index is the
+  // one page whose entire job is to be true about other pages.
+  //
+  // Page numbers are now always derived. What a caller may state is examination *structure*: who
+  // examined. Supplying a page number is refused rather than ignored, because a caller who believes
+  // their number matters should be told it does not, not quietly overruled.
   //
   // Refused rather than defaulted when there is no examiner. This used to emit
   // { examiner: "EXAMINING ATTORNEY" } and the index printed it.
   const examinationEntries = examinations.length
-    ? examinations.map(exam => ({ ...exam, startPage:exam.startPage + pageShift, endPage:exam.endPage + pageShift }))
+    ? placeExaminations(examinations, testimonyStart, testimonyEnd)
     : examiner
       ? [{ examiner, startPage:testimonyStart, endPage:testimonyEnd }]
       : null;
