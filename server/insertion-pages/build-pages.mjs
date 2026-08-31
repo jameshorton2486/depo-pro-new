@@ -1,6 +1,7 @@
 import { appearancePhrase, captionParties } from "./assemble.mjs";
 import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
+import { certifiedDateValues } from "./certified-date.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../texas-freelance-deposition-profile.mjs";
 
 const value = (field) => field && typeof field === "object" && "value" in field ? field.value : field;
@@ -325,7 +326,7 @@ export function captionOverflowFindings(input) {
     const rendered = renderTemplatePage(template, values, { pageNumber: 1, role, linesPerPage: 0 });
     for (const row of alignCaptionLines(rendered.lines, profile).overflow) {
       findings.push({
-        code: "CAPTION_ROW_OVERFLOW", target: `pages.${role}.caption`, severity: "warning",
+        code: "CAPTION_ROW_OVERFLOW", target: `pages.${role}.caption`, severity: "blocking",
         message: `The ${role} caption row "${row.text.trim()}" occupies ${row.length} characters; the profile permits ${profile.charactersPerLine}. Squared up it would be re-flowed and lose its column. Supply the court heading, county and judicial district lines so the court column carries the short form rather than the whole court name.`,
         path: `pages.${role}.caption`,
       });
@@ -366,7 +367,7 @@ function templateValues(input, roles) {
   };
   // The index lines are built only when the index page is, so a certificate-only document never
   // asks for a number nobody can supply.
-  return { ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) };
+  return certifiedDateValues({ ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) });
 }
 
 export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {

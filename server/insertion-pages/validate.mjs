@@ -14,10 +14,8 @@ import { captionJurisdiction } from "./variants.mjs";
 // with a dropped clause and a clean bill of health -- the defect this list is next to, not a use
 // for it. An entry added merely to make validation pass is how the guard stops meaning anything.
 export const INTENTIONAL_BLANKS = Object.freeze({
-  TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([
-    "cert.submissionDate", "cert.returnDeadline", "cert.serviceDate",
-  ]),
-  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze(["cert.serviceDate"]),
+  TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([]),
+  TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze([]),
   FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
   FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
 });

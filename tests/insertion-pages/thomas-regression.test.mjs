@@ -74,6 +74,8 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
   // nothing to block on. Per ADR-0020 the method is a fact about the deposition, and the
   // per-attorney requirement blocked counsel who had appeared on a field no certified page renders.
   assert.deepEqual(pairs("blocking"), [
+    "CAPTION_ROW_OVERFLOW:pages.certification1.caption",
+    "CAPTION_ROW_OVERFLOW:pages.title.caption",
     "CERT_COUNSEL_INCOMPLETE:cert.counselOfRecord",
     "CERT_FIRM_REGISTRATION_UNRESOLVED:reporter.firmRegistrationNumber",
     "CERT_JURISDICTION_MISMATCH:cert.jurisdiction",
@@ -89,18 +91,13 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "UNEXPECTED_BLANK:cert.chargesResponsibleParty",
     "UNEXPECTED_BLANK:cert.custodialAttorney",
     "UNEXPECTED_BLANK:cert.furtherCertificationDate",
+    "UNEXPECTED_BLANK:cert.returnDeadline",
     "UNEXPECTED_BLANK:cert.returnStatus",
+    "UNEXPECTED_BLANK:cert.serviceDate",
+    "UNEXPECTED_BLANK:cert.submissionDate",
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",
-    // The fixture's court is the full "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF
-    // TEXAS" with no short heading line supplied, so the caption column carries all 62 characters
-    // of it and the row cannot be squared inside the geometry. Recorded as a defect of this record:
-    // before the finding existed the row was re-flowed to a single space either side of the
-    // delimiter and the caption silently lost its column. It warns rather than blocks because
-    // nothing in the application collects the heading line that would fix it.
-    "CAPTION_ROW_OVERFLOW:pages.certification1.caption",
-    "CAPTION_ROW_OVERFLOW:pages.title.caption",
     "ALSO_PRESENT_AWKWARD:participants.videographer",
     "CAPTION_PLURALIZATION:caption.partyLabel",
     "CAPTION_PUNCTUATION:caption.causeNumber",

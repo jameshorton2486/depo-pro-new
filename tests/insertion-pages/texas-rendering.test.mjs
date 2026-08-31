@@ -97,9 +97,8 @@ test("a caption that cannot be squared is refused rather than re-flowed", async 
   const long = await validInput("waived", { courtHeadingLine: "IN THE 285TH JUDICIAL DISTRICT COURT OF BEXAR COUNTY, TEXAS" });
   const overflow = validateInsertionInput(long).filter((finding) => finding.code === "CAPTION_ROW_OVERFLOW");
   assert.ok(overflow.length, "a 59-character court line beside a caption value cannot fit 63");
-  // A warning, not a blocker: no screen collects the heading line that would resolve it, and a
-  // gate the reporter cannot pass is not a gate.
-  assert.equal(overflow[0].severity, "warning");
+  // A certified caption that cannot remain squared is refused rather than silently re-flowed.
+  assert.equal(overflow[0].severity, "blocking");
   assert.match(overflow[0].message, /Supply the court heading/);
 
   const short = await validInput("waived");

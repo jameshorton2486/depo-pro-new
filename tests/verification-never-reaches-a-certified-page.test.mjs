@@ -39,10 +39,10 @@ function scratch(t, { witness = "Mohammad Etminan, M.D." } = {}) {
       createCanonicalDepositionRecord({
         court: "In the 285th Judicial District Court",
         causeNumber: "2024-CI-11223",
-        caseStyle: "Mohammad Etminan, M.D. v. Baptist Health System",
+        caseStyle: "Etminan v. Baptist",
         parties: [
-          { name: "Mohammad Etminan, M.D.", role: "Plaintiff" },
-          { name: "Baptist Health System", role: "Defendant" },
+          { name: "M. Etminan", role: "Plaintiff" },
+          { name: "Baptist", role: "Defendant" },
         ],
         witness,
         depositionDate: "2026-04-24",
@@ -89,7 +89,8 @@ const render = (s) =>
         // Supplied for the same reason pagination is: these two certificate fields now reach the
         // guard and nothing collects them yet. Not what this file is about.
         certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+          certificationDate: "2026-08-14", returnStatus: "2026-08-28", furtherCertificationDate: "2026-08-30",
+          submissionDate: "2026-08-14", returnDeadline: "2026-08-28", serviceDate: "2026-08-30" },
         // Same reason: the time-used clause blocks now, and this guard needs a render that
         // completes.
         timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] },

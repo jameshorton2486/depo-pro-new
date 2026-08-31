@@ -41,7 +41,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertificateWorkflow, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertificateWorkflow, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -421,6 +421,14 @@ const server = http.createServer(async (req,res) => {
     if(req.url==="/api/deposition/certification"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeDepositionCertification(root,{depositionId:input.depositionId,certification:input.certification,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url?.startsWith("/api/deposition/certificate-workflow?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionCertificateWorkflow(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/deposition/certificate-workflow"&&req.method==="POST"){
+      const input=await body(req,16*1024);
+      return json(res,200,writeDepositionCertificateWorkflow(root,{depositionId:input.depositionId,workflow:input.workflow,storageRoot:depositionStorageRoot}),origin);
     }
     // The time each party used, which the certificate states by name and nothing could record.
     // Same shape as the certification pair above and for the same reason: the screen has to be

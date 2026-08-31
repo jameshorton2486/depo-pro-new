@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { guardAction } from "./unsaved-edit-guard.mjs";
 
 export type DocumentFragment={id:string;kind:"evidence"|"authored"|"generated";role:string;text:string;sourceWordId:string|null;sourceStart?:number;sourceEnd?:number;audioStart?:number|null;audioEnd?:number|null};
 export type DocumentLine={position:number;occupied:boolean;content:string;paragraphId:string|null;fragments:DocumentFragment[]};
@@ -49,6 +50,23 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
   useEffect(()=>{onEditingChange(Boolean(activeEdit));return()=>onEditingChange(false)},[activeEdit,onEditingChange]);
   useEffect(()=>{activeEditRef.current=activeEdit},[activeEdit]);
   useEffect(()=>{if(saveTimer.current)clearTimeout(saveTimer.current);if(activeEdit?.status==="editing"&&activeEdit.draft!==activeEdit.baseText)saveTimer.current=setTimeout(()=>{void saveRef.current()},1200);return()=>{if(saveTimer.current)clearTimeout(saveTimer.current)}},[activeEdit?.draft,activeEdit?.baseText,activeEdit?.status]);
+  // The debounce above leaves up to 1.2 seconds of typing uncommitted, and a closing tab does not
+  // wait for it. Two listeners, doing deliberately different things -- see unsaved-edit-guard.mjs
+  // for why saving during unload is not one of the options.
+  //
+  // Hiding is where the save happens: visibilitychange fires when the tab is backgrounded or
+  // closed and still permits asynchronous work, so the existing save runs. No second save path --
+  // the same saveRef, so nothing can commit a paragraph a different way.
+  //
+  // Unloading only warns. If the edit is somehow still dirty by then the browser is asked to
+  // confirm, which does not preserve the text but does stop it disappearing without a word.
+  useEffect(()=>{
+    const onHide=()=>{if(document.visibilityState==="hidden"&&guardAction("hide",activeEditRef.current)==="flush")void saveRef.current()};
+    const onUnload=(event:BeforeUnloadEvent)=>{if(guardAction("unload",activeEditRef.current)!=="warn")return;event.preventDefault();event.returnValue=""};
+    document.addEventListener("visibilitychange",onHide);
+    window.addEventListener("beforeunload",onUnload);
+    return()=>{document.removeEventListener("visibilitychange",onHide);window.removeEventListener("beforeunload",onUnload)};
+  },[]);
   function openEdit(paragraphId:string,lineKey:string,offset:number){const paragraph=paragraphById.get(paragraphId);if(!paragraph)return;setActiveEdit({paragraphId,lineKey,draft:paragraph.text,baseText:paragraph.text,caret:Math.min(offset,paragraph.text.length),status:"editing"})}
   async function save(){
     if(savePromise.current)return savePromise.current;

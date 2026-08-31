@@ -44,7 +44,7 @@ function render(reporterProfile) {
   const record = createCanonicalDepositionRecord({
     court: "In the 285th Judicial District Court", causeNumber: "2024-CI-11223",
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
-    parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Central Texas Logistics, LLC", role: "Defendant" }],
+    parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Delta LLC", role: "Defendant" }],
     depositionDate: "2026-09-18", location: "San Antonio", remote: true, remotePlatform: "Zoom",
     attorneys: [{ name: "Alicia Moreno", firm: "Moreno Trial Law PLLC", represents: "Plaintiff", side: "PLAINTIFF", appeared: true, participation: { method: "remote-video" } }],
     reporterProfile,
@@ -55,7 +55,8 @@ function render(reporterProfile) {
     // cert.furtherCertificationDate now reach the guard and nothing collects them yet.
     operator: { jurisdiction: "texas-state", signatureDisposition: "requested", signatureDispositionBasis: "Requested on the record.",
       certification: { custodialAttorney: "Pat Counsel", charges: "500.00", chargesResponsibleParty: "Plaintiff",
-          certificationDate: "August 14, 2026", returnStatus: "August 28, 2026", furtherCertificationDate: "August 30, 2026" },
+          certificationDate: "2026-08-14", returnStatus: "2026-08-28", furtherCertificationDate: "2026-08-30",
+          submissionDate: "2026-08-14", returnDeadline: "2026-08-28", serviceDate: "2026-08-30" },
       // Same reason: the time-used clause blocks now, and this file is about the reporter profile.
       timeUsed: { parties: [{ name: "Pat Counsel", minutes: 60 }] } },
     pagination: { index: { entries: [], actualSectionPages: {}, declaredSectionPages: {},
@@ -81,7 +82,7 @@ test("a solo reporter created through the store renders a certification page", t
   const { blocking, pages } = render(stored(t, { csrExpiration: "2027-06-30", firmRegistrationWaiver: WAIVER }));
   assert.deepEqual(blocking, [], "nothing may block a reporter who has answered every requirement");
   const blob = JSON.stringify(pages);
-  assert.ok(blob.includes("Expiration Date: 2027-06-30"), "the expiration prints, as every specimen does");
+  assert.ok(blob.includes("Expiration Date: June 30, 2027"), "the expiration prints in the certified date format");
   assert.ok(!blob.includes("Firm Registration"), "and the firm line is omitted, not blanked");
   assert.ok(!/\^[a-z][a-zA-Z0-9_.-]*\^/.test(blob), "no placeholder survives onto the page");
 });
