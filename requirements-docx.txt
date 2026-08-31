@@ -1,0 +1,16 @@
+# The Word deliverable's toolchain.
+#
+# server/fixed-page-docx-renderer.py and server/insertion-pages/python-docx-renderer.py turn the
+# Print Model into the .docx a reporter serves. Neither package appears in package.json, because
+# neither is a Node dependency -- which is exactly why this file exists. Without it the final
+# document rests on whatever `python` happens to be on PATH, and a Python upgrade or a new machine
+# breaks Word output with nothing in the dependency graph to explain why.
+#
+# Pinned to the versions the 221-page Word qualification was performed against.
+#
+#   pip install -r requirements-docx.txt
+#
+# The interpreter is resolved as DEPO_PRO_PYTHON ?? "python". Set DEPO_PRO_PYTHON to pin a
+# specific interpreter, as DEPO_PRO_RX_PYTHON already does for the audio worker.
+python-docx==1.1.2
+lxml==6.0.2

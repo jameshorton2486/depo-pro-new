@@ -28,6 +28,11 @@ export function createTranscriptDocxArtifact(root,{depositionId,printModel,stora
   writeAtomic(specPath,spec);
   const python=process.env.DEPO_PRO_PYTHON??"python";
   const result=spawnSync(python,[renderer,"--spec",specPath,"--output",outputPath,"--mapping",mappingPath],{encoding:"utf8",windowsHide:true});
+  // A missing interpreter or a missing package is a setup problem, and a Python traceback is not
+  // something a reporter can act on. Say what to run. Everything else surfaces as it is, because a
+  // genuine renderer fault should not be dressed up as a setup problem.
+  if(result.error||/ModuleNotFoundError|ImportError/.test(`${result.stderr??""}`))
+    throw new Error(`FIXED_PAGE_DOCX_TOOLCHAIN_MISSING: the Word renderer needs Python with python-docx and lxml. Install them with "pip install -r requirements-docx.txt", or set DEPO_PRO_PYTHON to an interpreter that has them. (${(result.error?.message||`${result.stderr??""}`).trim().split(/\r?\n/).pop()})`);
   if(result.status!==0)throw new Error(`FIXED_PAGE_DOCX_RENDER_FAILED: ${(result.stderr||result.stdout||"unknown renderer error").trim()}`);
   return{outputPath,specPath,mappingPath,bytes:fs.statSync(outputPath).size,specSha256:spec.sha256,renderer:JSON.parse(result.stdout.trim())};
 }
