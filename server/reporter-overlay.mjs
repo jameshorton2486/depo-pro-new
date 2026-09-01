@@ -14,7 +14,11 @@
 
 export const OVERLAY_SCHEMA_VERSION = "2.0.0";
 export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review"]);
+export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review", "examination"]);
+// The examinations a Texas deposition actually contains, in the order they can occur. Closed on
+// purpose: an examination type is a thing the record can be asked to prove, not a free-text note,
+// and a heading nobody recognises is worse than a refusal.
+export const EXAMINATION_TYPES = Object.freeze(["DIRECT", "CROSS", "REDIRECT", "RECROSS"]);
 export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[], transactionSizes:[], redoTransactions:[] });
 
 const text = value => String(value ?? "");
@@ -79,6 +83,26 @@ export function validateOperation(input) {
   if (op === "unflag") {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
+  }
+  // Where one examination stops and the next begins.
+  //
+  // `labelParagraphs` holds a single examiner for the whole transcript, so defending counsel's
+  // cross renders as colloquy and the answers to it render as THE WITNESS rather than A. The
+  // missing thing is not a label -- it is that the transcript has no notion of an examination
+  // having a beginning. This operation supplies one; nothing consumes it yet.
+  //
+  // A boundary carries no end. The next boundary terminates the previous one and the last runs to
+  // the end of testimony, so an examination cannot be left with an end that contradicts where the
+  // following one starts.
+  //
+  // `examinerPersonId` is a canonical participant id, never a typed name. A name entered twice is
+  // two examiners as far as the index is concerned, and the index is printed.
+  if (op === "examination") {
+    if (!trimmed(input.atWordId)) return { ok:false, message:"examination requires atWordId." };
+    if (!trimmed(input.examinerPersonId)) return { ok:false, message:"examination requires examinerPersonId; a boundary that names nobody cannot say whose examination begins." };
+    const type = trimmed(input.type).toUpperCase();
+    if (!EXAMINATION_TYPES.includes(type)) return { ok:false, message:`examination type must be one of ${EXAMINATION_TYPES.join(", ")}.` };
+    return { ok:true, operation:{ op, atWordId:trimmed(input.atWordId), examinerPersonId:trimmed(input.examinerPersonId), type } };
   }
   if (op === "review") {
     if (!trimmed(input.wordId)) return { ok:false, message:"review requires wordId." };
@@ -156,6 +180,9 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
   // rather than stacking two, and an unflag has one thing to address.
   const flags = new Map(), reviews = new Map();
+  // Keyed by the word the examination begins at, which is what makes a second boundary on the
+  // same word detectable.
+  const examinations = new Map();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
@@ -211,6 +238,19 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       reviews.set(operation.wordId,{disposition:operation.disposition,at:operation.at,actor:operation.actor});
       return;
     }
+    if (operation.op === "examination") {
+      // Resolved against segment order rather than anchorExists, for the reason flags are: a word
+      // that exists in the evidence but sits in no segment cannot begin anything in the reading.
+      if (segmentHolding(current, operation.atWordId) < 0) return orphan("WORD_NOT_FOUND");
+      // Refused, not overwritten -- and this is where it differs from `flag`, deliberately.
+      // Re-flagging a passage moves a mark that means "listen again"; nothing is lost. A boundary
+      // is the reporter's statement that a named person began examining at this word, so quietly
+      // replacing one discards a recorded fact about the proceeding while looking like success.
+      // The correction path is undo, which is the correction path for every other operation here.
+      if (examinations.has(operation.atWordId)) return orphan("EXAMINATION_ALREADY_BOUNDED");
+      examinations.set(operation.atWordId, { atWordId:operation.atWordId, examinerPersonId:operation.examinerPersonId, type:operation.type });
+      return;
+    }
     const anchor=operation.afterWordId??operation.beforeWordId;
     if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
     const target=operation.beforeWordId?insertedBefore:inserted;
@@ -237,7 +277,17 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   }
   // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
   // reader reads, and a caller that only asks for the text gets the text.
-  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, orphaned };
+  // Transcript order, not the order the reporter marked them in. A reporter who notices the
+  // redirect first and goes back for the cross has still described the same proceeding, and
+  // whatever walks paragraphs in order needs the boundaries in the order it will meet them.
+  const examinationBoundaries = [...examinations.values()]
+    .map(boundary => ({ boundary, at:order.indexOf(boundary.atWordId) }))
+    .filter(item => item.at >= 0)
+    .sort((left, right) => left.at - right.at)
+    .map(item => item.boundary);
+  // Like `flagged`, deliberately not folded into replaced/deleted/inserted: a boundary changes no
+  // word the reader reads.
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, examinations:examinationBoundaries, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */
