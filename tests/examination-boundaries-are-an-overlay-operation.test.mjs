@@ -119,14 +119,29 @@ test("two boundaries on different words both stand", () => {
 // --- it changes nothing yet ------------------------------------------------------------------
 
 test("a boundary changes no word the reader reads", () => {
-  // Phase B is inert by design. If this fails, labelling has been changed, and that is Phase C.
+  // Phase B was inert: this asserted whole paragraphs were identical. Phase C landed and moves
+  // Q./A., so that assertion no longer holds -- and it was always broader than this test's name.
+  //
+  // What the name claims is still exactly true and is what matters evidentially: a boundary is a
+  // statement about who was examining, not an edit. It must not add, remove, retime or rewrite a
+  // single word. Narrowed to that, deliberately, rather than deleted -- the words are the record,
+  // and nothing else in this file would notice a boundary that quietly touched them.
   const withBoundaries = render(overlayOf(
     boundary(DIRECT_AT, "counsel-bentley", "DIRECT"),
     boundary(CROSS_AT, "counsel-ramon", "CROSS"),
   ));
   const plain = render(overlayOf());
-  assert.deepEqual(withBoundaries.paragraphs, plain.paragraphs,
-    "recording an examination boundary must not yet move a single Q. or A.");
+  const readable = result => result.paragraphs.map(paragraph => ({
+    text:paragraph.text, start:paragraph.start, end:paragraph.end,
+    words:paragraph.words.map(word => ({ id:word.id, text:word.text, start:word.start, end:word.end })),
+  }));
+  assert.deepEqual(readable(withBoundaries), readable(plain),
+    "every word, its text and its timing survive a boundary untouched");
+
+  // And the labelling did move, which is Phase C working. Asserted here so that a regression in
+  // which boundaries stopped reaching the renderer shows up as a failure rather than as this file
+  // quietly passing again.
+  assert.notDeepEqual(withBoundaries.paragraphs.map(item => item.elementType), plain.paragraphs.map(item => item.elementType));
 });
 
 test("a boundary still resolves after a split reshapes the segment holding it", () => {

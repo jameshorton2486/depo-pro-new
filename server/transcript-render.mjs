@@ -86,7 +86,9 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   });
 
   const grouped = groupTranscriptSegments(withText);
-  const labelled = labelParagraphs(grouped, { labels, examinerIdentity });
+  // The overlay is the authority on where examination changes hands. applyOverlay returns the
+  // boundaries in transcript order; labelParagraphs advances the active examiner as it walks.
+  const labelled = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations });
 
   const seen = new Set();
   const paragraphs = labelled.map((paragraph, index) => {
