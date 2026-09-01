@@ -9,10 +9,11 @@ import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
 import { EXAMINATION_TYPE_CHOICES, examinationControl, examinationOperation, examinationSummary } from "./examination-control.mjs";
+import { examinerColloquyControl, examinerColloquyLabel, examinerColloquyOperation } from "./examiner-colloquy-control.mjs";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
-type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
+type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; examinerColloquy?:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string; speakerIdentity?:string; name?:string };
 type Examination = { examinerPersonId:string; type:string; atWordId:string|null; implicit:boolean };
 type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; examinations?:Examination[]; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
@@ -766,6 +767,24 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               {rendered?.labels?.[candidate.id] ?? candidate.label}
             </button>
           ))}
+          {/* Whether an utterance is a question is a third fact, separate from who spoke and from
+              who is examining. The reporter states it; nothing here infers it, and the transcript
+              already knows who spoke so it is not asked again. Deliberately its own section: the
+              examination control below marks who is examining, which is a different decision. */}
+          <h3>This utterance</h3>
+          {(() => {
+            const control = examinerColloquyControl({ paragraph:active });
+            if (control.disabledReason) return <p className="workspace-note">{control.disabledReason}</p>;
+            const label = examinerColloquyLabel({ paragraph:active, labels:rendered?.labels ?? {} });
+            return (
+              <button type="button" disabled={busy} onClick={()=>{
+                const operation = examinerColloquyOperation({ paragraph:active });
+                if (!operation) return;
+                setSelected(null);
+                void structuralTransaction([operation]);
+              }}>{label}</button>
+            );
+          })()}
           {/* Where an examination changes hands. One action writes one overlay operation, and the
               heading, the BY-line, the Q./A. labelling and the index entry all derive from it --
               none of them is entered here or stored anywhere else. */}

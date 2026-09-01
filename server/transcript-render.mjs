@@ -137,6 +137,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       id:`paragraph:${paragraph.asrWordIds?.[0] ?? paragraph.segmentIds?.[0] ?? `empty:${index + 1}`}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
+      // The reporter's own determination, carried so the Workspace can offer to clear it.
+      examinerColloquy:Boolean(paragraph.examinerColloquy),
       // Carried, not parsed. speakerBuckets keys the speaker map by (job, speaker) and had to
       // recover the job by splitting segmentIds[0] on a colon -- a dependency on the shape of an
       // id string, where a format change would silently collapse every bucket back to speaker
