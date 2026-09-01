@@ -158,6 +158,21 @@ export function centerColumn(text, width = LINE_WIDTH) {
   return Math.max(0, Math.floor((width - String(text ?? "").length) / 2));
 }
 
+// The heading that announces an examination, by type -- Phase D2.
+//
+// DIRECT is deliberately absent, and that absence is a characterized decision rather than an
+// oversight. The certified specimens do carry a bare `EXAMINATION` heading for the first
+// examination, 17 times across the set, following "having been first duly sworn, testified as
+// follows:". Depo-Pro has never emitted it, for single-examiner transcripts or any other kind, and
+// the qualified 221-page output does not contain one. Adding it here would change every existing
+// transcript in order to fix something that has nothing to do with a second examiner, so it is
+// recorded as a separate gap instead. See the Phase D report.
+//
+// The three below are the reporter's stated forms. Nothing in the repository defined them, and
+// nothing in the specimens could -- every specimen is a single-examiner deposition, so a
+// cross-examination heading never appears in one.
+export const EXAMINATION_HEADINGS = Object.freeze({ CROSS:"CROSS-EXAMINATION", REDIRECT:"REDIRECT EXAMINATION", RECROSS:"RECROSS-EXAMINATION" });
+
 const FIXED_LABELS = Object.freeze({ COURT_REPORTER:"THE REPORTER", VIDEOGRAPHER:"THE VIDEOGRAPHER", INTERPRETER:"THE INTERPRETER", WITNESS:"THE WITNESS" });
 const ATTORNEY_ROLES = new Set(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY"]);
 

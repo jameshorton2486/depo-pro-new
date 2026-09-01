@@ -218,18 +218,21 @@ const boundaryOp = { op:"examination", atWordId:CROSS_WORD, examinerPersonId:"co
 test("a persisted boundary reaches the rendered transcript", () => {
   const before = renderWith(null).paragraphs;
   const after = renderWith(appendTransaction(emptyOverlay("DEP-TEST"), [boundaryOp])).paragraphs;
-  const crossIndex = before.findIndex(item => item.speakerIdentity === "counsel-ramon");
-  assert.ok(crossIndex >= 0, "the fixture must contain a second attorney");
-  assert.equal(before[crossIndex].elementType, "COLLOQUY", "her paragraph was conversation");
-  assert.equal(after[crossIndex].elementType, "QUESTION", "and one boundary makes it a question");
+  // Located independently in each rendering. D2 inserts a heading and a BY-line ahead of the
+  // handover, so the same paragraph no longer sits at the same index in both.
+  const findCross = list => list.findIndex(item => item.speakerIdentity === "counsel-ramon");
+  const beforeIndex = findCross(before), afterIndex = findCross(after);
+  assert.ok(beforeIndex >= 0 && afterIndex >= 0, "the fixture must contain a second attorney");
+  assert.equal(before[beforeIndex].elementType, "COLLOQUY", "her paragraph was conversation");
+  assert.equal(after[afterIndex].elementType, "QUESTION", "and one boundary makes it a question");
 
   // The answer after her is ANSWER in both renderings, and that is not the boundary's doing: in
   // this fixture she speaks while Mr. Bentley's question is still open, so the existing rule that
   // attorney colloquy does not close a question already produced A. The point worth asserting is
   // that the boundary did not disturb it -- an implementation that reset the pending question on
   // an examiner change would turn this into THE WITNESS:.
-  assert.equal(before[crossIndex + 1].elementType, "ANSWER");
-  assert.equal(after[crossIndex + 1].elementType, "ANSWER");
+  assert.equal(before[beforeIndex + 1].elementType, "ANSWER");
+  assert.equal(after[afterIndex + 1].elementType, "ANSWER");
 });
 
 test("a boundary survives a reload and reconstruction", () => {

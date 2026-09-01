@@ -131,12 +131,16 @@ test("a boundary changes no word the reader reads", () => {
     boundary(CROSS_AT, "counsel-ramon", "CROSS"),
   ));
   const plain = render(overlayOf());
-  const readable = result => result.paragraphs.map(paragraph => ({
-    text:paragraph.text, start:paragraph.start, end:paragraph.end,
-    words:paragraph.words.map(word => ({ id:word.id, text:word.text, start:word.start, end:word.end })),
-  }));
+  // Compared word by word across the whole transcript rather than paragraph by paragraph. D2 now
+  // inserts a heading and a BY-line at each handover, and those are structural rows carrying no
+  // word at all -- so a paragraph-list comparison would fail while the claim this test makes stays
+  // exactly true. The claim is about the words, and the words are the record.
+  const readable = result => result.paragraphs.flatMap(paragraph => paragraph.words)
+    .map(word => ({ id:word.id, text:word.text, start:word.start, end:word.end }));
   assert.deepEqual(readable(withBoundaries), readable(plain),
     "every word, its text and its timing survive a boundary untouched");
+  assert.ok(withBoundaries.paragraphs.some(paragraph => paragraph.derived && paragraph.words.length === 0),
+    "the rows a boundary does add carry no words, which is why the comparison above holds");
 
   // And the labelling did move, which is Phase C working. Asserted here so that a regression in
   // which boundaries stopped reaching the renderer shows up as a failure rather than as this file
