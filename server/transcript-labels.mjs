@@ -173,6 +173,22 @@ export function centerColumn(text, width = LINE_WIDTH) {
 // cross-examination heading never appears in one.
 export const EXAMINATION_HEADINGS = Object.freeze({ CROSS:"CROSS-EXAMINATION", REDIRECT:"REDIRECT EXAMINATION", RECROSS:"RECROSS-EXAMINATION" });
 
+// How an examination is named on the index. Same source as the headings above, so the page and the
+// index cannot describe one examination two ways.
+//
+// DIRECT is "Examination", not "Direct Examination", and that is settled on the source rather than
+// chosen. F-09 in docs/opening-procedures/ufm-opening-tier-findings.md measures UFM Figures 14 and
+// 15 as identical but for one line: the trial record heads DIRECT EXAMINATION, the freelance
+// deposition heads EXAMINATION. This application produces freelance depositions. The certified
+// specimen agrees -- thomas-regression encodes a real transcript's index entry as
+// { examiner: "Mr. Nunez" }, printed "Examination by Mr. Nunez", with no type.
+//
+// The other three are a Depo-Pro presentation policy, not a prescribed form. No source prescribes
+// them: every certified specimen in this project is a single-examiner deposition, so a
+// cross-examination index line has never appeared in one. They mirror the body headings above so a
+// reader meets the same words in both places.
+export const EXAMINATION_INDEX_LABELS = Object.freeze({ DIRECT:"Examination", CROSS:"Cross-Examination", REDIRECT:"Redirect Examination", RECROSS:"Recross-Examination" });
+
 const FIXED_LABELS = Object.freeze({ COURT_REPORTER:"THE REPORTER", VIDEOGRAPHER:"THE VIDEOGRAPHER", INTERPRETER:"THE INTERPRETER", WITNESS:"THE WITNESS" });
 const ATTORNEY_ROLES = new Set(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY"]);
 

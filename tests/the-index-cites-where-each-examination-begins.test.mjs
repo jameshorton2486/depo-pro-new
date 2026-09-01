@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WORKING as LONG, EVIDENCE as LONG_EVIDENCE, SPEAKER_CANDIDATES as LONG_SPEAKERS } from "./fixtures/long-deposition.mjs";
 import { completePagination } from "../server/complete-transcript-model.mjs";
+import { EXAMINATION_INDEX_LABELS } from "../server/transcript-labels.mjs";
 import { renderTranscript } from "../server/transcript-render.mjs";
 import { buildTranscriptPrintModel } from "../server/transcript-print-model.mjs";
 import { appendTransaction, emptyOverlay } from "../server/reporter-overlay.mjs";
@@ -165,6 +166,51 @@ test("the implicit first examination begins on the first page of testimony", () 
   // Absolute, not merely equal to itself across two builds. It has no anchor and no heading, so
   // page 1 is a definition rather than a lookup -- and a definition nothing asserts is a default.
   assert.equal(synthetic(21).direct.testimonyPage, 1);
+});
+
+// --- how each examination is named ---------------------------------------------------------------
+
+test("each examination type names itself on the index", () => {
+  const entries = place([
+    exam("counsel-alvarez", "DIRECT", 1, true),
+    exam("counsel-whitfield", "CROSS", 60),
+    exam("counsel-alvarez", "REDIRECT", 120),
+    exam("counsel-whitfield", "RECROSS", 170),
+  ]);
+  assert.deepEqual(entries.map(entry => `${entry.examinationLabel} by ${entry.examiner}`), [
+    "Examination by Ms. Ana Alvarez",
+    "Cross-Examination by Ms. Grace Whitfield",
+    "Redirect Examination by Ms. Ana Alvarez",
+    "Recross-Examination by Ms. Grace Whitfield",
+  ]);
+  // And the pages are still the paginator's, not something the naming changed.
+  assert.deepEqual(entries.map(entry => `${entry.startPage}-${entry.endPage}`), ["4-62", "63-122", "123-172", "173-203"]);
+});
+
+test("a deposition's first examination is Examination, not Direct Examination", () => {
+  // Settled on the source, not chosen. F-09 measures UFM Figures 14 and 15 as identical but for one
+  // line: the trial record heads DIRECT EXAMINATION and the freelance deposition heads EXAMINATION.
+  // The certified specimen agrees -- thomas-regression's real index entry reads "Examination by
+  // Mr. Nunez". This application produces freelance depositions.
+  assert.equal(EXAMINATION_INDEX_LABELS.DIRECT, "Examination");
+  assert.notEqual(EXAMINATION_INDEX_LABELS.DIRECT, "Direct Examination");
+  assert.deepEqual(Object.keys(EXAMINATION_INDEX_LABELS).sort(), ["CROSS", "DIRECT", "RECROSS", "REDIRECT"]);
+});
+
+test("an untyped examination keeps the certified specimen's wording", () => {
+  // The single-examiner path supplies no type, and its line must not change: this is the form a
+  // real certified transcript uses.
+  const [entry] = place([exam("counsel-alvarez", "DIRECT", 1, true)], { examiner:"Ms. Ana Alvarez" });
+  assert.equal(entry.examinationLabel, undefined, "the legacy path carries no label");
+});
+
+test("the longest typed index line still fits the certified page width", () => {
+  // "Recross-Examination by " is 23 characters before the name. A line that overflows 63 characters
+  // is a blocking finding at assembly, so the naming decision has to be checked against the
+  // geometry rather than assumed to fit.
+  const entries = place([exam("counsel-alvarez", "DIRECT", 1, true), exam("counsel-whitfield", "RECROSS", 170)]);
+  const rendered = entries.map(entry => `  ${entry.examinationLabel ?? "Examination"} by ${entry.examiner}........... ${entry.startPage}-${entry.endPage}`);
+  for (const line of rendered) assert.ok(line.length <= 63, `${line.length} characters: ${line}`);
 });
 
 // --- §122's refusals are untouched ---------------------------------------------------------------

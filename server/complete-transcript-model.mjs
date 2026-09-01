@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EXAMINATION_INDEX_LABELS } from "./transcript-labels.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
@@ -92,7 +93,7 @@ function placeResolvedExaminations(resolved, record, testimonyStart, testimonyEn
     // closes without turning the leaf. The earlier one ends on the page it started, rather than
     // citing a range that runs backwards.
     const endPage = next ? Math.max(startPage, testimonyStart + next.testimonyPage - 2) : testimonyEnd;
-    return { examiner:name, type:examination.type, startPage, endPage };
+    return { examiner:name, type:examination.type, examinationLabel:EXAMINATION_INDEX_LABELS[examination.type] ?? "Examination", startPage, endPage };
   });
 }
 

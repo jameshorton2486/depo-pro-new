@@ -210,7 +210,9 @@ function indexLines(input) {
   const index = input.pagination.index ?? {};
   const lines = [`Appearances................................ ${indexPage(index.appearances?.startPage, "Appearances")}`, ""];
   lines.push(input.deposition.witness ?? "WITNESS");
-  for (const exam of index.examinations ?? []) lines.push(`  Examination by ${exam.examiner}........... ${exam.startPage}-${exam.endPage}`);
+  // The label comes with the entry. A single examination carries none and reads "Examination by",
+  // which is the certified specimen's own form; a typed one names its type.
+  for (const exam of index.examinations ?? []) lines.push(`  ${exam.examinationLabel ?? "Examination"} by ${exam.examiner}........... ${exam.startPage}-${exam.endPage}`);
   if (input.signatureDisposition === "requested") lines.push(`Changes and Signature...................... ${indexPage(index.changesAndSignature?.startPage, "Changes and Signature")}`);
   lines.push(`Reporter's Certificate..................... ${indexPage(index.reportersCertification?.startPage, "the Reporter's Certificate")}`);
   if ((index.exhibits ?? []).length) {
