@@ -26,7 +26,10 @@ test("both directions are reachable from the workspace, not only by keystroke", 
 test("the first paragraph cannot be joined upward", () => {
   // activeIndex<=0 covers both the first paragraph and the no-selection case, where findIndex
   // returns -1 and an unguarded control would call joinParagraph with a paragraph that is not there.
-  assert.match(SOURCE, /disabled=\{!active\|\|busy\|\|activeIndex<=0\}/);
+  // awaitingRecord joined this condition when the Workspace stopped permitting a second edit before
+  // the refreshed record arrives: the hash a second edit would carry belongs to a transcript that has
+  // already moved, which the server refuses as stale.
+  assert.match(SOURCE, /disabled=\{!active\|\|busy\|\|awaitingRecord\|\|activeIndex<=0\}/);
 });
 
 test("the last paragraph cannot be joined downward", () => {

@@ -25,7 +25,14 @@ test("Phase 5 uses a controlled one-paragraph editor and the stale-state transac
   assert.match(pages,/onSaveParagraph/);
   assert.doesNotMatch(pages,/contentEditable/);
   assert.match(workspace,/paragraphEditTransaction/);
-  assert.match(workspace,/expectedReviewStateHash:printModel\.source\.reviewStateHash/);
+  // The hash is no longer spelled at each call site. Every overlay mutation is built by
+  // overlayMutationRequest / overlayHistoryRequest, which THROW when the hash is missing rather than
+  // sending a request the server is certain to refuse -- the defect that made six reporter actions
+  // fail silently. Pinning the builder rather than the literal is the stronger check: a new call
+  // site that spells its own payload no longer satisfies this.
+  assert.match(workspace,/overlayMutationRequest\(\{depositionId,operations,reviewStateHash:printModel\.source\.reviewStateHash\}\)/);
+  assert.doesNotMatch(workspace,/expectedReviewStateHash/,"no Workspace call site may assemble the hash by hand");
+  assert.match(workspace,/overlayHistoryRequest\(\{ depositionId, reviewStateHash:printModel\?\.source\.reviewStateHash \}\)/);
   assert.match(workspace,/api\/transcript\/overlay\/redo/);
 });
 
