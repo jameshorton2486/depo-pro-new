@@ -2,7 +2,7 @@ import { appearancePhrase } from "./assemble.mjs";
 import { captionOverflowFindings } from "./build-pages.mjs";
 import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
-import { captionJurisdiction } from "./variants.mjs";
+import { STAGE_ONE_DEFERRED_RULE_WIDTHS, captionJurisdiction } from "./variants.mjs";
 
 // What is left is exactly the set with no producer: submittedToWitnessDate, dueDate and serviceDate
 // are declared WORKFLOW_DERIVED in the canonical record, and no workflow writes them. They are
@@ -13,8 +13,39 @@ import { captionJurisdiction } from "./variants.mjs";
 // them. Leaving them here would have meant a reporter who skips the form still gets a certificate
 // with a dropped clause and a clean bill of health -- the defect this list is next to, not a use
 // for it. An entry added merely to make validation pass is how the guard stops meaning anything.
+// Fields a variant may legitimately leave blank.
+//
+// The eight below are DEFERRED, not optional. Rule 203 certification happens in stages: the initial
+// certification is signed when the transcript is produced, the witness then examines and returns it,
+// and only afterwards can return, custody, charges and service be certified. A transcript produced
+// at stage one cannot state facts that have not occurred, and the reviewed template says so in its
+// own words on the page: "Further certification requirements pursuant to Rule 203 of TRCP will be
+// certified to after they have occurred."
+//
+// Measured against the reporter's own certified 72-page Etminan transcript, which is the known-good
+// output this application is trying to reproduce: eight of these nine fields are blank on the
+// delivered document. Requiring them at stage one asked the reporter for facts their own certified
+// practice defers.
+//
+// Do not read this list as "these fields are optional". Each becomes required at the certification
+// stage that can establish it, and nothing here produces that later page yet. If a further-
+// certification document is ever generated, these must be required there -- a field permitted to be
+// blank forever is how a certificate ends up asserting nothing where it should assert something.
+//
+// cert.chargesResponsibleParty is deliberately NOT here. The certified transcript states it at stage
+// one -- "THE DEPOSITION OFFICER'S CHARGES TO THE PLAINTIFF" -- so it is knowable when the initial
+// certificate is signed, and it stays required.
+//
+// Scoped to the one variant a real deposition has exercised. The waived and federal variants are not
+// changed for symmetry: no source document has been read for them, and a blank permitted without
+// evidence is the same mistake in the other direction.
+// One table, in variants.mjs, so validation and rendering cannot disagree about which fields are
+// deferred. A field permitted to be blank here that has no printed rule there would render an empty
+// clause; a field with a rule but no permission here would block a document it can already print.
+const RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR = Object.freeze(Object.keys(STAGE_ONE_DEFERRED_RULE_WIDTHS));
+
 export const INTENTIONAL_BLANKS = Object.freeze({
-  TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([]),
+  TEXAS_STATE_SIGNATURE_REQUESTED: RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR,
   TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze([]),
   FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
   FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),

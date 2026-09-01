@@ -2,6 +2,7 @@ import { appearancePhrase, captionParties } from "./assemble.mjs";
 import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
 import { certifiedDateValues } from "./certified-date.mjs";
+import { STAGE_ONE_DEFERRED_RULE_WIDTHS, STAGE_ONE_DEFERRED_VARIANT, deferredRule } from "./variants.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../texas-freelance-deposition-profile.mjs";
 
 const value = (field) => field && typeof field === "object" && "value" in field ? field.value : field;
@@ -366,6 +367,31 @@ function insertionRoles(input, certificateOnly = false) {
   return certificateOnly ? allRoles.filter(role => role !== "index") : allRoles;
 }
 
+// Rule 203 stage one. Eight certificate facts do not exist yet, because the events that produce them
+// -- submission to the witness, the return deadline and what came back, the officer's charges, the
+// date of service, and the further certification -- have not occurred at the time this transcript is
+// certified. validate.mjs permits those eight to be blank, reading the same table; this prints the
+// blank the reporter fills in by hand. Without it the sentence collapses to "Certified to by me this
+// ." -- a deferred fact silently disappearing from a certified clause, which is worse than either
+// blocking or printing a rule.
+//
+// Presentation only. It is applied to the values handed to the templates, after the record has been
+// read and after validation has seen the field as missing. No rule text reaches the canonical record
+// or the correction log: the fact is still absent, and still reads as absent everywhere but the
+// printed line.
+//
+// A field declared deferred with no width declared throws rather than receiving a generic blank --
+// deferredRule refuses. An approved deferred field is an approved presentation, not a default.
+function stageOneDeferredRules(variant, values) {
+  if (variant !== STAGE_ONE_DEFERRED_VARIANT) return values;
+  const printed = { ...values };
+  for (const field of Object.keys(STAGE_ONE_DEFERRED_RULE_WIDTHS)) {
+    const value = printed[field];
+    if (value === null || value === undefined || String(value).trim() === "") printed[field] = deferredRule(field);
+  }
+  return printed;
+}
+
 function templateValues(input, roles) {
   const baseValues = {
     ...input.fieldValues,
@@ -385,7 +411,8 @@ function templateValues(input, roles) {
   };
   // The index lines are built only when the index page is, so a certificate-only document never
   // asks for a number nobody can supply.
-  return certifiedDateValues({ ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) });
+  return stageOneDeferredRules(input.variant,
+    certifiedDateValues({ ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) }));
 }
 
 export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {
