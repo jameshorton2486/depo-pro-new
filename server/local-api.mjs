@@ -41,7 +41,7 @@ import { DERIVATIVE_KINDS } from "./audio-kinds.mjs";
 import { detectSpeechSegments } from "./speech-segments.mjs";
 import { systemPreflight } from "./preflight.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
-import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertificateWorkflow, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertificateWorkflow, writeDepositionCertification, writeDepositionCounsel, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
+import { createDeposition, playbackProxyPaths, readDepositionAttorneyTime, readDepositionCertificateWorkflow, readDepositionCertification, readDepositionCounsel, readDepositionIntake, readDepositionParties, readDepositionRecord, readDepositionVideographers, readPlaybackProxy, resolveDepositionAudio, scanDepositions, writeDepositionAttorneyTime, writeDepositionCertificateWorkflow, writeDepositionCertification, writeDepositionCounsel, writeDepositionParties, writeDepositionProceeding, writeDepositionVideographers, writeParticipantHonorific, writePlaybackProxyRecord } from "./deposition-store.mjs";
 import { buildTermGroups } from "./term-groups.mjs";
 import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
@@ -456,6 +456,18 @@ const server = http.createServer(async (req,res) => {
     }
     // GET beside the POST: the screen that chooses an examining attorney needs the same canonical
     // ids the assembly stores, and there was no way to ask for them.
+    // The caption's parties. Same pair, same reason as counsel below: a deposition whose Notice
+    // extraction produced no parties had a certified caption with nothing under PLAINTIFF or
+    // DEFENDANT, and no screen anywhere that could put a name there. Manual intake collects them
+    // when a deposition is created; nothing could record them afterwards.
+    if(req.url?.startsWith("/api/deposition/parties?")&&req.method==="GET"){
+      const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
+      return json(res,200,readDepositionParties(root,{depositionId,storageRoot:depositionStorageRoot}),origin);
+    }
+    if(req.url==="/api/deposition/parties"&&req.method==="POST"){
+      const input=await body(req,64*1024);
+      return json(res,200,writeDepositionParties(root,{depositionId:input.depositionId,parties:input.parties,storageRoot:depositionStorageRoot}),origin);
+    }
     if(req.url?.startsWith("/api/deposition/counsel?")&&req.method==="GET"){
       const depositionId=new URL(req.url,"http://localhost").searchParams.get("depositionId");
       return json(res,200,readDepositionCounsel(root,{depositionId,storageRoot:depositionStorageRoot}),origin);

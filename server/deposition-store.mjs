@@ -121,6 +121,32 @@ export function appendDepositionAudio(root, { depositionId, entries, storageRoot
  * party status were allowed to imply eligibility, a speaker map could attribute testimony to an
  * entity that was never in the room, which is a defect in the record rather than in the interface.
  */
+/**
+ * The parties as a screen edits them, in the shape writeDepositionParties takes back.
+ *
+ * Same contract as readDepositionCounsel beside it, and written at the same time for the same
+ * reason: the caption prints the plaintiffs and the defendants, and a deposition whose Notice
+ * extraction produced no parties had no way to record them at all. The id comes back first --
+ * partyEntry falls back to `party-${index + 1}`, so an editor that dropped it would renumber the
+ * parties by position.
+ */
+export function readDepositionParties(root, { depositionId, storageRoot } = {}) {
+  const file = path.join(depositionDirectory(root, depositionId, { storageRoot }), "intake", "canonical-deposition-record.json");
+  if (!fs.existsSync(file)) throw new Error("The Canonical Deposition Data Record was not found.");
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  const value = field => field && typeof field === "object" && "value" in field ? field.value : field;
+  return {
+    depositionId,
+    parties: (record.parties ?? []).map(entry => ({
+      id: entry.id,
+      name: String(value(entry.name) ?? "").trim(),
+      role: String(value(entry.role) ?? "").trim(),
+      entityType: String(value(entry.entityType) ?? "").trim(),
+      captionDisplayName: String(value(entry.captionDisplayName) ?? "").trim(),
+    })),
+  };
+}
+
 export function writeDepositionParties(root, { depositionId, parties, storageRoot, source = "REPORTER_ENTERED" } = {}) {
   if (!Array.isArray(parties)) throw new Error("Parties must be an array.");
   const entries = parties.map((party, index) => {
@@ -188,10 +214,20 @@ export function readDepositionCounsel(root, { depositionId, storageRoot } = {}) 
       // `attorney-${index + 1}` when none is supplied, so an editor that dropped it would renumber
       // counsel by position and leave the examiner reference and every speaker mapping pointing at
       // an id that no longer exists -- while the save looked entirely successful.
+      //
+      // The same failure, found the same way: bar number, address, fax, phone and email were absent
+      // here while counsel entries carried them, and they are exactly what the certified APPEARANCES
+      // page prints. Recording a side through the Counsel Editor -- the only screen that offers one
+      // -- emptied the address and phone of every attorney on the deposition, and reported success.
       id: entry.id,
       name: String(value(entry.fullName) ?? "").trim(),
       honorific: value(entry.honorific) ?? "",
+      barNumber: String(value(entry.barNumber) ?? "").trim(),
       firm: String(value(entry.firm) ?? "").trim(),
+      address: String(value(entry.address) ?? "").trim(),
+      phone: String(value(entry.phone) ?? "").trim(),
+      fax: String(value(entry.fax) ?? "").trim(),
+      email: String(value(entry.email) ?? "").trim(),
       represents: value(entry.represents) ?? [],
       appearanceRole: value(entry.appearanceRole) ?? "",
       side: value(entry.side) ?? "",

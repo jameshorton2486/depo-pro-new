@@ -5,6 +5,7 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
+import PartiesEditor from "./PartiesEditor";
 import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
@@ -846,6 +847,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} speakerOptions={speakerOptions} speakerAssignmentForCounsel={speakerAssignmentForCounsel} onSpeakerAssignment={assignCounselSpeaker} />
+
+          {/* And the parties, because the caption names them and nothing else in the application
+              could. A deposition made from an existing recording reaches finalization with an empty
+              parties list and a certified caption with nothing under PLAINTIFF or DEFENDANT. */}
+          <h2>Parties</h2>
+          <PartiesEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" className="secondary-button" onClick={()=>{

@@ -92,15 +92,45 @@ function judicialDistrictLine(record) {
   return district ? `${ordinalDistrict(district).toUpperCase()} JUDICIAL DISTRICT` : "";
 }
 
-function captionValues(input) {
+/**
+ * The style of the cause, down as many rows as it needs.
+ *
+ * A caption names every party, and on a real multi-party case that does not fit one line: Etminan's
+ * three defendants joined to 85 characters on a 63-character page, and the block had no square form
+ * at all. The certified specimen answers this by running the names down the left column, so this
+ * does the same -- plain word wrap at the profile's measured caption column.
+ *
+ * Returned as an array even when it is one line, so the caption row always takes the renderer's
+ * expansion path and a one-party caption and a four-party caption are laid out by the same rule
+ * rather than by two.
+ *
+ * A single name longer than the column is left whole on its own row rather than broken mid-word.
+ * alignCaptionLines then measures it, and CAPTION_ROW_OVERFLOW refuses the document: a party name
+ * split across rows by this function would be a name the caption states differently from the
+ * pleadings, which is not a formatting question.
+ */
+function captionColumn(names, profile) {
+  const width = profile?.captionLeftColumn;
+  const text = upper(names.join(", "));
+  if (!Number.isInteger(width) || width < 1 || !text) return text ? [text] : [];
+  const lines = [];
+  for (const word of text.split(/\s+/)) {
+    const last = lines.at(-1);
+    if (last !== undefined && `${last} ${word}`.length <= width) lines[lines.length - 1] = `${last} ${word}`;
+    else lines.push(word);
+  }
+  return lines;
+}
+
+function captionValues(input, profile = TEXAS_FREELANCE_DEPOSITION_V1) {
   const { plaintiffs, defendants } = captionParties(input.record);
   return {
     "caption.causeNumber": input.caption.causeNumber,
     "caption.court": input.operator.courtHeadingLine ?? input.caption.court,
     "caption.plaintiffLabel": plaintiffs.length === 1 ? "PLAINTIFF," : "PLAINTIFFS,",
-    "caption.plaintiffs": upper(plaintiffs.join(", ")),
+    "caption.plaintiffs": captionColumn(plaintiffs, profile),
     "caption.defendantLabel": defendants.length === 1 ? "DEFENDANT," : "DEFENDANTS,",
-    "caption.defendants": upper(defendants.join(", ")),
+    "caption.defendants": captionColumn(defendants, profile),
     "caption.countyCourtLine": input.operator.countyCourtLine ?? countyCourtLine(input.record),
     "caption.judicialDistrictLine": input.operator.judicialDistrictLine ?? judicialDistrictLine(input.record),
   };
@@ -337,7 +367,7 @@ export function captionOverflowFindings(input) {
   // APPEARANCE_SIDE_MISSING for counsel with no side, so building them here turned every finding
   // this function sits beside into an exception. A caption row carries only caption.* fields and
   // literal furniture, so caption values are all this measurement needs.
-  const values = captionValues(input);
+  const values = captionValues(input, profile);
   const findings = [];
   for (const role of roles) {
     const template = input.template.templates[role];
@@ -392,10 +422,10 @@ function stageOneDeferredRules(variant, values) {
   return printed;
 }
 
-function templateValues(input, roles) {
+function templateValues(input, roles, profile) {
   const baseValues = {
     ...input.fieldValues,
-    ...captionValues(input),
+    ...captionValues(input, profile),
     ...certificationValues(input),
     "deposition.proceedingHeading": input.operator.proceedingHeading ?? "ORAL DEPOSITION OF",
     "deposition.narrative.1": input.operator.titleNarrative?.[0] ?? "",
@@ -419,8 +449,8 @@ export function buildTexasInsertionPageSet(input, { setId, depositionId, generat
   if (!input.variant?.startsWith("TEXAS_STATE_")) throw new Error(`Texas page builder cannot render ${input.variant ?? "an unspecified variant"}`);
   const templates = input.template.templates;
   const roles = insertionRoles(input, certificateOnly);
-  const values = templateValues(input, roles);
   const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
+  const values = templateValues(input, roles, profile);
   const pages = roles.flatMap((role) => renderRolePages(templates[role], values, { role, profile }));
   pages.forEach((page, index) => { page.pageNumber = index + 1; });
   return createInsertionPageSet({
