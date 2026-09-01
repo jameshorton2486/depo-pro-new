@@ -120,12 +120,31 @@ test("a mark survives being written out and read back", () => {
 
 // --- inert, by design -------------------------------------------------------------------------------
 
-test("a mark changes nothing the reader reads yet", () => {
-  // §247-A is the operation only. If this fails, the labeller has been changed and that is §247-B.
-  const marked = render(overlayOf(mark(EXAMINER_WORD), mark(OTHER_WORD)));
+test("a mark changes only the paragraph it was placed on", () => {
+  // This asserted that a mark changed nothing at all, which was the §247-A contract and stopped
+  // being true when §247-B taught the labeller to read it. Narrowed rather than deleted: what
+  // matters now is the blast radius. A classification is about one utterance, and a mark that moved
+  // a second paragraph would be a rule the reporter did not state.
+  const marked = render(overlayOf(mark(EXAMINER_WORD)));
   const plain = render(overlayOf());
-  assert.deepEqual(marked.paragraphs, plain.paragraphs,
-    "marking an utterance must not yet move a single Q. or A.");
+  const changed = marked.paragraphs
+    .map((paragraph, index) => ({ paragraph, plain:plain.paragraphs[index], index }))
+    .filter(pair => pair.paragraph.elementType !== pair.plain.elementType);
+
+  // Two, and the second one is right. This anchor sits on the examiner's actual question, so the
+  // mark withdraws it -- and the witness's next line is then not answering anything, which is what
+  // "no question is open" means everywhere else in this file. Asserting "exactly one" would have
+  // been asserting that a withdrawn question still has an answer.
+  assert.equal(changed.length, 2, changed.map(item => `${item.index}:${item.plain.elementType}->${item.paragraph.elementType}`).join(" "));
+  assert.ok((changed[0].paragraph.asrWordIds ?? []).includes(EXAMINER_WORD), "the first is the one the mark anchors to");
+  assert.equal(changed[0].plain.elementType, "QUESTION");
+  assert.equal(changed[0].paragraph.elementType, "COLLOQUY");
+  assert.equal(changed[1].index, changed[0].index + 1, "the second is the line that followed it");
+  assert.equal(changed[1].plain.elementType, "ANSWER");
+  assert.equal(changed[1].paragraph.elementType, "COLLOQUY", "no longer an answer, because there is no longer a question");
+
+  // And the blast radius stops there: nothing beyond the withdrawn exchange moves.
+  assert.ok(changed.every(item => item.index <= changed[0].index + 1), "no paragraph further down was touched");
 });
 
 test("a mark changes no word, no timing and no speaker", () => {
