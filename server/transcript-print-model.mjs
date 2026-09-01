@@ -68,6 +68,30 @@ export function buildTranscriptPrintModel({ rendered, reviewStateHash, depositio
   const sharedDocument=buildSharedDocumentModel({rendered,paragraphs:withPreviewLabels(rendered.paragraphs),profile});
   printFindings.push(...sharedDocument.findings);
   const pages=sharedDocument.pages;
+  // Where each examination actually begins, in testimony pages -- Phase D3.
+  //
+  // Read out of the paginator's own output rather than counted alongside it. Every printed line
+  // carries a trace naming the paragraph and the source words behind it, so an examination's page
+  // is a lookup, never an arithmetic guess that could drift from what was laid out. The implicit
+  // first examination begins on testimony page 1 by definition: it starts where testimony starts.
+  //
+  // No page number is stored anywhere. This is recomputed on every build, which is exactly why a
+  // body one page longer moves every later citation without anything being told to.
+  const pageHoldingParagraph=id=>pages.find(page=>page.lines.some(line=>line.paragraphId===id))?.pageNumber??null;
+  const pageHoldingWord=wordId=>pages.find(page=>page.lines.some(line=>line.trace?.sourceWordIds?.includes(wordId)))?.pageNumber??null;
+  const examinations=(rendered.examinations??[]).map(examination=>{
+    if(examination.implicit||!examination.atWordId)return{...examination,testimonyPage:1};
+    // The heading is where the examination begins on the page, so it is preferred over the anchor
+    // word: a heading at the foot of one page and its first question at the head of the next are
+    // one page apart, and the index should cite where the reader sees the examination start.
+    const testimonyPage=pageHoldingParagraph(`examination:${examination.type}:${examination.atWordId}`)??pageHoldingWord(examination.atWordId);
+    return{...examination,testimonyPage};
+  });
+  for(const examination of examinations){
+    if(examination.testimonyPage!==null)continue;
+    printFindings.push({code:"PRINT_EXAMINATION_PAGE_UNRESOLVED",severity:"warning",target:examination.atWordId,
+      message:`The ${examination.type} examination could not be located on a printed page, so the index cannot cite it.`});
+  }
   const unsigned={
     schemaVersion:TRANSCRIPT_PRINT_MODEL_VERSION, recordType:"TRANSCRIPT_PRINT_MODEL",
     deposition:{ id:deposition?.id??null, caseStyle:deposition?.caseStyle??"", witness:deposition?.witness??"", depositionDate:deposition?.depositionDate??"", causeNumber:deposition?.causeNumber??"" },
@@ -75,6 +99,7 @@ export function buildTranscriptPrintModel({ rendered, reviewStateHash, depositio
     layoutProfile:profile,
     paragraphs,
     pages,
+    examinations,
     findings:{ transcript:[...(rendered.findings??[])], print:printFindings },
   };
   return { ...unsigned, modelHash:hash(unsigned) };
