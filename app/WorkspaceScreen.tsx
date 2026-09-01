@@ -7,6 +7,9 @@ import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generation
 import CounselEditor from "./CounselEditor";
 import { splitSpeakerChoices, splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
 import { overlayHistoryRequest, overlayMutationRequest } from "./overlay-mutation.mjs";
+
+// One empty set, so "no low-confidence marks" is the same reference on every render.
+const EMPTY_WORD_IDS: Set<string> = new Set();
 import PartiesEditor from "./PartiesEditor";
 import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
@@ -409,6 +412,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  // Stable identities so the transcript pages below can be held back. Both read through a ref rather
+  // than listing their function as a dependency: those functions are rebuilt every render, so a
+  // dependency would hand every page a new handler again and defeat the comparator.
+  const playParagraphRef=useRef(playParagraph),playAtRef=useRef(playAt);
+  useEffect(()=>{playParagraphRef.current=playParagraph;playAtRef.current=playAt});
+  const playParagraphById = useCallback((id:string)=>playParagraphRef.current(rendered?.paragraphs.find(item=>item.id===id)??null),[rendered]);
+  const playAtSeconds = useCallback((seconds:number)=>{void playAtRef.current(seconds)},[]);
   const speakerChoices = useMemo(()=>splitSpeakerChoices({ candidates, examinerIdentity:examiner, labels:rendered?.labels ?? {} }),[candidates,examiner,rendered]);
   // Where the selected paragraph sits, so the two join controls can refuse at the ends of the
   // transcript rather than calling joinParagraph and letting it fail. The first paragraph has
@@ -512,6 +522,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return null;
   },[rendered,selected]);
   const lowConfidenceWords=useMemo(()=>(rendered?.paragraphs??[]).flatMap(paragraph=>paragraph.words.filter(word=>word.lowConfidence).map(word=>({paragraphId:paragraph.id,wordId:word.id}))),[rendered]);
+  // Rebuilt inline on every render before this, including the empty branch -- `new Set()` is a new
+  // reference each time, which alone was enough to defeat memo on all 63 transcript pages.
+  const lowConfidenceWordIdSet = useMemo(
+    ()=>lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):EMPTY_WORD_IDS,
+    [lowConfidenceMode,lowConfidenceWords]);
   const searchMatches=useMemo(()=>{
     if(!searchText)return[];
     const escaped=searchText.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),pattern=wholeWords?`\\b${escaped}\\b`:escaped,flags=matchCase?"g":"gi",matches:{id:string;paragraphId:string;start:number;end:number;context:string}[]=[];
@@ -713,7 +728,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onPlayAt={seconds=>{void playAt(seconds)}} onEditingChange={editingChange}/>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
           :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
