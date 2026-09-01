@@ -90,7 +90,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   // boundaries in transcript order; labelParagraphs advances the active examiner as it walks and
   // hands back the resolved sequence -- including the implicit first examination, whose examiner
   // it may have adopted here and which nothing outside could otherwise name.
-  const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations });
+  const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations, colloquy:applied.colloquy });
 
   const seen = new Set();
   let paragraphs = labelled.map((paragraph, index) => {

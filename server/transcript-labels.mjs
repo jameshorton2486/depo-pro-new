@@ -258,11 +258,14 @@ export function buildSpeakerLabels(candidates = []) {
  * to render exactly as it does today. A synthetic DIRECT boundary would be a stored fact standing
  * in for a derivable one.
  */
-export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [] } = {}) {
+export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [], colloquy = null } = {}) {
   let examiner = examinerIdentity;
   // Indexed by the word each boundary begins at, because a paragraph is what gets labelled and a
   // paragraph is a list of word ids. applyOverlay has already put them in transcript order and
   // dropped any whose anchor no longer exists.
+  // The utterances the reporter has said are not questions -- §247. Empty or absent leaves every
+  // branch below exactly as it was, which is what lets an existing transcript render unchanged.
+  const colloquyWordIds = colloquy instanceof Set ? colloquy : new Set(colloquy ?? []);
   const boundaryByWordId = new Map();
   for (const boundary of examinations ?? []) if (boundary?.atWordId) boundaryByWordId.set(boundary.atWordId, boundary);
   // The resolved sequence every downstream consumer reads: Q./A. context, the heading, the BY-line
@@ -334,6 +337,26 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS.WITNESS}:`, null);
     }
     if (identity && examiner && identity === examiner) {
+      // The examiner said something that is not a question, and the reporter has said so. §247.
+      //
+      // Three things happen together, and each is a separate way to get this wrong.
+      //
+      // It carries her own name, because she did say it. The speaker is not changed -- misattributing
+      // the utterance was the only way to reach colloquy before this operation existed, and it put
+      // another person's name on a line they never said.
+      //
+      // The open question stays open. Attorney colloquy already does not close one, and an aside by
+      // the examiner is no different: "Q. Do you remember the accident? / MS. WHITFIELD: Let me be
+      // more specific. / A. Yes." must keep its A.
+      //
+      // The resumption marker is left exactly as it was found -- neither consumed nor set. Not
+      // consumed, because `(BY MS. WHITFIELD)` announces her returning to questioning and belongs on
+      // the question, not on the aside before it; measured, it was landing on the aside. Not set,
+      // because her own aside is not an interruption by somebody else, and a by-line after it would
+      // announce a return from nowhere.
+      if ((paragraph?.asrWordIds ?? []).some(wordId => colloquyWordIds.has(wordId))) {
+        return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
+      }
       const byLine = resumptionByLinePending && label ? `(BY ${label})` : null;
       resumptionByLinePending = false;
       return emit(ELEMENT.QUESTION, "Q.", byLine, true);
