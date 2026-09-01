@@ -36,7 +36,10 @@ test("the store keeps the waiver reason on the reporter", t => {
   createReporter(root, profile({ id:crypto.randomUUID(), firmRegistrationWaiver:WAIVER }));
   const [stored] = listReporters(root);
   assert.equal(stored.firmRegistrationWaiver, WAIVER);
-  assert.ok(!("firmRegistrationNumber" in stored), "no number field is stored; no specimen justifies one");
+  // The number field exists now -- the Etminan Notice showed a firm-reported job whose certificate
+  // printed no number, so its absence was never evidence that none applied. What matters to THIS
+  // test is that recording a waiver does not quietly put something in the number's place.
+  assert.equal(stored.firmRegistrationNumber, "", "a waived reporter records no number, rather than a blank-looking one");
 });
 
 test("a recorded waiver clears the blocking finding", () => {
