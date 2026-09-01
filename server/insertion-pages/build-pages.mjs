@@ -206,13 +206,31 @@ function indexPage(value, section) {
   return value;
 }
 
+// Every index line puts its page reference in the same column.
+//
+// Column 44 is not chosen here: it is what the three section lines have always used, each with a
+// hand-counted run of dots that happened to agree. The examination line had its own fixed run of
+// eleven and therefore landed wherever the examiner's name left it -- column 54 for one name and
+// somewhere else for the next, which reads as unfinished on a certified index. Typed labels made
+// that visible rather than causing it.
+//
+// Computing the fill from one constant reproduces the three section lines character for character
+// and brings the examination lines onto the same column. At least one dot always remains, so a
+// long name pushes the reference right rather than running into it; a line that then exceeds the
+// profile width is refused at assembly as a horizontal overflow, which is what already happens to
+// every other over-long line on the page.
+const INDEX_REFERENCE_COLUMN = 44;
+const indexEntry = (label, reference) => `${label}${".".repeat(Math.max(1, INDEX_REFERENCE_COLUMN - 1 - label.length))} ${reference}`;
+
 function indexLines(input) {
   const index = input.pagination.index ?? {};
-  const lines = [`Appearances................................ ${indexPage(index.appearances?.startPage, "Appearances")}`, ""];
+  const lines = [indexEntry("Appearances", indexPage(index.appearances?.startPage, "Appearances")), ""];
   lines.push(input.deposition.witness ?? "WITNESS");
-  for (const exam of index.examinations ?? []) lines.push(`  Examination by ${exam.examiner}........... ${exam.startPage}-${exam.endPage}`);
-  if (input.signatureDisposition === "requested") lines.push(`Changes and Signature...................... ${indexPage(index.changesAndSignature?.startPage, "Changes and Signature")}`);
-  lines.push(`Reporter's Certificate..................... ${indexPage(index.reportersCertification?.startPage, "the Reporter's Certificate")}`);
+  // The label comes with the entry. A single examination carries none and reads "Examination by",
+  // which is the certified specimen's own form; a typed one names its type.
+  for (const exam of index.examinations ?? []) lines.push(indexEntry(`  ${exam.examinationLabel ?? "Examination"} by ${exam.examiner}`, `${exam.startPage}-${exam.endPage}`));
+  if (input.signatureDisposition === "requested") lines.push(indexEntry("Changes and Signature", indexPage(index.changesAndSignature?.startPage, "Changes and Signature")));
+  lines.push(indexEntry("Reporter's Certificate", indexPage(index.reportersCertification?.startPage, "the Reporter's Certificate")));
   if ((index.exhibits ?? []).length) {
     lines.push("", "EXHIBITS", "NO.  DESCRIPTION                            PAGE");
     for (const exhibit of index.exhibits) lines.push(`${exhibit.number}    ${exhibit.description}    ${exhibit.page}`);
