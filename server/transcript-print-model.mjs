@@ -47,6 +47,19 @@ function renderedProjection(rendered) {
   };
 }
 
+// A label for a speaker the record cannot name.
+//
+// This is a PREVIEW device and its name says so. A reporter reading a transcript before the speaker
+// map is reconciled needs to see who is who by number rather than a wall of blank labels, and that
+// is worth having. What is not worth having is the same substitution reaching a certified page: it
+// prints "SPEAKER 1:" over testimony under the reporter's CSR number, and it looks like a label
+// rather than like a gap.
+//
+// So the substitution is marked where it happens. The finalization boundary refuses on the mark
+// rather than on the transcript's speaker-map status, because those are not the same condition --
+// measured, a transcript can read `reconciled` and still hold paragraphs with no label at all when
+// a participant is in the transcript but not in the canonical record. That is exactly the case the
+// Word gate found, and a status check alone would have passed it.
 function withPreviewLabels(paragraphs) {
   const fallbackLabels=new Map();
   return paragraphs.map(paragraph=>{
@@ -59,7 +72,7 @@ function withPreviewLabels(paragraphs) {
     const speaker=paragraph.deepgramSpeaker;
     const key=speaker===null||speaker===undefined?null:`${paragraph.sourceJobIdentity??"unknown-job"}:${speaker}`;
     if(key&&!fallbackLabels.has(key))fallbackLabels.set(key,`SPEAKER ${fallbackLabels.size+1}:`);
-    return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:"};
+    return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:",previewLabel:true};
   });
 }
 function previewParagraphs(rendered){return renderedProjection({...rendered,paragraphs:withPreviewLabels(rendered?.paragraphs??[])}).paragraphs}
@@ -73,6 +86,11 @@ export function buildTranscriptPrintModel({ rendered, reviewStateHash, depositio
   const sharedDocument=buildSharedDocumentModel({rendered,paragraphs:withPreviewLabels(rendered.paragraphs),profile});
   printFindings.push(...sharedDocument.findings);
   const pages=sharedDocument.pages;
+  // Which paragraphs are only readable because the preview named their speaker for them. Carried as
+  // data, not as a refusal: Preview is entitled to show them, and the Final Document Model is the
+  // layer that decides a certified page may not.
+  const previewLabelled=withPreviewLabels(rendered.paragraphs).filter(paragraph=>paragraph.previewLabel)
+    .map(paragraph=>({id:paragraph.id,label:paragraph.label,speakerIdentity:paragraph.speakerIdentity??null,deepgramSpeaker:paragraph.deepgramSpeaker??null}));
   // Where each examination actually begins, in testimony pages -- Phase D3.
   //
   // Read out of the paginator's own output rather than counted alongside it. Every printed line
@@ -105,6 +123,8 @@ export function buildTranscriptPrintModel({ rendered, reviewStateHash, depositio
     paragraphs,
     pages,
     examinations,
+    speakerMap:rendered.speakerMap??null,
+    previewLabelled,
     findings:{ transcript:[...(rendered.findings??[])], print:printFindings },
   };
   return { ...unsigned, modelHash:hash(unsigned) };

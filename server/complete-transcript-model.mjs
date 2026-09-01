@@ -176,6 +176,34 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   for(const page of front)pages.push(normalizeAdministrativePage(page,pages.length+1));
   for(const page of printModel.pages)pages.push(shiftTestimonyPage(page,pages.length+1));
   for(const page of back)pages.push(normalizeAdministrativePage(page,pages.length+1));
+  // A certified page may not name a speaker the record cannot.
+  //
+  // §248. The Print Model substitutes "SPEAKER 1:" for a paragraph whose speaker has no label, which
+  // is right for Preview and wrong here: on a served transcript it reads as an attribution rather
+  // than as the gap it is. Measured on a live record whose speaker map was never reconciled, every
+  // one of its 895 paragraphs printed a placeholder across 81 pages -- and the project's own F-13
+  // recorded a real export of that same deposition carrying SPEAKER 0: inline, so this has happened
+  // rather than merely being possible.
+  //
+  // Refused on the substitution, not on speakerMap.status. They are different conditions: a
+  // transcript can read `reconciled` and still hold paragraphs with no label when a participant is
+  // in the transcript but absent from the canonical record, which is precisely what the Word gate
+  // found. The status is reported alongside so the message can say which remedy applies.
+  //
+  // Not a warning. The reporter cannot un-serve a transcript, and a placeholder is indistinguishable
+  // from a real label to everyone who reads one afterwards.
+  const unresolvedSpeakers=printModel.previewLabelled??[];
+  if(unresolvedSpeakers.length){
+    const status=printModel.speakerMap?.status??"unknown";
+    const remedy=status==="reconciled"
+      ?"Every speaker is assigned, so the missing names are participants the Canonical Deposition Data Record does not list. Add them in Appearances or Participants."
+      :`The speaker map is ${status}. Assign every speaker in Workspace before producing the final document.`;
+    const error=new Error(`COMPLETE_TRANSCRIPT_UNRESOLVED_SPEAKER: ${unresolvedSpeakers.length} paragraph(s) would print a placeholder such as ${unresolvedSpeakers[0].label} instead of a speaker. ${remedy}`);
+    error.code="COMPLETE_TRANSCRIPT_UNRESOLVED_SPEAKER";
+    error.paragraphs=unresolvedSpeakers.map(item=>item.id);
+    error.speakerMapStatus=status;
+    throw error;
+  }
   const horizontalOverflow=horizontalOverflowFindings(pages,printModel.layoutProfile);
   if(horizontalOverflow.length)throw new Error(`COMPLETE_TRANSCRIPT_HORIZONTAL_OVERFLOW:${horizontalOverflow.map(item=>item.target).join(",")}`);
   const sections=[
