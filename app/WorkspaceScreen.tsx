@@ -162,6 +162,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // overwrite a fresh one.
   const [reloadToken,setReloadToken] = useState(0);
   const reload = useCallback(()=>setReloadToken(token=>token+1),[]);
+  // Two reload signals, because an overlay edit and a record edit invalidate different things.
+  //
+  // A correction used to refetch seven endpoints. Four of them cannot be affected by an overlay
+  // operation at all -- the audio audit, the playback metadata, the transcription jobs, and the
+  // speaker candidates, which getSpeakerCandidates derives from the canonical record and never from
+  // the overlay. Measured at about 1.4 seconds of a 4 second correction cycle.
+  //
+  // reloadToken still means "everything moved" and is what the counsel, parties, proceeding,
+  // honorific and speaker-map writers use. reloadTranscript means "the transcript moved", which is
+  // all an overlay mutation can do.
+  const [transcriptToken,setTranscriptToken] = useState(0);
+  const reloadTranscript = useCallback(()=>setTranscriptToken(token=>token+1),[]);
   const [media,setMedia] = useState<{ needsProxy:boolean; proxy:{ alignment?:{ aligned:boolean; message:string } }|null; sourceMedia:{ codec:string } }|null>(null);
   const [building,setBuilding] = useState(false);
   const playbackSource = media
@@ -182,7 +194,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,printOutcome,candidateRes,mediaRes] = await Promise.all([
+        const [renderRes,printOutcome] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
           // The fallback stays -- a reporter with no assembly authority still needs to see and
           // work the testimony -- but the reason the complete model refused no longer goes in
@@ -193,10 +205,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             const blockedReason = await response.json().then(payload=>String(payload?.error||"")).catch(()=>"");
             return { response: await fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}), blockedReason };
           }),
-          fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
-          fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
-        if(mediaRes.ok && !cancelled) setMedia(await mediaRes.json());
         const body = await renderRes.json();
         if(cancelled) return;
         if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
@@ -209,12 +218,29 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         setPrintModel(servedModel);
       setAwaitingRecord(false);
         setDocumentState(deriveDocumentStatus({ servedRecordType:servedModel?.recordType??null, blockedReason:printOutcome.blockedReason }));
-        if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
         if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
     })();
     return ()=>{ cancelled = true; };
-  },[depositionId,examiner,audioIndex,reloadToken]);
+  },[depositionId,examiner,reloadToken,transcriptToken]);
+
+  // The participant roster and the media. Neither can be changed by an overlay operation --
+  // getSpeakerCandidates derives candidates from the canonical record and never reads the overlay --
+  // so this deliberately does NOT depend on transcriptToken. It reloads when the RECORD moves, which
+  // is what the counsel, parties, proceeding and participant writers signal.
+  useEffect(()=>{
+    let cancelled=false;
+    void (async ()=>{
+      const [candidateRes,mediaRes]=await Promise.all([
+        fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
+        fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
+      ]);
+      if(cancelled) return;
+      if(mediaRes.ok) setMedia(await mediaRes.json());
+      if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
+    })();
+    return ()=>{ cancelled=true; };
+  },[depositionId,audioIndex,reloadToken]);
 
   // Audio and job state load independently of the transcript. When there is no transcript the
   // render effect above fails by design, and this is the only thing left to show -- so it must
@@ -283,14 +309,16 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // The key matches the one reconcileSpeakerMap validates against server-side.
   const buckets = useMemo(()=>speakerBuckets(rendered?.paragraphs ?? []) as Bucket[],[rendered]);
 
-  async function post(path:string, payload:Record<string,unknown>) {
+  // scope says what the write can have invalidated. "transcript" refetches the rendered transcript
+  // and the document model; "record" refetches everything, including the participant roster.
+  async function post(path:string, payload:Record<string,unknown>, scope:"record"|"transcript"="record") {
     setBusy(true); setError("");
     try {
       const response = await fetch(`${API}${path}`,{ method:"POST", headers:{ "content-type":"application/json" }, body:JSON.stringify(payload) });
       const body = await response.json();
       if(!response.ok) throw new Error(body.error||"The edit could not be saved.");
       setAwaitingRecord(true);
-      reload();
+      if(scope==="transcript") reloadTranscript(); else reload();
       return true;
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
@@ -307,7 +335,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // listen, clearing a mark, correcting a word, striking a word -- failed every time while the
   // buttons looked available.
   const append = (operations:Operation[]) =>
-    post("/api/transcript/overlay", overlayMutationRequest({ depositionId, operations, reviewStateHash:printModel?.source.reviewStateHash }));
+    post("/api/transcript/overlay", overlayMutationRequest({ depositionId, operations, reviewStateHash:printModel?.source.reviewStateHash }), "transcript");
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
     if(!paragraph||!printModel){setError("The paragraph is no longer current. Reload it before saving.");return false}
@@ -322,13 +350,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       if(!response.ok)throw new Error(body.error||"The paragraph edit could not be saved.");
         setAwaitingRecord(true);
       setSelected(previous=>previous?.paragraphId===paragraphId?previous:{paragraphId,wordId:paragraph.words[0]?.id??previous?.wordId??"",extentWordId:null});
-      reload();
+      reloadTranscript();
       requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-token-id="${paragraph.words[0]?.id}"]`)?.scrollIntoView({block:"center"}));
       void caret;
       return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The paragraph edit could not be saved.");return false}
     finally{setBusy(false)}
-  },[depositionId,printModel,reload,rendered]);
+  },[depositionId,printModel,reloadTranscript,rendered]);
 
   // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
   // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
@@ -389,9 +417,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     setBusy(true);setError("");
     try{
       const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(overlayMutationRequest({depositionId,operations,reviewStateHash:printModel.source.reviewStateHash}))});
-      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");setAwaitingRecord(true);reload();return true;
+      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");setAwaitingRecord(true);reloadTranscript();return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The structural edit could not be saved.");return false}finally{setBusy(false)}
-  },[depositionId,printModel,reload]);
+  },[depositionId,printModel,reloadTranscript]);
   const splitParagraph=useCallback(async(paragraphId:string,caret:number)=>{
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)return false;
     const anchor=wordCharacterRanges(paragraph).find(range=>range.start>=caret)?.word;
@@ -605,8 +633,8 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }))} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }))} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
       </header>
