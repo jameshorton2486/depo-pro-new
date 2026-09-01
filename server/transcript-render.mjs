@@ -11,7 +11,7 @@
 // decides what the reader sees.
 import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { joinStyled, styleWords } from "./transcript-style.mjs";
-import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
+import { ELEMENT, EXAMINATION_HEADINGS, LAYOUT, buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
@@ -93,7 +93,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations });
 
   const seen = new Set();
-  const paragraphs = labelled.map((paragraph, index) => {
+  let paragraphs = labelled.map((paragraph, index) => {
     const resolved = [];
     for (const id of paragraph.asrWordIds || []) {
       const word = words.get(id);
@@ -159,6 +159,61 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       segmentIds:paragraph.segmentIds ?? [], asrWordIds:paragraph.asrWordIds ?? [],
     };
   });
+
+  // The heading and the BY-line that announce an examination -- Phase D2.
+  //
+  // Reporter-derived structural content, not testimony. They carry no ASR word, no timing and no
+  // segment: a heading is something the record's structure says, not something a microphone heard,
+  // and giving one a borrowed timestamp would let a click seek audio to a line nobody spoke.
+  //
+  // Placed before the paragraph holding the boundary's anchor word. The anchor itself is never
+  // moved or rewritten -- the overlay stays the only authority on where an examination begins, and
+  // this reads that authority rather than recording a second copy of it.
+  //
+  // The implicit first examination gets neither. It has no anchor to place them at, and emitting
+  // them would change every existing single-examiner transcript. See EXAMINATION_HEADINGS.
+  const structural = [];
+  for (const examination of examinationSequence) {
+    // The first examination is not announced, and this one test is what enforces it: it is always
+    // DIRECT, and DIRECT has no heading form. Guarding on `implicit` or on the missing anchor as
+    // well would be two more names for the same condition and two branches no test could reach --
+    // both were written, both survived deletion, and both are gone.
+    const heading = EXAMINATION_HEADINGS[examination.type];
+    if (!heading) continue;
+    const index = paragraphs.findIndex(paragraph => (paragraph.asrWordIds ?? []).includes(examination.atWordId));
+    // Defence, and unreachable through renderTranscript today: applyOverlay resolves boundaries
+    // against segment order and drops any whose anchor no longer exists, so an unresolvable one
+    // never reaches this sequence. Kept because the alternative to a finding here is a heading
+    // silently going missing from a certified page.
+    if (index < 0) {
+      findings.push({ code:"EXAMINATION_ANCHOR_NOT_RENDERED", wordId:examination.atWordId,
+        message:`The ${examination.type} examination is anchored to a word that appears in no paragraph, so its heading was not placed.` });
+      continue;
+    }
+    const label = labels[examination.examinerPersonId] ?? null;
+    // No label, no by-line. buildSpeakerLabels already refuses to guess an honorific and falls back
+    // to the surname; an examiner it cannot name at all would print "BY :" on a certified page.
+    if (!label) findings.push({ code:"EXAMINATION_EXAMINER_UNLABELLED", speakerIdentity:examination.examinerPersonId,
+      message:`The ${examination.type} examination names ${examination.examinerPersonId}, who has no speaker label. The heading is placed; the BY-line is omitted rather than printed blank.` });
+    const shared = { speakerIdentity:null, transcriptRole:null, deepgramSpeaker:null, unlabeledSpeaker:false,
+      sourceJobIdentity:paragraphs[index].sourceJobIdentity, start:null, end:null, words:[], segmentIds:[], asrWordIds:[],
+      derived:true, examinationType:examination.type, examinerPersonId:examination.examinerPersonId };
+    const rows = [{ ...shared, id:`examination:${examination.type}:${examination.atWordId}`, elementType:ELEMENT.HEADING,
+      label:null, byLine:null, layout:LAYOUT[ELEMENT.HEADING], text:heading }];
+    if (label) rows.push({ ...shared, id:`examination:${examination.type}:${examination.atWordId}:by`, elementType:ELEMENT.BY_LINE,
+      label:null, byLine:null, layout:LAYOUT[ELEMENT.BY_LINE], text:`BY ${label}:` });
+    structural.push({ index, rows });
+  }
+  if (structural.length) {
+    const withStructure = [];
+    const byIndex = new Map(structural.map(item => [item.index, item.rows]));
+    paragraphs.forEach((paragraph, index) => {
+      const rows = byIndex.get(index);
+      if (rows) withStructure.push(...rows);
+      withStructure.push(paragraph);
+    });
+    paragraphs = withStructure;
+  }
 
   // Every evidence word that no segment claimed. Not an error on its own -- a rebuild in
   // progress can leave one -- but it means the reader is not being shown the whole record, and
