@@ -126,6 +126,10 @@ export default function Home() {
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
+  // The profile being corrected, or null when adding a new one. One modal does both: a reporter
+  // fixing a mistyped licence number is filling in the same fields they filled in to create it, and a
+  // second screen would only be a second place for the two to disagree.
+  const [editingReporter, setEditingReporter] = useState<CourtReporter | null>(null);
   const [selectedReporterId, setSelectedReporterId] = useState("");
   const [active, setActive] = useState<Deposition | null>(null);
   const [notice, setNotice] = useState("");
@@ -221,11 +225,16 @@ export default function Home() {
   }
 
 
-  async function createReporter(event: FormEvent<HTMLFormElement>) {
+  // Saves a new profile, or corrects one that exists. Nothing could correct a stored reporter before
+  // this: create refuses an id it already holds and import skips one, so a mistyped CSR licence
+  // number -- which prints in the signature block of every certificate that reporter signs -- was
+  // permanent. Found at the first screen of Production Trial #1.
+  async function saveReporter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const correcting = editingReporter;
     const reporter: CourtReporter = {
-      id: crypto.randomUUID(), name: String(data.get("name")), company: String(data.get("company")),
+      id: correcting?.id ?? crypto.randomUUID(), name: String(data.get("name")), company: String(data.get("company")),
       email: String(data.get("email")), phone: formatPhoneNumber(String(data.get("phone"))),
       licenseNumber: String(data.get("licenseNumber")), csrExpiration: String(data.get("csrExpiration")),
       taxId: String(data.get("taxId")), address: String(data.get("address")),
@@ -233,9 +242,11 @@ export default function Home() {
       firmRegistrationWaiver: String(data.get("firmRegistrationWaiver")),
     };
     try{
-      const saved=await postJson<CourtReporter>("/api/reporters",reporter);
-      setReporters(current=>[...current,saved].sort((a,b)=>a.name.localeCompare(b.name)));
+      const saved=await postJson<CourtReporter>(correcting?"/api/reporters/update":"/api/reporters",reporter);
+      setReporters(current=>(correcting?current.map(item=>item.id===saved.id?saved:item):[...current,saved])
+        .sort((a,b)=>a.name.localeCompare(b.name)));
       setSelectedReporterId(saved.id);
+      setEditingReporter(null);
       setShowReporterModal(false);
     }catch(error){setNotice(error instanceof Error?error.message:"Could not save the Court Reporter.")}
   }
@@ -365,7 +376,8 @@ export default function Home() {
               <div className="form-row"><label>Witness name<input name="witness" required defaultValue={intakeDraft?.witness ?? ""} placeholder="Full name" /></label><label>Deponent type<select name="deponentType" defaultValue={deponentTypeOption(intakeDraft?.deponentType) ?? ""}><option value="">Not stated</option>{DEPONENT_TYPES.map(option => <option key={option} value={option}>{option}</option>)}</select></label></div>
               <label>Cause number <small>Letters are saved in uppercase</small><input name="causeNumber" required defaultValue={normalizeCauseNumber(intakeDraft?.causeNumber)} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.toLocaleUpperCase("en-US"); }} placeholder="e.g., 25-CV-00598-OLG" /></label>
               <div className="form-row reporter-row"><label>Deposition date<input name="depositionDate" type="date" required defaultValue={parseNoticeDate(intakeDraft?.depositionDate) ?? logisticsFields(intakeDraft?.ufmData).depositionDate ?? ""} /></label><label>Court Reporter <small>{reporters.length ? "Required for local filing" : "Required — no court reporter is saved on this computer yet. Add one below before creating the deposition."}</small><select name="courtReporterId" required value={selectedReporterId} onChange={(event) => setSelectedReporterId(event.target.value)}><option value="">Select a court reporter</option>{reporters.map((reporter) => <option key={reporter.id} value={reporter.id}>{reporter.name}{reporter.licenseNumber ? ` — ${reporter.licenseNumber}` : ""}</option>)}</select></label></div>
-              <button className="add-reporter-button" type="button" onClick={() => setShowReporterModal(true)}>＋ Add a new Court Reporter</button>
+              <button className="add-reporter-button" type="button" onClick={() => { setEditingReporter(null); setShowReporterModal(true); }}>＋ Add a new Court Reporter</button>
+              {selectedReporterId && <button className="add-reporter-button" type="button" onClick={() => { setEditingReporter(reporters.find((item) => item.id === selectedReporterId) ?? null); setShowReporterModal(true); }}>✎ Correct this Court Reporter</button>}
               <CanonicalDataSheet seed={intakeDraft?.masterData}/>
               <label>Reporter notes<textarea name="reporterNotes" rows={3} defaultValue={intakeDraft?.notes ?? ""} placeholder="Scheduling details, appearances, spellings, or special instructions..." /></label>
               <div className="modal-actions"><button type="button" onClick={() => setShowModal(false)} disabled={creating}>Cancel</button><button className="primary-button" type="submit" disabled={creating}>{creating?"Saving to hard drive…":intakeDraft?.creationMode==="live"?"Save, Create, and Continue to Recording Setup":"Save and Create Deposition"}</button></div>
@@ -378,12 +390,12 @@ export default function Home() {
         <div className="modal-backdrop reporter-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowReporterModal(false)}>
           <section className="modal reporter-modal" role="dialog" aria-modal="true" aria-labelledby="reporter-modal-title">
             <button className="close-button" aria-label="Close" onClick={() => setShowReporterModal(false)}>×</button>
-            <span className="eyebrow">COURT REPORTER DIRECTORY</span><h2 id="reporter-modal-title">Add a Court Reporter</h2><p>Save the reporter once, then select them for future depositions.</p>
-            <form onSubmit={createReporter}>
-              <div className="form-row"><label>Full name<input name="name" required placeholder="Court reporter's full name" /></label><label>Company<input name="company" placeholder="Reporting firm" /></label></div>
-              <div className="form-row"><label>Email address<input name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
-              <div className="form-row"><label>License number <small>Digits only; the certificate prints &quot;Texas CSR&quot; before it.</small><input name="licenseNumber" placeholder="9174" /></label><label>CSR expiration<input name="csrExpiration" type="date" /></label></div>
-              <div className="form-row"><label>Tax ID<input name="taxId" placeholder="Tax identification number" /></label></div>
+            <span className="eyebrow">COURT REPORTER DIRECTORY</span><h2 id="reporter-modal-title">{editingReporter ? "Correct a Court Reporter" : "Add a Court Reporter"}</h2><p>{editingReporter ? "These values print in the signature block of every certificate this reporter signs." : "Save the reporter once, then select them for future depositions."}</p>
+            <form onSubmit={saveReporter}>
+              <div className="form-row"><label>Full name<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.name ?? ""} name="name" required placeholder="Court reporter's full name" /></label><label>Company<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.company ?? ""} name="company" placeholder="Reporting firm" /></label></div>
+              <div className="form-row"><label>Email address<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.email ?? ""} name="email" type="email" placeholder="name@example.com" /></label><label>Phone number<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.phone ?? ""} name="phone" type="tel" inputMode="tel" maxLength={14} placeholder="(469) 740-9603" onInput={(event) => { event.currentTarget.value = formatPhoneNumber(event.currentTarget.value); }} /></label></div>
+              <div className="form-row"><label>License number <small>Digits only; the certificate prints &quot;Texas CSR&quot; before it.</small><input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.licenseNumber ?? ""} name="licenseNumber" placeholder="9174" /></label><label>CSR expiration<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.csrExpiration ?? ""} name="csrExpiration" type="date" /></label></div>
+              <div className="form-row"><label>Tax ID<input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.taxId ?? ""} name="taxId" placeholder="Tax identification number" /></label></div>
               {/* Both of these are required by a certified page and had no input at all. Every
                   reviewed Texas certificate prints the CSR expiration, and validateInsertionInput
                   blocks without it. The waiver is how a reporter with no firm answers the firm
@@ -394,11 +406,11 @@ export default function Home() {
                   The number below is the other answer, and until now this form could not take it:
                   the waiver's own hint said "leave empty if the firm has one" beside no field to put
                   one in. */}
-              <label>Firm registration number <small>Printed in the signature block. Enter it if the deposition was reported through a registered firm.</small><input name="firmRegistrationNumber" placeholder="2486" /></label>
-              <label>Firm registration waiver <small>Why no firm registration number applies. Leave empty if the firm has one.</small><textarea name="firmRegistrationWaiver" rows={2} placeholder="Certifies under an individual Texas CSR; no firm registration applies." /></label>
-              <label>Mailing address<textarea name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>
+              <label>Firm registration number <small>Printed in the signature block. Enter it if the deposition was reported through a registered firm.</small><input key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.firmRegistrationNumber ?? ""} name="firmRegistrationNumber" placeholder="2486" /></label>
+              <label>Firm registration waiver <small>Why no firm registration number applies. Leave empty if the firm has one.</small><textarea key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.firmRegistrationWaiver ?? ""} name="firmRegistrationWaiver" rows={2} placeholder="Certifies under an individual Texas CSR; no firm registration applies." /></label>
+              <label>Mailing address<textarea key={editingReporter?.id ?? "new"} defaultValue={editingReporter?.address ?? ""} name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>
               <p className="sensitive-note">Tax ID information is stored only on this computer. Protect access to this device and its browser profile.</p>
-              <div className="modal-actions"><button type="button" onClick={() => setShowReporterModal(false)}>Cancel</button><button className="primary-button" type="submit">Save Court Reporter</button></div>
+              <div className="modal-actions"><button type="button" onClick={() => { setEditingReporter(null); setShowReporterModal(false); }}>Cancel</button><button className="primary-button" type="submit">Save Court Reporter</button></div>
             </form>
           </section>
         </div>

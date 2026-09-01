@@ -113,6 +113,36 @@ export function createReporter(storageRoot, input) {
   return reporter;
 }
 
+/**
+ * Corrects a profile that already exists. Its own verb, deliberately.
+ *
+ * Nothing could change a stored reporter before this. createReporter refuses an id it already holds,
+ * and importReporters skips one -- and that skip is correct, because a legacy import must never
+ * clobber a profile somebody has since corrected. Between them there was no path at all, so a
+ * mistyped CSR licence number, expiration, address or firm registration was permanent, and every one
+ * of those prints in the signature block of every certificate that reporter signs.
+ *
+ * Found at the first screen of Production Trial #1: the deposition could not be created because the
+ * reporter's licence number was wrong and could not be fixed. It is also the likeliest reason this
+ * store holds two profiles for one reporter.
+ *
+ * REFUSES an id it does not hold rather than falling through to an insert. An update that quietly
+ * created would answer "this profile is not here" by manufacturing one, and the caller would never
+ * learn it had the wrong id. Depositions reference the reporter by id, so the id never moves.
+ */
+export function updateReporter(storageRoot, input) {
+  // An update must say who it is updating. normalizeReporter invents an id when none is supplied,
+  // which is right for a creation and wrong here: without this the caller gets "not found" naming a
+  // UUID it never sent, which describes the wrong problem.
+  if (!text(input?.id, 128)) throw new Error("Court reporter ID is required to correct a profile.");
+  const reporter = normalizeReporter(input);
+  const reporters = listReporters(storageRoot);
+  const at = reporters.findIndex(item => item.id === reporter.id);
+  if (at < 0) throw new Error(`Court reporter ${reporter.id} was not found, so there is nothing to correct.`);
+  writeReporters(storageRoot, reporters.map((item, index) => index === at ? reporter : item));
+  return reporter;
+}
+
 export function importReporters(storageRoot, input) {
   if (!Array.isArray(input)) throw new Error("Court reporters must be an array.");
   const existing = listReporters(storageRoot);
