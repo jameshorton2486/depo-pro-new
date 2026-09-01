@@ -8,12 +8,14 @@ import CounselEditor from "./CounselEditor";
 import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
+import { EXAMINATION_TYPE_CHOICES, examinationControl, examinationOperation, examinationSummary } from "./examination-control.mjs";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string; speakerIdentity?:string; name?:string };
-type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Examination = { examinerPersonId:string; type:string; atWordId:string|null; implicit:boolean };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; examinations?:Examination[]; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string; honorific?:string|null };
 type PrintModel = { recordType?:string; pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:import("./WorkspaceDocumentPages").LayoutProfile; findings:{print?:Finding[];assembly?:Finding[]} };
 
@@ -104,6 +106,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // pass is meant to question, so a selection that could not span them would be useless for it.
   const [selected,setSelected] = useState<{ paragraphId:string; wordId:string; extentWordId:string|null }|null>(null);
   const [editing,setEditing] = useState<{ wordId:string; text:string }|null>(null);
+  // Both facts the reporter states. Neither is preselected: a boundary names a person and a kind
+  // of examination, and a default that prints a heading nobody chose is the §247 mistake in a new
+  // place.
+  const [examinationType,setExaminationType] = useState("");
+  const [examinationExaminer,setExaminationExaminer] = useState("");
   const [error,setError] = useState("");
   const [errorCode,setErrorCode] = useState("");
   const [busy,setBusy] = useState(false);
@@ -759,6 +766,40 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               {rendered?.labels?.[candidate.id] ?? candidate.label}
             </button>
           ))}
+          {/* Where an examination changes hands. One action writes one overlay operation, and the
+              heading, the BY-line, the Q./A. labelling and the index entry all derive from it --
+              none of them is entered here or stored anywhere else. */}
+          <h3>Examination</h3>
+          {(() => {
+            const control = examinationControl({ paragraph:active, candidates, examinations:rendered?.examinations ?? [], labels:rendered?.labels ?? {} });
+            if (control.disabledReason) return <p className="workspace-note">{control.disabledReason}</p>;
+            const summary = examinationSummary({ type:examinationType, examinerPersonId:examinationExaminer, labels:rendered?.labels ?? {}, candidates });
+            return (
+              <Fragment>
+                <label className="workspace-field" htmlFor="examination-type">What begins here
+                  <select id="examination-type" value={examinationType} disabled={busy} onChange={event=>setExaminationType(event.target.value)}>
+                    <option value="">Choose…</option>
+                    {EXAMINATION_TYPE_CHOICES.map(choice=>(<option key={choice.value} value={choice.value}>{choice.label}</option>))}
+                  </select>
+                </label>
+                <label className="workspace-field" htmlFor="examination-examiner">Who is examining
+                  <select id="examination-examiner" value={examinationExaminer} disabled={busy} onChange={event=>setExaminationExaminer(event.target.value)}>
+                    <option value="">Choose…</option>
+                    {control.examiners.map(examiner=>(<option key={examiner.id} value={examiner.id}>{examiner.label}</option>))}
+                  </select>
+                </label>
+                {/* The button says what it will record. A control reading "Record" leaves the
+                    reporter to remember which two lists they set; this one can be checked against
+                    the screen before it is pressed. */}
+                <button type="button" disabled={busy||!summary} onClick={()=>{
+                  const operation = examinationOperation({ paragraph:active, type:examinationType, examinerPersonId:examinationExaminer });
+                  if (!operation) return;
+                  setExaminationType(""); setExaminationExaminer(""); setSelected(null);
+                  void structuralTransaction([operation]);
+                }}>{summary ? summary : "Choose what begins here and who is examining"}</button>
+              </Fragment>
+            );
+          })()}
           {editing && (
             <form className="workspace-edit" onSubmit={event=>{ event.preventDefault(); const text=editing.text.trim(); setEditing(null); if(text) void append([{ op:"replace", wordId:editing.wordId, text }]); }}>
               <label htmlFor="workspace-word-edit">Correct this word</label>
