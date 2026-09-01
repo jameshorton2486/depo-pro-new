@@ -14,7 +14,7 @@
 
 export const OVERLAY_SCHEMA_VERSION = "2.0.0";
 export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review", "examination"]);
+export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review", "examination", "colloquy", "uncolloquy"]);
 // The examinations a Texas deposition actually contains, in the order they can occur. Closed on
 // purpose: an examination type is a thing the record can be asked to prove, not a free-text note,
 // and a heading nobody recognises is worse than a refusal.
@@ -83,6 +83,36 @@ export function validateOperation(input) {
   if (op === "unflag") {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
+  }
+  // An utterance by the active examiner that is not a question.
+  //
+  // §247. `labelParagraphs` emits Q. for anything the active examiner says, so "I will rephrase."
+  // and "Let me back up." print as testimony. Whether an utterance is a question is a THIRD fact,
+  // separate from who spoke and from who is examining, and nothing in this repository recorded it.
+  //
+  // Stated by the reporter, never inferred. Measured on a real deposition, 456 of 1,972 sentences
+  // end in a question mark against 484 examiner turns, and "Counsel, can we take a short break?"
+  // carries one while being colloquy -- a punctuation rule would be wrong in both directions at
+  // once. Deepgram carries no question, type or intent field anywhere.
+  //
+  // The reporter had no way to say it either: measured against every value `label` can set, all five
+  // roles still emit Q., because the identity test precedes the role test. The one lever that worked
+  // was changing who spoke, which puts another person's name on a line they did not say.
+  //
+  // Paired with `uncolloquy` rather than relying on undo. Undo pops the last transaction; a reporter
+  // who finds a bad mark an hour later cannot reach it that way. `flag`/`unflag` set the precedent
+  // and the naming follows it -- `uncolloquy` is not a word, and consistency with the nine
+  // operations already here is worth more than a prettier name nobody else in the file uses.
+  if (op === "colloquy") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"colloquy requires wordId." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId) } };
+  }
+  // Removes the reporter's determination. It does NOT assert that the utterance is a question: the
+  // paragraph returns to whatever the examination model derives for it, which is the only honest
+  // meaning of clearing a mark.
+  if (op === "uncolloquy") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"uncolloquy requires wordId." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId) } };
   }
   // Where one examination stops and the next begins.
   //
@@ -183,6 +213,11 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   // Keyed by the word the examination begins at, which is what makes a second boundary on the
   // same word detectable.
   const examinations = new Map();
+  // The utterances the reporter has said are colloquy. A set, not a list: marking one paragraph
+  // twice says the same thing twice and discards nothing, which is why this is idempotent where a
+  // second examination boundary on one word is refused -- that one carries a person and a type that
+  // could differ, and silently replacing it would lose a recorded fact.
+  const colloquy = new Set();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
@@ -251,6 +286,20 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       examinations.set(operation.atWordId, { atWordId:operation.atWordId, examinerPersonId:operation.examinerPersonId, type:operation.type });
       return;
     }
+    if (operation.op === "colloquy") {
+      // Resolved against segment order for the reason flags and boundaries are: a word present in
+      // the evidence but held by no segment cannot classify anything in the reading.
+      if (segmentHolding(current, operation.wordId) < 0) return orphan("WORD_NOT_FOUND");
+      colloquy.add(operation.wordId);
+      return;
+    }
+    if (operation.op === "uncolloquy") {
+      // Reported rather than ignored, exactly as unflag is. A clear that silently did nothing
+      // leaves the reporter believing a line reads as a question again when it still reads as
+      // colloquy on the page they are about to certify.
+      if (!colloquy.delete(operation.wordId)) return orphan("COLLOQUY_NOT_FOUND");
+      return;
+    }
     const anchor=operation.afterWordId??operation.beforeWordId;
     if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
     const target=operation.beforeWordId?insertedBefore:inserted;
@@ -287,7 +336,10 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
     .map(item => item.boundary);
   // Like `flagged`, deliberately not folded into replaced/deleted/inserted: a boundary changes no
   // word the reader reads.
-  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, examinations:examinationBoundaries, orphaned };
+  // Like `flagged` and the boundaries, deliberately not folded into replaced/deleted/inserted: a
+  // classification changes no word the reader reads. Nothing consumes this yet -- §247-B is the
+  // labeller, and keeping the operation inert first is the discipline Phase B used.
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, examinations:examinationBoundaries, colloquy, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */
