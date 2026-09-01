@@ -87,8 +87,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
 
   const grouped = groupTranscriptSegments(withText);
   // The overlay is the authority on where examination changes hands. applyOverlay returns the
-  // boundaries in transcript order; labelParagraphs advances the active examiner as it walks.
-  const labelled = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations });
+  // boundaries in transcript order; labelParagraphs advances the active examiner as it walks and
+  // hands back the resolved sequence -- including the implicit first examination, whose examiner
+  // it may have adopted here and which nothing outside could otherwise name.
+  const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations });
 
   const seen = new Set();
   const paragraphs = labelled.map((paragraph, index) => {
@@ -215,6 +217,9 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       // the number they care about is how many places still need another listen.
       flags:new Set(applied.flagged.values()).size,
       lowConfidenceUnresolved:paragraphs.flatMap(paragraph=>paragraph.words).filter(word=>word.lowConfidence).length },
+    // The one resolved sequence. The heading, the BY-line and the index entry all read this, so
+    // none of them recomputes who was examining from the boundaries a second time.
+    examinations:examinationSequence,
     diarized, paragraphs, findings,
   };
 }

@@ -37,7 +37,7 @@ const say = (id, role, text) => {
 };
 const at = (paragraph, examinerPersonId, type) => ({ atWordId:paragraph.wordId, examinerPersonId, type });
 const shape = (paragraphs, examinations = []) =>
-  labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations })
+  labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations }).paragraphs
     .map(item => `${item.elementType}:${item.label ?? "-"}`);
 
 // --- the sequence a deposition actually runs ---------------------------------------------------
@@ -83,7 +83,7 @@ test("a participant's transcriptRole is never what decides this", () => {
   const cross = say("ramirez", "DEFENDING_ATTORNEY", "Did you see the vehicle?");
   const laterObjection = say("ramirez", "DEFENDING_ATTORNEY", "Objection, form.");
   const back = say("alvarez", "QUESTIONING_ATTORNEY", "Redirect.");
-  const labelled = labelParagraphs([cross, back, laterObjection], {
+  const { paragraphs:labelled } = labelParagraphs([cross, back, laterObjection], {
     labels:LABELS, examinerIdentity:"alvarez",
     examinations:[at(cross, "ramirez", "CROSS"), at(back, "alvarez", "REDIRECT")],
   });
@@ -149,8 +149,8 @@ test("a boundary naming whoever is already examining changes nothing", () => {
   // Anchored at the RESUMING paragraph, not the opening one. Anywhere else the reset is invisible
   // because there is no resumption state to lose, and the test would pass while proving nothing --
   // it did, until a mutation that deleted the guard survived it.
-  const withRedundant = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations:[at(resumed, "alvarez", "DIRECT")] });
-  const without = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez" });
+  const withRedundant = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations:[at(resumed, "alvarez", "DIRECT")] }).paragraphs;
+  const without = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez" }).paragraphs;
   assert.deepEqual(withRedundant.map(item => item.byLine), without.map(item => item.byLine),
     "including the resumption by-line, which a spurious reset would have swallowed");
   assert.deepEqual(withRedundant.map(item => item.elementType), without.map(item => item.elementType));
@@ -164,7 +164,7 @@ test("a handover does not emit a resumption by-line", () => {
   const objection = say("ramirez", "DEFENDING_ATTORNEY", "Objection.");
   const answer = say("witness", "WITNESS", "No.");
   const cross = say("whitfield", "QUESTIONING_ATTORNEY", "Doctor, my name is Grace Whitfield.");
-  const labelled = labelParagraphs([q, objection, answer, cross], {
+  const { paragraphs:labelled } = labelParagraphs([q, objection, answer, cross], {
     labels:LABELS, examinerIdentity:"alvarez", examinations:[at(cross, "whitfield", "CROSS")],
   });
   assert.equal(labelled.at(-1).elementType, "QUESTION");
@@ -200,9 +200,9 @@ test("an existing single-examiner deposition renders exactly as it did", () => {
     say("witness", "WITNESS", "I will answer."),
     say("alvarez", "QUESTIONING_ATTORNEY", "Thank you."),
   ];
-  const untouched = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez" });
+  const untouched = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez" }).paragraphs;
   for (const examinations of [[], undefined, null]) {
-    const supplied = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations });
+    const supplied = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations }).paragraphs;
     assert.deepEqual(supplied.map(item => ({ elementType:item.elementType, label:item.label, byLine:item.byLine })),
       untouched.map(item => ({ elementType:item.elementType, label:item.label, byLine:item.byLine })),
       `an empty boundary list (${JSON.stringify(examinations)}) must reproduce today's output exactly`);
@@ -298,8 +298,8 @@ test("on the realistic deposition one boundary replaces 450 label operations", (
   // one operation rather than 450.
   const crossAt = LONG.segments.find(segment => segment.speakerIdentity === "counsel-whitfield").asrWordIds[0];
   const options = { labels:{ "counsel-alvarez":"MR. ALVAREZ", "counsel-whitfield":"MS. WHITFIELD", "counsel-ramirez":"MS. RAMIREZ" }, examinerIdentity:"counsel-alvarez" };
-  const before = labelParagraphs(LONG.segments, options);
-  const after = labelParagraphs(LONG.segments, { ...options, examinations:[{ atWordId:crossAt, examinerPersonId:"counsel-whitfield", type:"CROSS" }] });
+  const before = labelParagraphs(LONG.segments, options).paragraphs;
+  const after = labelParagraphs(LONG.segments, { ...options, examinations:[{ atWordId:crossAt, examinerPersonId:"counsel-whitfield", type:"CROSS" }] }).paragraphs;
 
   // What was wrong: Ms. Whitfield's questions, and the witness's answers to them.
   const misrendered = index => {
