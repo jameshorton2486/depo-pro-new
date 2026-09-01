@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { depositionStorageRoot as configuredDepositionStorageRoot } from "./storage-config.mjs";
 import { createInsertionWordArtifact, prepareInsertionRenderingArtifact } from "./insertion-pages/word-service.mjs";
 import { insertionTemplateCatalog } from "./insertion-pages/templates.mjs";
-import { createReporter, importReporters, listReporters } from "./reporter-store.mjs";
+import { createReporter, importReporters, listReporters, updateReporter } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
 import { attestWitnessSworn } from "./deposition-store.mjs";
@@ -210,6 +210,11 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/depositions" && req.method === "GET") return json(res,200,scanDepositions(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/reporters" && req.method === "GET") return json(res,200,{reporters:listReporters(depositionStorageRoot)},origin);
     if (req.url === "/api/reporters" && req.method === "POST") return json(res,201,createReporter(depositionStorageRoot,await body(req,64*1024)),origin);
+    // Correcting a saved profile. Its own verb because create refuses an existing id and import
+    // skips one, so nothing could change a stored value -- and a mistyped CSR number, expiration,
+    // address or firm registration prints in the signature block of every certificate that reporter
+    // signs. Found at the first screen of Production Trial #1.
+    if (req.url === "/api/reporters/update" && req.method === "POST") return json(res,200,updateReporter(depositionStorageRoot,await body(req,64*1024)),origin);
     if (req.url === "/api/reporters/import" && req.method === "POST") { const input=await body(req,256*1024);return json(res,200,{reporters:importReporters(depositionStorageRoot,input.reporters)},origin); }
     if (req.url === "/api/storage/inventory" && req.method === "GET") return json(res,200,inspectStorage(root,{storageRoot:depositionStorageRoot}),origin);
     if (req.url === "/api/depositions" && req.method === "POST") {
