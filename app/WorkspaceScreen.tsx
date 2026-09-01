@@ -5,6 +5,12 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
+import { splitSpeakerChoices, splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
+import { overlayHistoryRequest, overlayMutationRequest } from "./overlay-mutation.mjs";
+
+// One empty set, so "no low-confidence marks" is the same reference on every render.
+const EMPTY_WORD_IDS: Set<string> = new Set();
+import PartiesEditor from "./PartiesEditor";
 import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
@@ -97,6 +103,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const depositionId = deposition.id;
   const [rendered,setRendered] = useState<Rendered|null>(null);
   const [printModel,setPrintModel] = useState<PrintModel|null>(null);
+  // Set the moment a mutation succeeds, cleared only when the refreshed model lands. Every mutation
+  // control is disabled while it is set, because the hash a second edit would carry is the hash of a
+  // transcript that has already moved -- which the server refuses, correctly, as stale. Rapid
+  // corrections were failing exactly that way during the boundary measurement, and the screen went
+  // on looking ready. The authoritative state comes from the server; nothing here advances the hash
+  // optimistically.
+  const [awaitingRecord,setAwaitingRecord] = useState(false);
   const [documentState,setDocumentState] = useState<{state:string;reason:string;absentSections:string[]}|null>(null);
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
@@ -149,6 +162,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // overwrite a fresh one.
   const [reloadToken,setReloadToken] = useState(0);
   const reload = useCallback(()=>setReloadToken(token=>token+1),[]);
+  // Two reload signals, because an overlay edit and a record edit invalidate different things.
+  //
+  // A correction used to refetch seven endpoints. Four of them cannot be affected by an overlay
+  // operation at all -- the audio audit, the playback metadata, the transcription jobs, and the
+  // speaker candidates, which getSpeakerCandidates derives from the canonical record and never from
+  // the overlay. Measured at about 1.4 seconds of a 4 second correction cycle.
+  //
+  // reloadToken still means "everything moved" and is what the counsel, parties, proceeding,
+  // honorific and speaker-map writers use. reloadTranscript means "the transcript moved", which is
+  // all an overlay mutation can do.
+  const [transcriptToken,setTranscriptToken] = useState(0);
+  const reloadTranscript = useCallback(()=>setTranscriptToken(token=>token+1),[]);
   const [media,setMedia] = useState<{ needsProxy:boolean; proxy:{ alignment?:{ aligned:boolean; message:string } }|null; sourceMedia:{ codec:string } }|null>(null);
   const [building,setBuilding] = useState(false);
   const playbackSource = media
@@ -169,7 +194,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,printOutcome,candidateRes,mediaRes] = await Promise.all([
+        const [renderRes,printOutcome] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
           // The fallback stays -- a reporter with no assembly authority still needs to see and
           // work the testimony -- but the reason the complete model refused no longer goes in
@@ -180,10 +205,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             const blockedReason = await response.json().then(payload=>String(payload?.error||"")).catch(()=>"");
             return { response: await fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}), blockedReason };
           }),
-          fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
-          fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
-        if(mediaRes.ok && !cancelled) setMedia(await mediaRes.json());
         const body = await renderRes.json();
         if(cancelled) return;
         if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
@@ -194,13 +216,31 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         const printRes=printOutcome.response;
         const servedModel=printRes.ok?await printRes.json():null;
         setPrintModel(servedModel);
+      setAwaitingRecord(false);
         setDocumentState(deriveDocumentStatus({ servedRecordType:servedModel?.recordType??null, blockedReason:printOutcome.blockedReason }));
-        if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
         if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
     })();
     return ()=>{ cancelled = true; };
-  },[depositionId,examiner,audioIndex,reloadToken]);
+  },[depositionId,examiner,reloadToken,transcriptToken]);
+
+  // The participant roster and the media. Neither can be changed by an overlay operation --
+  // getSpeakerCandidates derives candidates from the canonical record and never reads the overlay --
+  // so this deliberately does NOT depend on transcriptToken. It reloads when the RECORD moves, which
+  // is what the counsel, parties, proceeding and participant writers signal.
+  useEffect(()=>{
+    let cancelled=false;
+    void (async ()=>{
+      const [candidateRes,mediaRes]=await Promise.all([
+        fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
+        fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
+      ]);
+      if(cancelled) return;
+      if(mediaRes.ok) setMedia(await mediaRes.json());
+      if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
+    })();
+    return ()=>{ cancelled=true; };
+  },[depositionId,audioIndex,reloadToken]);
 
   // Audio and job state load independently of the transcript. When there is no transcript the
   // render effect above fails by design, and this is the only thing left to show -- so it must
@@ -269,13 +309,16 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // The key matches the one reconcileSpeakerMap validates against server-side.
   const buckets = useMemo(()=>speakerBuckets(rendered?.paragraphs ?? []) as Bucket[],[rendered]);
 
-  async function post(path:string, payload:Record<string,unknown>) {
+  // scope says what the write can have invalidated. "transcript" refetches the rendered transcript
+  // and the document model; "record" refetches everything, including the participant roster.
+  async function post(path:string, payload:Record<string,unknown>, scope:"record"|"transcript"="record") {
     setBusy(true); setError("");
     try {
       const response = await fetch(`${API}${path}`,{ method:"POST", headers:{ "content-type":"application/json" }, body:JSON.stringify(payload) });
       const body = await response.json();
       if(!response.ok) throw new Error(body.error||"The edit could not be saved.");
-      reload();
+      setAwaitingRecord(true);
+      if(scope==="transcript") reloadTranscript(); else reload();
       return true;
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
@@ -286,7 +329,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // it was true of a certified transcript and of a bare testimony body alike, which is exactly
   // what made it useless to the person deciding whether to send the file.
   async function generateDocx(){setBusy(true);setError("");try{const endpoint=documentState?.state===DOCUMENT_STATUS.READY?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(generationNotice({producedKind:result.documentKind,outputPath:result.outputPath}))}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
-  const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
+  // Every overlay mutation is built in one place, where a missing review-state hash throws instead
+  // of producing a request the server is certain to refuse. This helper used to send no hash at all,
+  // so six reporter actions -- label and speaker correction, split-with-speaker, marking for another
+  // listen, clearing a mark, correcting a word, striking a word -- failed every time while the
+  // buttons looked available.
+  const append = (operations:Operation[]) =>
+    post("/api/transcript/overlay", overlayMutationRequest({ depositionId, operations, reviewStateHash:printModel?.source.reviewStateHash }), "transcript");
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
     if(!paragraph||!printModel){setError("The paragraph is no longer current. Reload it before saving.");return false}
@@ -296,17 +345,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!operations.length)return true;
     setBusy(true);setError("");
     try{
-      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(overlayMutationRequest({depositionId,operations,reviewStateHash:printModel.source.reviewStateHash}))});
       const body=await response.json();
       if(!response.ok)throw new Error(body.error||"The paragraph edit could not be saved.");
+        setAwaitingRecord(true);
       setSelected(previous=>previous?.paragraphId===paragraphId?previous:{paragraphId,wordId:paragraph.words[0]?.id??previous?.wordId??"",extentWordId:null});
-      reload();
+      reloadTranscript();
       requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-token-id="${paragraph.words[0]?.id}"]`)?.scrollIntoView({block:"center"}));
       void caret;
       return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The paragraph edit could not be saved.");return false}
     finally{setBusy(false)}
-  },[depositionId,printModel,reload,rendered]);
+  },[depositionId,printModel,reloadTranscript,rendered]);
 
   // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
   // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
@@ -343,7 +393,19 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // Both operations address a word, never a segment. A rendered paragraph can span several
   // segments and the client cannot tell which one holds a given word; addressing by word lets
   // the server resolve it, and after a split the segment holding the anchor is the new tail.
+  //
+  // Two things one control does, chosen by WHERE the reporter clicked. Select the word a paragraph
+  // already begins at and this relabels that paragraph. Select any later word and it starts a new
+  // paragraph there, belonging to the speaker chosen -- which is what the hint beside these buttons
+  // has always promised and what the buttons did not do.
+  //
+  // The second case is the Etminan repair. Deepgram ran two turns together across most of the
+  // deposition, so roughly 224 boundaries are missing; before the overlay could carry a speaker on a
+  // split, each one cost a split and then a label addressed at a derived id the caller had to
+  // rebuild. One click, one operation, one undo.
   function relabel(paragraph:Paragraph, speakerIdentity:string|null, transcriptRole:string|null) {
+    const startsHere = splitWithSpeakerOperation({ paragraph, selectedWordId:selected?.wordId ?? null, speakerIdentity, transcriptRole });
+    if (startsHere) { setSelected(null); void append([startsHere]); return; }
     const anchor = paragraph.words.find(word=>!word.authored)?.id;
     if(!anchor) return;
     setSelected(null);
@@ -354,15 +416,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!printModel)return false;
     setBusy(true);setError("");
     try{
-      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
-      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");reload();return true;
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(overlayMutationRequest({depositionId,operations,reviewStateHash:printModel.source.reviewStateHash}))});
+      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");setAwaitingRecord(true);reloadTranscript();return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The structural edit could not be saved.");return false}finally{setBusy(false)}
-  },[depositionId,printModel,reload]);
+  },[depositionId,printModel,reloadTranscript]);
   const splitParagraph=useCallback(async(paragraphId:string,caret:number)=>{
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)return false;
     const anchor=wordCharacterRanges(paragraph).find(range=>range.start>=caret)?.word;
     if(!anchor||anchor.id===paragraph.words[0]?.id){setError("Place the caret at a word boundary inside the paragraph before pressing Enter.");return false}
-    return structuralTransaction([{op:"split",beforeWordId:anchor.id},{op:"label",wordId:anchor.id,speakerIdentity:paragraph.speakerIdentity,transcriptRole:paragraph.transcriptRole}]);
+    // One operation. The label this used to send set the tail to the speaker it already inherits,
+    // so it was a no-op that doubled the audit trail and the undo depth for every split.
+    return structuralTransaction([{op:"split",beforeWordId:anchor.id}]);
   },[rendered,structuralTransaction]);
   const joinParagraph=useCallback(async(paragraphId:string,direction:"previous"|"next")=>{
     const paragraphs=rendered?.paragraphs??[],index=paragraphs.findIndex(item=>item.id===paragraphId);
@@ -376,6 +440,14 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  // Stable identities so the transcript pages below can be held back. Both read through a ref rather
+  // than listing their function as a dependency: those functions are rebuilt every render, so a
+  // dependency would hand every page a new handler again and defeat the comparator.
+  const playParagraphRef=useRef(playParagraph),playAtRef=useRef(playAt);
+  useEffect(()=>{playParagraphRef.current=playParagraph;playAtRef.current=playAt});
+  const playParagraphById = useCallback((id:string)=>playParagraphRef.current(rendered?.paragraphs.find(item=>item.id===id)??null),[rendered]);
+  const playAtSeconds = useCallback((seconds:number)=>{void playAtRef.current(seconds)},[]);
+  const speakerChoices = useMemo(()=>splitSpeakerChoices({ candidates, examinerIdentity:examiner, labels:rendered?.labels ?? {} }),[candidates,examiner,rendered]);
   // Where the selected paragraph sits, so the two join controls can refuse at the ends of the
   // transcript rather than calling joinParagraph and letting it fail. The first paragraph has
   // nothing above it and the last has nothing below.
@@ -478,6 +550,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return null;
   },[rendered,selected]);
   const lowConfidenceWords=useMemo(()=>(rendered?.paragraphs??[]).flatMap(paragraph=>paragraph.words.filter(word=>word.lowConfidence).map(word=>({paragraphId:paragraph.id,wordId:word.id}))),[rendered]);
+  // Rebuilt inline on every render before this, including the empty branch -- `new Set()` is a new
+  // reference each time, which alone was enough to defeat memo on all 63 transcript pages.
+  const lowConfidenceWordIdSet = useMemo(
+    ()=>lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):EMPTY_WORD_IDS,
+    [lowConfidenceMode,lowConfidenceWords]);
   const searchMatches=useMemo(()=>{
     if(!searchText)return[];
     const escaped=searchText.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),pattern=wholeWords?`\\b${escaped}\\b`:escaped,flags=matchCase?"g":"gi",matches:{id:string;paragraphId:string;start:number;end:number;context:string}[]=[];
@@ -556,10 +633,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
+        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
-        <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
+        <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
@@ -679,7 +756,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onPlayAt={seconds=>{void playAt(seconds)}} onEditingChange={editingChange}/>
+        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
           :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
@@ -692,7 +769,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <label><input type="checkbox" checked={lowConfidenceMode} onChange={event=>setLowConfidenceMode(event.target.checked)}/> Show review marks</label>
             <p className="workspace-hint">{lowConfidenceWords.length} unresolved · provisional configurable threshold</p>
             <div><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(-1)}>Previous</button><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(1)}>Next</button></div>
-            {selectedWord?.lowConfidence&&<button type="button" disabled={busy} onClick={()=>void structuralTransaction([{op:"review",wordId:selectedWord.id,disposition:"APPROVED",at:new Date().toISOString()}])}>Approve selected occurrence</button>}
+            {selectedWord?.lowConfidence&&<button type="button" disabled={busy||awaitingRecord} onClick={()=>void structuralTransaction([{op:"review",wordId:selectedWord.id,disposition:"APPROVED",at:new Date().toISOString()}])}>Approve selected occurrence</button>}
           </section>
           <section className="workspace-review-tools" aria-label="Find and replace">
             <h3>Find / Replace</h3>
@@ -716,14 +793,16 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <p className="workspace-hint">{unresolvedHonorifics.length} unresolved participant{unresolvedHonorifics.length===1?"":"s"}</p>
             {unresolvedHonorifics.map(finding=><div className="workspace-honorific" key={finding.speakerIdentity}>
               <strong>{finding.name||finding.speakerIdentity}</strong>
-              {["MR.","MS.","MRS.","DR."].map(value=><button type="button" key={value} disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,value)}>{value}</button>)}
-              <button type="button" disabled={busy} onClick={()=>{const value=window.prompt("Enter the participant's honorific");if(value&&finding.speakerIdentity)void resolveHonorific(finding.speakerIdentity,value)}}>Other</button>
-              <button type="button" disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,null)}>None</button>
+              {["MR.","MS.","MRS.","DR."].map(value=><button type="button" key={value} disabled={busy||awaitingRecord} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,value)}>{value}</button>)}
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>{const value=window.prompt("Enter the participant's honorific");if(value&&finding.speakerIdentity)void resolveHonorific(finding.speakerIdentity,value)}}>Other</button>
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,null)}>None</button>
             </div>)}
           </section>
           <p className="workspace-hint">
             {range ? `${rangeWords} words selected. Choosing a label still acts on the anchor word; single-word edits are unavailable while a range is selected.`
-              : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`
+              : active ? (splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId
+                ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a speaker starts a new paragraph at that word. Hold shift and click another word to select a range.`
+                : `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}", which begins this paragraph. Choosing a speaker relabels the whole paragraph; select a later word to start a new one there.`)
               : "Click a word, then choose what its paragraph should be."}
           </p>
           {active&&<section className="workspace-selection-context" aria-label="Selected paragraph evidence">
@@ -736,11 +815,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               make a decision at the moment this exists to make fast, and everything else a
               passage might need is already an operation: replace corrects, delete strikes, label
               reattributes. Marking changes no text -- the passage reads exactly as it did. */}
-          <button type="button" className="workspace-mark" disabled={!selected||busy} onClick={flagSelection}>
+          <button type="button" className="workspace-mark" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>
             {range ? `Mark these ${rangeWords} words for another listen` : "Mark for another listen"}
           </button>
           {selectedWord?.flagged && (
-            <button type="button" disabled={busy} onClick={()=>{ const from=selectedWord.flaggedFrom; if(from) void append([{ op:"unflag", fromWordId:from }]); }}>
+            <button type="button" disabled={busy||awaitingRecord} onClick={()=>{ const from=selectedWord.flaggedFrom; if(from) void append([{ op:"unflag", fromWordId:from }]); }}>
               Clear this mark
             </button>
           )}
@@ -752,20 +831,25 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               They act on whole paragraphs, which is what join does. Moving a highlighted span
               alone would be split-then-join, and is deliberately not what these buttons claim. */}
           <h3>Paragraph</h3>
-          <button type="button" disabled={!active||busy||activeIndex<=0} onClick={()=>active&&void joinParagraph(active.id,"previous")}>
+          <button type="button" disabled={!active||busy||awaitingRecord||activeIndex<=0} onClick={()=>active&&void joinParagraph(active.id,"previous")}>
             Join to previous paragraph
           </button>
-          <button type="button" disabled={!active||busy||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1} onClick={()=>active&&void joinParagraph(active.id,"next")}>
+          <button type="button" disabled={!active||busy||awaitingRecord||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1} onClick={()=>active&&void joinParagraph(active.id,"next")}>
             Join to next paragraph
           </button>
+          {/* Who each button hands the paragraph to comes from splitSpeakerChoices, which is
+              tested. The same rule used to sit inline in three places here, untested, and the Q.
+              fallback to the recorded examining attorney is the part that matters: every real
+              Etminan candidate arrived carrying defaultRole "". */}
           <h3>Label</h3>
-          <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="QUESTIONING_ATTORNEY")?.id??examiner??null,"QUESTIONING_ATTORNEY")}>Q.</button>
-          <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="WITNESS")?.id??null,"WITNESS")}>A.</button>
+          {speakerChoices.filter(choice=>choice.key==="question"||choice.key==="answer").map(choice=>(
+            <button type="button" key={choice.key} title={choice.title} disabled={!active||busy||awaitingRecord}
+              onClick={()=>active&&relabel(active,choice.speakerIdentity,choice.transcriptRole)}>{choice.label}</button>
+          ))}
           <h3>Colloquy</h3>
-          {candidates.map(candidate=>(
-            <button type="button" key={candidate.id} disabled={!active||busy} onClick={()=>active&&relabel(active,candidate.id,candidate.defaultRole)}>
-              {rendered?.labels?.[candidate.id] ?? candidate.label}
-            </button>
+          {speakerChoices.filter(choice=>choice.key!=="question"&&choice.key!=="answer").map(choice=>(
+            <button type="button" key={choice.key} title={choice.title} disabled={!active||busy||awaitingRecord}
+              onClick={()=>active&&relabel(active,choice.speakerIdentity,choice.transcriptRole)}>{choice.label}</button>
           ))}
           {/* Whether an utterance is a question is a third fact, separate from who spoke and from
               who is examining. The reporter states it; nothing here infers it, and the transcript
@@ -777,7 +861,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             if (control.disabledReason) return <p className="workspace-note">{control.disabledReason}</p>;
             const label = examinerColloquyLabel({ paragraph:active, labels:rendered?.labels ?? {} });
             return (
-              <button type="button" disabled={busy} onClick={()=>{
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>{
                 const operation = examinerColloquyOperation({ paragraph:active });
                 if (!operation) return;
                 setSelected(null);
@@ -796,13 +880,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             return (
               <Fragment>
                 <label className="workspace-field" htmlFor="examination-type">What begins here
-                  <select id="examination-type" value={examinationType} disabled={busy} onChange={event=>setExaminationType(event.target.value)}>
+                  <select id="examination-type" value={examinationType} disabled={busy||awaitingRecord} onChange={event=>setExaminationType(event.target.value)}>
                     <option value="">Choose…</option>
                     {EXAMINATION_TYPE_CHOICES.map(choice=>(<option key={choice.value} value={choice.value}>{choice.label}</option>))}
                   </select>
                 </label>
                 <label className="workspace-field" htmlFor="examination-examiner">Who is examining
-                  <select id="examination-examiner" value={examinationExaminer} disabled={busy} onChange={event=>setExaminationExaminer(event.target.value)}>
+                  <select id="examination-examiner" value={examinationExaminer} disabled={busy||awaitingRecord} onChange={event=>setExaminationExaminer(event.target.value)}>
                     <option value="">Choose…</option>
                     {control.examiners.map(examiner=>(<option key={examiner.id} value={examiner.id}>{examiner.label}</option>))}
                   </select>
@@ -810,7 +894,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 {/* The button says what it will record. A control reading "Record" leaves the
                     reporter to remember which two lists they set; this one can be checked against
                     the screen before it is pressed. */}
-                <button type="button" disabled={busy||!summary} onClick={()=>{
+                <button type="button" disabled={busy||awaitingRecord||!summary} onClick={()=>{
                   const operation = examinationOperation({ paragraph:active, type:examinationType, examinerPersonId:examinationExaminer });
                   if (!operation) return;
                   setExaminationType(""); setExaminationExaminer(""); setSelected(null);
@@ -827,7 +911,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                   to the reporter choosing "Correct the word", where moving focus to it is the
                   expected behaviour and skipping it would strand keyboard users. */}
               <input id="workspace-word-edit" value={editing.text} ref={node=>{ node?.focus(); }} onChange={event=>setEditing({ ...editing, text:event.target.value })} />
-              <button type="submit" className="primary-button" disabled={busy}>Save</button>
+              <button type="submit" className="primary-button" disabled={busy||awaitingRecord}>Save</button>
               <button type="button" onClick={()=>setEditing(null)}>Cancel</button>
             </form>
           )}
@@ -836,8 +920,8 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           {selected && !editing && !range && (
             <>
               <h3>This word</h3>
-              <button type="button" disabled={busy} onClick={()=>{ const word=active?.words.find(item=>item.id===selected.wordId); if(word) setEditing({ wordId:word.id, text:word.text }); }}>Correct the word</button>
-              <button type="button" disabled={busy} onClick={()=>{ const id=selected.wordId; setSelected(null); void append([{ op:"delete", wordId:id }]); }}>Strike the word</button>
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>{ const word=active?.words.find(item=>item.id===selected.wordId); if(word) setEditing({ wordId:word.id, text:word.text }); }}>Correct the word</button>
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>{ const id=selected.wordId; setSelected(null); void append([{ op:"delete", wordId:id }]); }}>Strike the word</button>
             </>
           )}
 
@@ -846,6 +930,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} speakerOptions={speakerOptions} speakerAssignmentForCounsel={speakerAssignmentForCounsel} onSpeakerAssignment={assignCounselSpeaker} />
+
+          {/* And the parties, because the caption names them and nothing else in the application
+              could. A deposition made from an existing recording reaches finalization with an empty
+              parties list and a certified caption with nothing under PLAINTIFF or DEFENDANT. */}
+          <h2>Parties</h2>
+          <PartiesEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" className="secondary-button" onClick={()=>{
@@ -882,7 +972,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 <small className="workspace-sample">{bucket.sample}…</small>
               </div>
             ))}
-            <button type="button" className="primary-button" disabled={busy} onClick={()=>{ void (async ()=>{
+            <button type="button" className="primary-button" disabled={busy||awaitingRecord} onClick={()=>{ void (async ()=>{
               // Each bucket carries the job its paragraphs came from. The previous payload took
               // one job identity from the first rendered paragraph and stamped it on every
               // assignment, which is right only while a single job is in the transcript.

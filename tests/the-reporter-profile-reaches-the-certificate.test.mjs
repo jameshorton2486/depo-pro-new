@@ -79,12 +79,15 @@ function render(reporterProfile) {
   return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true }) };
 }
 
-test("the store keeps both fields now, and still drops a firm registration number", t => {
+test("the store keeps every field the signature block prints, the number included", t => {
   const saved = stored(t, { csrExpiration: "2027-06-30", firmRegistrationWaiver: WAIVER, firmRegistrationNumber: "7788" });
   assert.equal(saved.csrExpiration, "2027-06-30");
   assert.equal(saved.firmRegistrationWaiver, WAIVER);
-  assert.ok(!("firmRegistrationNumber" in saved),
-    "the number is still not storable; no certified specimen justifies one");
+  // This assertion was inverted. It pinned the number as unstorable on the reasoning that no
+  // certified specimen carried one -- and the Etminan Notice then showed a deposition reported
+  // through SA Legal Solutions whose certificate prints none anyway. Silence in the specimens was
+  // never the same as absence in the world.
+  assert.equal(saved.firmRegistrationNumber, "7788");
 });
 
 test("a solo reporter created through the store renders a certification page", t => {

@@ -97,15 +97,11 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "INDEX_PAGE_MISMATCH:index.section.changesAndSignature",
     "INDEX_UNRESOLVED_ENTRY:index.page.75",
     "INDEX_UNRESOLVED_ENTRY:index.section.changesAndSignature",
-    "UNEXPECTED_BLANK:cert.certificationDate",
-    "UNEXPECTED_BLANK:cert.charges",
+    // Eight of the nine cert.* blanks left this list when Rule 203 stage-one deferral landed:
+    // they name events that have not occurred when a transcript is certified, and they now print
+    // a rule the reporter fills in by hand. chargesResponsibleParty stays, because who is
+    // responsible for the charges is settled at the deposition and Thomas has not recorded it.
     "UNEXPECTED_BLANK:cert.chargesResponsibleParty",
-    "UNEXPECTED_BLANK:cert.custodialAttorney",
-    "UNEXPECTED_BLANK:cert.furtherCertificationDate",
-    "UNEXPECTED_BLANK:cert.returnDeadline",
-    "UNEXPECTED_BLANK:cert.returnStatus",
-    "UNEXPECTED_BLANK:cert.serviceDate",
-    "UNEXPECTED_BLANK:cert.submissionDate",
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",

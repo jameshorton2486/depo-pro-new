@@ -48,7 +48,7 @@ type Deposition = {
 type CourtReporter = {
   id: string; name: string; company: string; email: string; phone: string;
   licenseNumber: string; csrExpiration: string; taxId: string; address: string;
-  firmRegistrationWaiver: string;
+  firmRegistrationNumber: string; firmRegistrationWaiver: string;
 };
 
 const REPORTERS_STORAGE_KEY = "depo-pro-court-reporters";
@@ -229,6 +229,7 @@ export default function Home() {
       email: String(data.get("email")), phone: formatPhoneNumber(String(data.get("phone"))),
       licenseNumber: String(data.get("licenseNumber")), csrExpiration: String(data.get("csrExpiration")),
       taxId: String(data.get("taxId")), address: String(data.get("address")),
+      firmRegistrationNumber: String(data.get("firmRegistrationNumber")),
       firmRegistrationWaiver: String(data.get("firmRegistrationWaiver")),
     };
     try{
@@ -388,7 +389,12 @@ export default function Home() {
                   blocks without it. The waiver is how a reporter with no firm answers the firm
                   registration requirement -- the validator has honoured it since this evening, but
                   nothing could record one, so the stored value was always "" and an empty waiver is
-                  not a waiver. */}
+                  not a waiver.
+
+                  The number below is the other answer, and until now this form could not take it:
+                  the waiver's own hint said "leave empty if the firm has one" beside no field to put
+                  one in. */}
+              <label>Firm registration number <small>Printed in the signature block. Enter it if the deposition was reported through a registered firm.</small><input name="firmRegistrationNumber" placeholder="2486" /></label>
               <label>Firm registration waiver <small>Why no firm registration number applies. Leave empty if the firm has one.</small><textarea name="firmRegistrationWaiver" rows={2} placeholder="Certifies under an individual Texas CSR; no firm registration applies." /></label>
               <label>Mailing address<textarea name="address" rows={3} placeholder="Street, city, state, ZIP" /></label>
               <p className="sensitive-note">Tax ID information is stored only on this computer. Protect access to this device and its browser profile.</p>

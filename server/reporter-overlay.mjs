@@ -42,7 +42,19 @@ export function validateOperation(input) {
   // holding the anchor IS the new tail, so labelling by the same word needs no second lookup.
   if (op === "split") {
     if (!trimmed(input.beforeWordId)) return { ok:false, message:"split requires beforeWordId." };
-    return { ok:true, operation:{ op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId) } };
+    // The speaker of the paragraph the split creates, optional and carried by the same operation.
+    //
+    // Two operations were needed before -- split, then label -- because the tail inherits the head's
+    // speaker. Across the Etminan deposition that is roughly 450 corrections instead of 224, and the
+    // second one is the hazardous one: a split names its tail `${segment.id}#${beforeWordId}`, so a
+    // caller labelling it has to rebuild that id, and getting it wrong lands the speaker on the head.
+    //
+    // Omitted, it behaves exactly as it always did. Nothing here infers a speaker; the reporter says
+    // who it is, and Q./A. is derived downstream from that and from the examination structure.
+    return { ok:true, operation:{
+      op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId),
+      speakerIdentity:trimmed(input.speakerIdentity) || null, transcriptRole:trimmed(input.transcriptRole) || null,
+    } };
   }
   if (op === "join") {
     if (!trimmed(input.leadingWordId) || !trimmed(input.trailingWordId)) return { ok:false, message:"join requires leadingWordId and trailingWordId." };
@@ -163,7 +175,7 @@ export function validateOverlay(value, depositionId) {
 
 const segmentHolding = (segments, wordId) => segments.findIndex(segment => (segment.asrWordIds || []).includes(wordId));
 
-function splitSegments(segments, segmentId, beforeWordId) {
+function splitSegments(segments, segmentId, beforeWordId, speaker = null) {
   const index = segmentId ? segments.findIndex(segment => segment.id === segmentId) : segmentHolding(segments, beforeWordId);
   if (index < 0) return { ok:false, reason:segmentId ? "SEGMENT_NOT_FOUND" : "WORD_NOT_FOUND" };
   const segment = segments[index];
@@ -179,6 +191,14 @@ function splitSegments(segments, segmentId, beforeWordId) {
   // speaker attribution to the wrong half. The anchor word is unique within the segment and
   // deterministic, so replaying the same overlay rebuilds the same ids.
   const tail = { ...segment, id:`${segment.id}#${beforeWordId}`, asrWordIds:segment.asrWordIds.slice(at), start:null, end:null };
+  // The reporter's determination about the paragraph this split creates, applied here so it is one
+  // operation rather than a split followed by a label addressed at the id above. deepgramSpeaker is
+  // deliberately untouched: the evidence keeps its own account of who spoke, beside the reporter's,
+  // so the record can still show that a human disagreed with the machine.
+  if (speaker?.speakerIdentity) {
+    tail.speakerIdentity = speaker.speakerIdentity;
+    tail.transcriptRole = speaker.transcriptRole;
+  }
   return { ok:true, segments:[...segments.slice(0, index), head, tail, ...segments.slice(index + 1)] };
 }
 
@@ -223,7 +243,7 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   overlay.operations.forEach((operation, index) => {
     const orphan = reason => orphaned.push({ index, operation, reason });
     if (operation.op === "split") {
-      const result = splitSegments(current, operation.segmentId, operation.beforeWordId);
+      const result = splitSegments(current, operation.segmentId, operation.beforeWordId, operation);
       if (!result.ok) return orphan(result.reason);
       current = result.segments;
       return;

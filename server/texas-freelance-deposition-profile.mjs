@@ -6,6 +6,16 @@ export const TEXAS_FREELANCE_DEPOSITION_V1=Object.freeze({
   id:"TEXAS_FREELANCE_DEPOSITION_V1",version:"1.0.0",scope:"transcript-body",verifiedBy:"Profile B Microsoft Word round-trip proof",verifiedAt:"2026-08-26",
   source:"Texas UFM relative rules plus selected Profile B Word/PDF proof",
   linesPerPage:25,charactersPerLine:63,
+  // The caption's left column: how wide the style of the cause may run before the ")" delimiter.
+  // Measured off the certified Etminan transcript, page 1, from word positions rather than from the
+  // extracted text: the left column begins at x=134pt and the delimiter sits at x=356pt, which at
+  // this profile's 10-CPI pitch (7.11pt per cell, calibrated on "LEONARDO " spanning 134 to 198) is
+  // 31 cells. The specimen's own longest caption line, "ROCIO LAURA ELIZONDO VARGAS," at 28, fits.
+  //
+  // Without this a multi-party caption has no square form at all: three defendants joined onto one
+  // line ran to 85 characters on a 63-character page, and CAPTION_ROW_OVERFLOW refused the
+  // transcript rather than let the wrapper re-flow the column away.
+  captionLeftColumn:31,
   font:Object.freeze({family:"Courier New",pointSize:12,monospace:true,pitchCpi:10}),
   page:Object.freeze({widthTwips:12240,heightTwips:15840}),
   formatBox:Object.freeze({leftInches:1.4333,rightClearanceInches:0.5317,widthInches:6.5350,topInches:1.0,heightInches:8.6667,borderPoints:1}),
@@ -17,6 +27,7 @@ export const TEXAS_FREELANCE_DEPOSITION_V1=Object.freeze({
     linesPerPage:classified(25,"UFM_REQUIRED","Twenty-five physical transcript line positions on a full testimony page."),
     pitchCpi:classified(10,"UFM_REQUIRED","Ten-character pitch."),
     charactersPerLine:classified(63,"UFM_DERIVED","Sixty-five cells across 6.5 inches at 10 CPI, less one cell inset at each side."),
+    captionLeftColumn:classified(31,"CERTIFIED_SPECIMEN_MEASURED","Left column of the caption block, measured from the certified Etminan transcript page 1: left text at x=134pt, delimiter at x=356pt, 7.11pt per cell."),
     tabColumns:classified([5,10,15],"UFM_REQUIRED","Fifth, tenth, and fifteenth character positions."),
     formatBox:classified({leftInches:1.4333,rightClearanceInches:0.5317,widthInches:6.5350},"PROFILE_B_WORD_PROVEN","Selected candidate retained 109/109 modeled-line parity through Word and PDF."),
     textMargins:classified({leftTwips:2208,rightTwips:910,widthTwips:9122},"PROFILE_B_WORD_PROVEN","Integer OOXML section units used in the successful Profile B proof."),

@@ -2,6 +2,7 @@ import { appearancePhrase, captionParties } from "./assemble.mjs";
 import { createInsertionPageSet } from "./page-model.mjs";
 import { renderTemplatePage } from "./render-template.mjs";
 import { certifiedDateValues } from "./certified-date.mjs";
+import { STAGE_ONE_DEFERRED_RULE_WIDTHS, STAGE_ONE_DEFERRED_VARIANT, deferredRule } from "./variants.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../texas-freelance-deposition-profile.mjs";
 
 const value = (field) => field && typeof field === "object" && "value" in field ? field.value : field;
@@ -91,15 +92,45 @@ function judicialDistrictLine(record) {
   return district ? `${ordinalDistrict(district).toUpperCase()} JUDICIAL DISTRICT` : "";
 }
 
-function captionValues(input) {
+/**
+ * The style of the cause, down as many rows as it needs.
+ *
+ * A caption names every party, and on a real multi-party case that does not fit one line: Etminan's
+ * three defendants joined to 85 characters on a 63-character page, and the block had no square form
+ * at all. The certified specimen answers this by running the names down the left column, so this
+ * does the same -- plain word wrap at the profile's measured caption column.
+ *
+ * Returned as an array even when it is one line, so the caption row always takes the renderer's
+ * expansion path and a one-party caption and a four-party caption are laid out by the same rule
+ * rather than by two.
+ *
+ * A single name longer than the column is left whole on its own row rather than broken mid-word.
+ * alignCaptionLines then measures it, and CAPTION_ROW_OVERFLOW refuses the document: a party name
+ * split across rows by this function would be a name the caption states differently from the
+ * pleadings, which is not a formatting question.
+ */
+function captionColumn(names, profile) {
+  const width = profile?.captionLeftColumn;
+  const text = upper(names.join(", "));
+  if (!Number.isInteger(width) || width < 1 || !text) return text ? [text] : [];
+  const lines = [];
+  for (const word of text.split(/\s+/)) {
+    const last = lines.at(-1);
+    if (last !== undefined && `${last} ${word}`.length <= width) lines[lines.length - 1] = `${last} ${word}`;
+    else lines.push(word);
+  }
+  return lines;
+}
+
+function captionValues(input, profile = TEXAS_FREELANCE_DEPOSITION_V1) {
   const { plaintiffs, defendants } = captionParties(input.record);
   return {
     "caption.causeNumber": input.caption.causeNumber,
     "caption.court": input.operator.courtHeadingLine ?? input.caption.court,
     "caption.plaintiffLabel": plaintiffs.length === 1 ? "PLAINTIFF," : "PLAINTIFFS,",
-    "caption.plaintiffs": upper(plaintiffs.join(", ")),
+    "caption.plaintiffs": captionColumn(plaintiffs, profile),
     "caption.defendantLabel": defendants.length === 1 ? "DEFENDANT," : "DEFENDANTS,",
-    "caption.defendants": upper(defendants.join(", ")),
+    "caption.defendants": captionColumn(defendants, profile),
     "caption.countyCourtLine": input.operator.countyCourtLine ?? countyCourtLine(input.record),
     "caption.judicialDistrictLine": input.operator.judicialDistrictLine ?? judicialDistrictLine(input.record),
   };
@@ -336,7 +367,7 @@ export function captionOverflowFindings(input) {
   // APPEARANCE_SIDE_MISSING for counsel with no side, so building them here turned every finding
   // this function sits beside into an exception. A caption row carries only caption.* fields and
   // literal furniture, so caption values are all this measurement needs.
-  const values = captionValues(input);
+  const values = captionValues(input, profile);
   const findings = [];
   for (const role of roles) {
     const template = input.template.templates[role];
@@ -366,10 +397,35 @@ function insertionRoles(input, certificateOnly = false) {
   return certificateOnly ? allRoles.filter(role => role !== "index") : allRoles;
 }
 
-function templateValues(input, roles) {
+// Rule 203 stage one. Eight certificate facts do not exist yet, because the events that produce them
+// -- submission to the witness, the return deadline and what came back, the officer's charges, the
+// date of service, and the further certification -- have not occurred at the time this transcript is
+// certified. validate.mjs permits those eight to be blank, reading the same table; this prints the
+// blank the reporter fills in by hand. Without it the sentence collapses to "Certified to by me this
+// ." -- a deferred fact silently disappearing from a certified clause, which is worse than either
+// blocking or printing a rule.
+//
+// Presentation only. It is applied to the values handed to the templates, after the record has been
+// read and after validation has seen the field as missing. No rule text reaches the canonical record
+// or the correction log: the fact is still absent, and still reads as absent everywhere but the
+// printed line.
+//
+// A field declared deferred with no width declared throws rather than receiving a generic blank --
+// deferredRule refuses. An approved deferred field is an approved presentation, not a default.
+function stageOneDeferredRules(variant, values) {
+  if (variant !== STAGE_ONE_DEFERRED_VARIANT) return values;
+  const printed = { ...values };
+  for (const field of Object.keys(STAGE_ONE_DEFERRED_RULE_WIDTHS)) {
+    const value = printed[field];
+    if (value === null || value === undefined || String(value).trim() === "") printed[field] = deferredRule(field);
+  }
+  return printed;
+}
+
+function templateValues(input, roles, profile) {
   const baseValues = {
     ...input.fieldValues,
-    ...captionValues(input),
+    ...captionValues(input, profile),
     ...certificationValues(input),
     "deposition.proceedingHeading": input.operator.proceedingHeading ?? "ORAL DEPOSITION OF",
     "deposition.narrative.1": input.operator.titleNarrative?.[0] ?? "",
@@ -385,15 +441,16 @@ function templateValues(input, roles) {
   };
   // The index lines are built only when the index page is, so a certificate-only document never
   // asks for a number nobody can supply.
-  return certifiedDateValues({ ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) });
+  return stageOneDeferredRules(input.variant,
+    certifiedDateValues({ ...baseValues, ...(roles.includes("index") ? { "index.lines": indexLines(input) } : {}) }));
 }
 
 export function buildTexasInsertionPageSet(input, { setId, depositionId, generatedAt, certificateOnly = false }) {
   if (!input.variant?.startsWith("TEXAS_STATE_")) throw new Error(`Texas page builder cannot render ${input.variant ?? "an unspecified variant"}`);
   const templates = input.template.templates;
   const roles = insertionRoles(input, certificateOnly);
-  const values = templateValues(input, roles);
   const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
+  const values = templateValues(input, roles, profile);
   const pages = roles.flatMap((role) => renderRolePages(templates[role], values, { role, profile }));
   pages.forEach((page, index) => { page.pageNumber = index + 1; });
   return createInsertionPageSet({
