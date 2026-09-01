@@ -355,7 +355,10 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       // because her own aside is not an interruption by somebody else, and a by-line after it would
       // announce a return from nowhere.
       if ((paragraph?.asrWordIds ?? []).some(wordId => colloquyWordIds.has(wordId))) {
-        return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
+        // Marked on the paragraph so the Workspace can offer to clear it. Without this the screen
+        // could tell the reporter a line reads as colloquy but not whether that is the model's
+        // doing or their own, and those have different remedies.
+        return { ...emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion), examinerColloquy:true };
       }
       const byLine = resumptionByLinePending && label ? `(BY ${label})` : null;
       resumptionByLinePending = false;
