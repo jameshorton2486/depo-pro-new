@@ -51,6 +51,11 @@ function withPreviewLabels(paragraphs) {
   const fallbackLabels=new Map();
   return paragraphs.map(paragraph=>{
     if(paragraph.label)return paragraph;
+    // A heading and a BY-line are structural content the reporter's record states, not speech
+    // somebody was recorded making. Giving them a fallback speaker printed
+    // "SPEAKER UNKNOWN:BY MS. WHITFIELD:" into the Word document -- found by reopening the file,
+    // because every stage before that was the application describing its own output.
+    if(paragraph.derived)return paragraph;
     const speaker=paragraph.deepgramSpeaker;
     const key=speaker===null||speaker===undefined?null:`${paragraph.sourceJobIdentity??"unknown-job"}:${speaker}`;
     if(key&&!fallbackLabels.has(key))fallbackLabels.set(key,`SPEAKER ${fallbackLabels.size+1}:`);
