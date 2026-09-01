@@ -204,9 +204,24 @@ export function buildSpeakerLabels(candidates = []) {
  * resumption. The specimen has 21 of these against a single standalone `BY MR. BENTLEY:` at the
  * start of the examination, so resumption after colloquy is the common case, not examiner
  * change -- there is only one examiner in that deposition and the by-line still appears 21 times.
+ *
+ * `examinations` is the ordered boundary list from the overlay -- Phase C of the examination
+ * model. Until it arrived, `examiner` was one identity for the whole transcript, so defending
+ * counsel's cross rendered as colloquy and the answers to it as THE WITNESS: rather than A.,
+ * 450 of 1,602 paragraphs on a realistic deposition. A boundary moves examination authority as
+ * this function walks; it does not touch `transcriptRole`, which keeps its participant meaning.
+ *
+ * An empty list leaves every branch below exactly as it was. That is not a happy accident of the
+ * implementation -- it is the contract that lets an existing single-examiner deposition render
+ * unchanged, and it is asserted rather than assumed.
  */
-export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null } = {}) {
+export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [] } = {}) {
   let examiner = examinerIdentity;
+  // Indexed by the word each boundary begins at, because a paragraph is what gets labelled and a
+  // paragraph is a list of word ids. applyOverlay has already put them in transcript order and
+  // dropped any whose anchor no longer exists.
+  const boundaryByWordId = new Map();
+  for (const boundary of examinations ?? []) if (boundary?.atWordId) boundaryByWordId.set(boundary.atWordId, boundary);
   // Attorney colloquy can interrupt a question without closing its Q/A relationship. Keep that
   // semantic state separately from the immediately preceding rendered element so an objection
   // does not turn the responsive testimony into generic witness colloquy.
@@ -215,6 +230,22 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
   // examiner's return from the intervening attorney colloquy.
   let resumptionByLinePending = false;
   return paragraphs.map(paragraph => {
+    // Authority moves before the paragraph holding the anchor is labelled, because that paragraph
+    // is the new examiner's first question -- the reporter marks the word their examination begins
+    // at, not the word after it.
+    //
+    // A boundary naming whoever is already examining is a no-op rather than a reset. It says
+    // nothing new about the proceeding, and treating it as a change would clear the resumption
+    // state a single-examiner transcript depends on.
+    for (const wordId of paragraph?.asrWordIds ?? []) {
+      const boundary = boundaryByWordId.get(wordId);
+      if (!boundary || boundary.examinerPersonId === examiner) continue;
+      examiner = boundary.examinerPersonId;
+      // A new examiner begins; they do not resume. An inline `(BY MS. RAMIREZ)` here would be the
+      // wrong mark for a handover -- the standalone heading and by-line that belong at one are
+      // Phase D -- and leaving the flag set would emit exactly that.
+      resumptionByLinePending = false;
+    }
     const role = String(paragraph?.transcriptRole ?? "").toUpperCase();
     const identity = paragraph?.speakerIdentity ?? null;
     const label = identity && labels[identity] ? labels[identity] : null;
