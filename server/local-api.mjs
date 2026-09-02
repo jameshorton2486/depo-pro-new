@@ -18,6 +18,9 @@ import {getDeepgramLive,recordLiveAnnotation,startDeepgramLive,stopDeepgramLive}
 import { readBackChannelFile, readBackSearch } from "./read-back.mjs";
 import { listCorrectionPasses, readCorrectionPass, runEntityPass } from "./entity-pass.mjs";
 import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
+import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
+import { RANGE_ACCEPTANCE_REFUSED, acceptRangeProposal } from "./range-proposal-acceptance.mjs";
+import { STALE_CORRECTION_PROPOSAL } from "./review-state-hash.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -197,6 +200,18 @@ const server = http.createServer(async (req,res) => {
     if (req.url === "/api/transcript/speaker-suggestions" && req.method === "POST") { const input=await body(req,64*1024),config=loadSecrets();
       if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before suggesting speakers."},origin);
       return json(res,200,await suggestSpeakerAttributions(root,{depositionId:input.depositionId,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,storageRoot:depositionStorageRoot}),origin); }
+    // RANGE, beside GLOBAL rather than instead of it. /api/transcript/speaker-suggestions proposes
+    // a whole diarization cluster; this proposes a stretch of words. Five of Trial #1's eight
+    // clusters were one person throughout, so both questions are worth asking.
+    if (req.url === "/api/correction/speaker-range-pass" && req.method === "POST") { const input=await body(req,16*1024),config=loadSecrets();
+      if (!config?.anthropicApiKey) return json(res,503,{error:"Add the Anthropic API key in Administrator Settings before running a correction pass."},origin);
+      return json(res,201,await runSpeakerRangePass(root,{depositionId:input.depositionId,limitChunks:input.limitChunks??null,additionalInstructions:input.additionalInstructions??"",apiKey:config.anthropicApiKey,model:config.claudeModel,passStartedAt:new Date().toISOString(),storageRoot:depositionStorageRoot}),origin); }
+    // The client sends WHICH proposal the reporter accepted, and nothing else. It does not send
+    // operations and is not trusted to have worked out what they would be -- the plan is made here,
+    // against the projection the proposal was analyzed against, and applied as one transaction.
+    if (req.url === "/api/transcript/range-proposal/accept" && req.method === "POST") { const input=await body(req,64*1024);
+      const result=acceptRangeProposal(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,proposal:input.proposal,expectedReviewStateHash:input.expectedReviewStateHash??null,getWorkingTranscript,readReporterOverlay,getSpeakerCandidates,appendReporterOperations});
+      return json(res,200,result,origin); }
     if (req.url?.startsWith("/api/correction/passes?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,{passes:listCorrectionPasses(root,{depositionId:url.searchParams.get("depositionId"),storageRoot:depositionStorageRoot})},origin); }
     if (req.url?.startsWith("/api/correction/pass?") && req.method === "GET") { const url=new URL(req.url,"http://localhost"); return json(res,200,readCorrectionPass(root,{depositionId:url.searchParams.get("depositionId"),passId:url.searchParams.get("passId"),storageRoot:depositionStorageRoot}),origin); }
     if (req.url === "/api/live-capture/read-back" && req.method === "POST") { const input=await body(req,16*1024); return json(res,200,await readBackSearch(root,{...input,storageRoot:depositionStorageRoot}),origin); }
@@ -578,6 +593,10 @@ const server = http.createServer(async (req,res) => {
     // generic handler below reported it as a 500 -- which tells the reporter the application
     // broke, when in fact it protected their transcript.
     if(error?.code===STALE_REPORTER_TRANSACTION)return json(res,409,{error:error.message,code:error.code,expected:error.expected,carried:error.carried},origin);
+    if(error?.code===STALE_CORRECTION_PROPOSAL)return json(res,409,{error:error.message,code:error.code,reason:error.reason??null,expected:error.expected??null,carried:error.carried??null},origin);
+    // A proposal the server will not apply is a refusal with a cause, not a fault. Reported as 422
+    // so the reporter is told WHY rather than being shown a generic failure.
+    if(error?.code===RANGE_ACCEPTANCE_REFUSED)return json(res,422,{error:error.message,code:error.code,reason:error.reason??null},origin);
     const message=error instanceof Error?error.message:"Unexpected local service error.",status=error instanceof DeepgramRequestError?502:/already processing|integrity verification failed/i.test(message)?409:/not found/i.test(message)?404:/required|requires|exceeds|invalid|missing|does not|failed SHA-256|not part of/i.test(message)?400:500,code=error instanceof RxProcessingError?error.code:error instanceof DeepgramRequestError?error.code||"DEEPGRAM_ERROR":status===409?"TRANSCRIPTION_CONFLICT":status===400?"TRANSCRIPTION_VALIDATION":"LOCAL_API_ERROR";return json(res,status,{error:message,code},origin); }
 });
 // Binding a port is a side effect of RUNNING this file, not of reading a value out of it.

@@ -241,6 +241,29 @@ export function validateProposals(response, { chunk, reviewStateHash, roster, al
 
     if (!EVIDENCE_SOURCES.includes(proposal.evidenceSource) && refuse("R8", "EVIDENCE_SOURCE_NOT_PERMITTED", { evidenceSource: proposal.evidenceSource ?? null })) continue;
 
+    // A speaker assignment proposes an IDENTITY, not text, so the rules below about text do not
+    // apply to it -- and the way to be certain of that is to forbid it carrying any.
+    //
+    // This split was found by measurement, not by reading. Before it, R12 compared the digits of the
+    // spanned testimony against the digits of a person's name, so a witness saying "I was 42 then"
+    // could never be reattributed: DIGITS_ALTERED, every time. R9 meanwhile forced the pass to emit
+    // a text value it has no authority over, which then sat beside speakerIdentity as a second,
+    // unvalidated answer to the same question. Nothing had noticed because nothing emits this type
+    // yet.
+    //
+    // Roster is checked before text, because a person absent from this record being proposed is the
+    // more serious finding and the one worth reporting first.
+    if (proposal.correctionType === "speaker_assignment") {
+      const identity = proposal.speakerIdentity ?? null;
+      if (!identity && refuse("R9", "SPEAKER_ASSIGNMENT_WITHOUT_IDENTITY", {})) continue;
+      if (!allowed.has(identity) && refuse("R11", "IDENTITY_NOT_IN_ROSTER", { attemptedIdentity: identity })) continue;
+      if (proposal.proposedValue !== null && proposal.proposedValue !== undefined
+        && refuse("R15", "SPEAKER_ASSIGNMENT_CARRIES_TEXT", { proposedValue: proposal.proposedValue })) continue;
+      claimed.push({ proposal, from: anchor.position, to: end.position });
+      accepted.push(proposal);
+      continue;
+    }
+
     // R9: a deletion is the one correction with nothing to propose, and it says so by type. An
     // empty value on any other type is a proposal that does not propose anything.
     const isDeletion = proposal.correctionType === "structure" && proposal.proposedValue === null;
@@ -265,12 +288,6 @@ export function validateProposals(response, { chunk, reviewStateHash, roster, al
     // rather than an oversight.
     if (lexicon && proposal.proposedValue !== null && !lexicon.has(String(proposal.proposedValue).toLowerCase())
       && refuse("R14", "VALUE_NOT_IN_LEXICON", { proposedValue: proposal.proposedValue })) continue;
-
-    if (proposal.correctionType === "speaker_assignment") {
-      const identity = proposal.speakerIdentity ?? null;
-      if (!identity && refuse("R9", "SPEAKER_ASSIGNMENT_WITHOUT_IDENTITY", {})) continue;
-      if (!allowed.has(identity) && refuse("R11", "IDENTITY_NOT_IN_ROSTER", { attemptedIdentity: identity })) continue;
-    }
 
     claimed.push({ proposal, from: anchor.position, to: end.position });
     accepted.push(proposal);
