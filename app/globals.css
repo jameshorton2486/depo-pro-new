@@ -541,6 +541,16 @@ dd { margin:0; font-size:13px; font-weight:650; }
    align-self:flex-start is what makes sticky work inside a flex row -- the default stretch makes
    the item full height, and a full-height item has nowhere to stick. */
 .workspace-menu { width:288px; flex:0 0 288px; border-left:1px solid var(--line); background:#fff; padding:14px 12px 24px; display:flex; flex-direction:column; gap:6px; position:sticky; top:0; align-self:flex-start; max-height:100vh; overflow-y:auto; overscroll-behavior:contain; }
+/* The panel styles its own controls. Find and Replace used to sit inside .workspace-review-tools
+   and borrowed its label and input rules; moving it into TEXT left the labels at the inherited
+   heading size with unstyled inputs collapsed underneath, which read as a broken feature rather
+   than an unstyled one. Scoped to the panel so any control added later is styled by default. */
+.workspace-menu label{font-size:11px;color:var(--muted)}
+.workspace-menu label>input:not([type="checkbox"]){display:block;width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid var(--line);border-radius:5px;font:inherit;font-size:13px;color:var(--navy)}
+.workspace-menu label>input[type="checkbox"]{margin-right:5px}
+.workspace-menu .workspace-review-marks,.workspace-menu .workspace-match-list label{display:flex;gap:6px;align-items:baseline}
+.workspace-menu .workspace-match-list{display:grid;gap:4px;max-height:160px;overflow:auto;padding:6px;border:1px solid var(--line);border-radius:6px}
+.workspace-menu .workspace-match-list span{font-size:11px;color:var(--navy)}
 .workspace-history{display:flex;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--line)}.workspace-history button{flex:1;text-align:center;padding:6px 8px}
 .workspace-where{margin:0;font-size:11px;color:var(--muted)}.workspace-where strong{color:var(--navy)}
 .workspace-who{margin:2px 0 0;font-size:13px}.workspace-who em{color:var(--muted);font-style:italic}.workspace-designation{color:var(--muted);font-size:11px}

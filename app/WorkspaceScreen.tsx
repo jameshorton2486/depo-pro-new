@@ -1004,7 +1004,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <label>Find<input value={searchText} onChange={event=>setSearchText(event.target.value)}/></label>
             <label><input type="checkbox" checked={matchCase} onChange={event=>setMatchCase(event.target.checked)}/> Match case</label>
             <label><input type="checkbox" checked={wholeWords} onChange={event=>setWholeWords(event.target.checked)}/> Whole words</label>
-            <p className="workspace-hint">{searchMatches.length?`${Math.min(searchIndex+1,searchMatches.length)} of ${searchMatches.length} matches across all testimony`:"No matches"}</p>
+            {/* An empty box has not failed to find anything. Reporting "No matches" before a word
+                has been typed reads as a broken search, which is exactly how it was reported. */}
+            <p className="workspace-hint">{!searchText.trim()?"Type to search all testimony."
+              :searchMatches.length?`${Math.min(searchIndex+1,searchMatches.length)} of ${searchMatches.length} matches across all testimony`
+              :`No match for “${searchText}”.`}</p>
             <div className="workspace-row"><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex-1)}>Previous</button><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex+1)}>Next</button></div>
             <button type="button" onClick={()=>setReplaceOpen(value=>!value)} aria-expanded={replaceOpen}>Replace (Ctrl+H)</button>
             {replaceOpen&&<><label>Replace with<input value={replaceText} onChange={event=>setReplaceText(event.target.value)}/></label>
