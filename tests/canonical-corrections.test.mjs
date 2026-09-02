@@ -120,9 +120,29 @@ test("a correction lands in the record and in the log beside it", t => {
 
 test("an older canonical counsel record gains only the missing honorific field before audited resolution",t=>{
   const space=workspace(t),record=space.read();delete record.counsel[0].honorific;fs.writeFileSync(space.recordFile,JSON.stringify(record));
-  writeParticipantHonorific(space.root,{depositionId:space.created.id,participantId:record.counsel[0].id,honorific:"Ms.",who:WHO,...space.options});
+  writeParticipantHonorific(space.root,{depositionId:space.created.id,participantId:record.counsel[0].id,honorific:"Ms.",...space.options});
   const updated=space.read();assert.equal(updated.counsel[0].honorific.value,"MS.");assert.equal(updated.counsel[0].honorific.source,"REPORTER_ENTERED");
   const log=readDepositionCorrections(space.root,space.created.id,space.options);assert.equal(log.at(-1).path,"counsel.0.honorific");assert.equal(log.at(-1).from,null);
+});
+
+test("a caller cannot name the author of a correction", t => {
+  // The one live forgery of attribution in the application: writeParticipantHonorific took `who`,
+  // and the route handed it through from the request body, so anything that could reach the local
+  // API could name anyone it liked as the author of a change to a canonical record.
+  //
+  // Withholding the capability rather than declining to use it. The label is a call-site constant
+  // and says only what this path can honestly claim -- a reporter did this, through the Workspace.
+  // It names no person, because the application has no signed-in user and cannot know which person
+  // acted. Naming the deposition's own CSR would assert exactly the thing it cannot establish, and
+  // that is how "Miah Bardot, Texas CSR 12129" came to sign a correction she never made.
+  const space = workspace(t), record = space.read();
+  writeParticipantHonorific(space.root, { depositionId:space.created.id, participantId:record.counsel[0].id,
+    honorific:"Ms.", who:"Somebody Else", ...space.options });
+  assert.equal(readDepositionCorrections(space.root, space.created.id, space.options).at(-1).who, "Workspace reporter",
+    "a supplied author is ignored, not honoured");
+
+  const api = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
+  assert.equal(/writeParticipantHonorific\([^)]*who:/.test(api), false, "and the route no longer forwards one");
 });
 
 test("the log is append-only: a second correction adds a line, never replaces one", t => {
