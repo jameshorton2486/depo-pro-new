@@ -567,7 +567,19 @@ export function readDepositionCorrections(root, id, options = {}) {
 }
 
 /** Resolves one generated transcript designation through the existing canonical correction log. */
-export function writeParticipantHonorific(root,{depositionId,participantId,honorific,who="Workspace reporter",storageRoot}={}){
+export function writeParticipantHonorific(root,{depositionId,participantId,honorific,storageRoot}={}){
+  // WHO IS NOT A PARAMETER. It used to be, defaulting to "Workspace reporter", and the route handed
+  // it straight through from the request body -- so anything that could reach the local API could
+  // name anyone it liked as the author of a change to a canonical record. That was the only live
+  // forgery of attribution in the application, and withholding the capability is a stronger fix
+  // than declining to use it.
+  //
+  // The label is a CALL-SITE CONSTANT and says only what this code path can honestly claim: a
+  // reporter did this, through the Workspace. It does not name a person, because the application
+  // has no signed-in user and cannot know which person acted -- and naming the deposition's CSR
+  // would assert exactly the thing it cannot establish. That is how a correction came to be signed
+  // by a reporter who never made it.
+  const who="Workspace reporter";
   const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
   if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
   const record=JSON.parse(fs.readFileSync(file,"utf8")),index=(record.counsel||[]).findIndex(item=>item.id===participantId);
