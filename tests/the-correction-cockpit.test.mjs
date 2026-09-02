@@ -9,6 +9,7 @@
 // each, about 580 times slower than correcting the same locations by hand, so REVIEW is a worklist
 // rather than an acceptance queue.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
 
@@ -190,6 +191,29 @@ test("the safe scope is the default, and the destructive one has to be chosen by
   assert.deepEqual(speakerScopeChoices({ paragraph, selectedWordId: "w1" }).map(item => item.key), ["paragraph"]);
   assert.deepEqual(speakerScopeChoices({ paragraph }).map(item => item.key), ["paragraph"]);
   assert.deepEqual(speakerScopeChoices({ paragraph: null }), []);
+});
+
+test("selecting a word never implies a split, which is a standing ruling and not a preference", () => {
+  // Ruled after a real correction went wrong on the real Baier record: a click on a word inside
+  // counsel's question was read as "a new paragraph starts here", cut the sentence in half, and
+  // gave the second half to the witness. A structural cut to a court record must be something the
+  // reporter asked for, in words, and never something a selection implies.
+  //
+  // Two halves to the guard, so both are pinned: the safe scope is offered first and is what the
+  // component defaults to, and the component only passes a cut word when that scope was CHOSEN.
+  const paragraph = { words: [{ id: "w1", text: "And" }, { id: "w2", text: "what" }, { id: "w3", text: "I" }] };
+  assert.equal(speakerScopeChoices({ paragraph, selectedWordId: "w2" })[0].key, "paragraph");
+
+  const source = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
+  // The cut word is null unless the reporter chose to cut. Pinned as source because the decision
+  // lives at the call site: relabel is the only path to split-with-speaker from a speaker click.
+  assert.match(source, /const cutAt = speakerScope === "here" \? \(selected\?\.wordId \?\? null\) : null;/,
+    "a speaker click may only carry a cut word when the cutting scope was chosen");
+  assert.match(source, /splitWithSpeakerOperation\(\{ paragraph, selectedWordId:cutAt/,
+    "and that is the only word it may pass");
+  // The default is the safe reading, derived rather than reset, so a stale destructive scope cannot
+  // survive a change of selection.
+  assert.match(source, /const speakerScope = scopeChoice\?\.key === selectionKey \? scopeChoice\.scope : "paragraph";/);
 });
 
 // --- which structural actions apply -------------------------------------------------------------
