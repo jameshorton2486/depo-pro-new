@@ -380,6 +380,20 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
     }
     resumptionByLinePending = false;
+    // A ROLE ESTABLISHED WITHOUT A PERSON still has a designation, and the record should say it.
+    //
+    // Trial #1's videographer opens the deposition, states the date and time, and goes on and off
+    // the record -- unmistakably the videographer, and never once named, in the recording or in the
+    // Notice. Before this, that paragraph printed with no designation at all, because the label is
+    // looked up by canonical identity and there is nobody to look up.
+    //
+    // FIXED_LABELS already holds the answer and the WITNESS branch above already reaches it this
+    // way. The alternative -- inventing a nameless participant to hang the role on -- would put a
+    // person who does not exist into the record that feeds the certificate.
+    //
+    // Only the four fixed roles, and only when no identity is recorded. An attorney has no fixed
+    // label because an attorney is named; this must never manufacture one.
+    if (!identity && FIXED_LABELS[role]) return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS[role]}:`, null, false);
     return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, false);
 
     function emit(elementType, token, byLine, nextPendingQuestion = false) {

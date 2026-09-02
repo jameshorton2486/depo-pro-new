@@ -82,7 +82,21 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
     }
     const rebuilt = parts.filter(Boolean).join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
-    return { ...segment, text:rebuilt || segment.text };
+    // `rebuilt || segment.text` RESURRECTED STRUCK TESTIMONY, and it is worth saying exactly how.
+    //
+    // Strike the only word of a paragraph and `rebuilt` is legitimately "" -- which is falsy, so the
+    // fallback restored the stored utterance text. The word was gone from `words` and present in
+    // `text`, and the printed page is built from the TEXT, so `SPEAKER 3: Alrighty.` still printed
+    // with its only word struck. One click, on a shipped control, and the strike did not reach the
+    // certified page.
+    //
+    // The fallback is still needed: two segments in Production Trial #1 and one in Heath Thomas
+    // carry text with no word ids at all, and for those there is nothing to rebuild from. So the
+    // question is not whether `rebuilt` is empty but whether there were ever words to rebuild it
+    // from. Struck-to-empty and nothing-to-build-from are different states and this is the
+    // difference between them.
+    const hadWords = (segment.asrWordIds ?? []).length > 0;
+    return { ...segment, text:hadWords ? rebuilt : (rebuilt || segment.text) };
   });
 
   const grouped = groupTranscriptSegments(withText);
