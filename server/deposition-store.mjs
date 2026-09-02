@@ -532,7 +532,7 @@ export function readDepositionRecord(root,id,options={}){const file=path.join(de
  * append can leave a half-written final line, and a truncated JSONL log is one that parseCorrection
  * Log will refuse to read at all -- losing every prior correction to save one.
  */
-export function appendDepositionCorrections(root, { depositionId, corrections, who, at = new Date().toISOString(), storageRoot } = {}) {
+export function appendDepositionCorrections(root, { depositionId, corrections, origin, at = new Date().toISOString(), storageRoot } = {}) {
   const proposed = Array.isArray(corrections) ? corrections : [corrections].filter(Boolean);
   if (!proposed.length) throw new Error("At least one correction is required.");
   const directory = depositionDirectory(root, depositionId, { storageRoot });
@@ -548,7 +548,7 @@ export function appendDepositionCorrections(root, { depositionId, corrections, w
   // Validated against the record as it stands after the previous correction in this batch, so two
   // corrections to one field in a single call are checked in the order they will be applied.
   for (const input of proposed) {
-    const result = validateCorrection(record, { ...input, depositionId, who: input.who ?? who, at: input.at ?? at });
+    const result = validateCorrection(record, { ...input, depositionId, origin: input.origin ?? origin, at: input.at ?? at });
     if (!result.ok) throw new Error(result.message);
     if (seen.has(result.entry.id)) throw new Error(`This correction to ${result.entry.path} is already in the log.`);
     seen.add(result.entry.id);
@@ -567,19 +567,12 @@ export function readDepositionCorrections(root, id, options = {}) {
 }
 
 /** Resolves one generated transcript designation through the existing canonical correction log. */
-export function writeParticipantHonorific(root,{depositionId,participantId,honorific,storageRoot}={}){
-  // WHO IS NOT A PARAMETER. It used to be, defaulting to "Workspace reporter", and the route handed
-  // it straight through from the request body -- so anything that could reach the local API could
-  // name anyone it liked as the author of a change to a canonical record. That was the only live
-  // forgery of attribution in the application, and withholding the capability is a stronger fix
-  // than declining to use it.
-  //
-  // The label is a CALL-SITE CONSTANT and says only what this code path can honestly claim: a
-  // reporter did this, through the Workspace. It does not name a person, because the application
-  // has no signed-in user and cannot know which person acted -- and naming the deposition's CSR
-  // would assert exactly the thing it cannot establish. That is how a correction came to be signed
-  // by a reporter who never made it.
-  const who="Workspace reporter";
+export function writeParticipantHonorific(root,{depositionId,participantId,honorific,storageRoot,...rest}={}){
+  if("who" in rest) throw new Error("A correction may not name its author. Depo-Pro has no signed-in user and cannot establish who acted; the call site records how the write happened, and the reporter states what it rests on in why.");
+
+  // No author is named, and none can be supplied. The previous fix made this a call-site constant,
+  // "Workspace reporter" -- honest, but still a human-shaped string in a field called `who`, which
+  // is two meanings in one place. It is an enum now, and says only how the write happened.
   const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
   if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
   const record=JSON.parse(fs.readFileSync(file,"utf8")),index=(record.counsel||[]).findIndex(item=>item.id===participantId);
@@ -590,7 +583,7 @@ export function writeParticipantHonorific(root,{depositionId,participantId,honor
   // envelope. Add only that declared field, as MISSING, before using the ordinary append-only
   // correction path. This is not an inferred title and does not touch testimony or evidence.
   if(!record.counsel[index].honorific){record.counsel[index]={...record.counsel[index],honorific:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
-  return appendDepositionCorrections(root,{depositionId,storageRoot,who,corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
+  return appendDepositionCorrections(root,{depositionId,storageRoot,origin:"WORKSPACE",corrections:[{path:`counsel.${index}.honorific`,from:current,to:next,why:"Reporter resolved the generated transcript speaker designation."}]});
 }
 
 /**
@@ -608,9 +601,17 @@ export function writeParticipantHonorific(root,{depositionId,participantId,honor
  * `sworn` is a strict boolean and is not coerced. false is an answer -- "the witness affirmed" --
  * and is the case the certification page refuses. Absence is a different fact and stays MISSING.
  */
-export function attestWitnessSworn(root,{depositionId,sworn,who,why,at,storageRoot}={}){
+export function attestWitnessSworn(root,{depositionId,sworn,why,at,storageRoot,...rest}={}){
+  if("who" in rest) throw new Error("A correction may not name its author. Depo-Pro has no signed-in user and cannot establish who acted; the call site records how the write happened, and the reporter states what it rests on in why.");
+
   if(sworn!==true&&sworn!==false)throw new Error("An oath attestation must be true or false. Absence is not an attestation.");
-  if(!String(who??"").trim())throw new Error("An oath attestation requires who made it.");
+  // The attestation names nobody, and that is the honest form of it.
+  //
+  // It used to carry "Miah Bardot, Texas CSR 12129", built by the route from the deposition record.
+  // An oath attestation IS a personal legal act -- but the application cannot tell who is at the
+  // keyboard, so that string asserted the one thing it could not establish. The reporter's own
+  // claim survives in `why`, which they type and which is required: a statement somebody actually
+  // made, rather than one the software made for them.
   if(!String(why??"").trim())throw new Error("An oath attestation requires why it was made. A certified record has to say what a value rests on.");
   const directory=depositionDirectory(root,depositionId,{storageRoot}),file=path.join(directory,"intake","canonical-deposition-record.json");
   if(!fs.existsSync(file))throw new Error("The Canonical Deposition Data Record was not found.");
@@ -620,7 +621,7 @@ export function attestWitnessSworn(root,{depositionId,sworn,who,why,at,storageRo
   // the same repair writeParticipantHonorific makes, and for the same reason.
   if(!record.deposition?.witnessSworn){record.deposition={...record.deposition,witnessSworn:field(null,{source:"REPORTER_ENTERED",state:"MISSING"})};atomicJson(file,record)}
   const current=record.deposition?.witnessSworn?.value??null;
-  return appendDepositionCorrections(root,{depositionId,storageRoot,who,...(at?{at}:{}),corrections:[{path:"deposition.witnessSworn",from:current,to:sworn,why}]});
+  return appendDepositionCorrections(root,{depositionId,storageRoot,origin:"OPENING",...(at?{at}:{}),corrections:[{path:"deposition.witnessSworn",from:current,to:sworn,why}]});
 }
 
 export function readDepositionIntake(root,id,options={}){const file=path.join(depositionDirectory(root,id,options),"intake","intake.json");if(!fs.existsSync(file))throw new Error("Deposition intake record was not found.");return JSON.parse(fs.readFileSync(file,"utf8"))}

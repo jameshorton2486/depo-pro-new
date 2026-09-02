@@ -60,14 +60,35 @@ test("the endpoint records the attestation and returns the refreshed projection"
   assert.equal(record.deposition.witnessSworn.value, false, "and disk agrees with the screen");
 });
 
-test("who comes from the record, not from the request", async () => {
+test("the entry records the path it came through, and names nobody", async () => {
+  // This route used to build "Riley Reporter, Texas CSR 1234" by reading the deposition's own
+  // reporter. That was safer than trusting the client -- and still wrong, because reading a name off
+  // a record does not establish that the person it names is the one who acted. It is how a real
+  // correction to Production Trial #1 came to be signed by a reporter who never made it.
   const s = seed();
   await post({ depositionId: s.depositionId, sworn: true, why: "I administered the oath on the record.", who: "Somebody Else" });
   const [entry] = readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE });
-  assert.match(entry.who, /Riley Reporter/, "the attestor is the reporter on the canonical record");
-  assert.doesNotMatch(entry.who, /Somebody Else/, "a client-supplied attestor is ignored, because it would be forgeable");
-  assert.match(entry.who, /CSR 1234/, "and carries the credential it was made under");
+  assert.equal(entry.origin, "OPENING");
+  assert.equal("who" in entry, false, "no author, forged or resolved");
+  assert.equal(JSON.stringify(entry).includes("Somebody Else"), false, "a client-supplied attestor reaches nothing");
+  assert.equal(JSON.stringify(entry).includes("Riley Reporter"), false, "and neither does the one on the record");
   assert.ok(entry.why.trim() && !Number.isNaN(Date.parse(entry.at)), "why and at are recorded");
+});
+
+test("origin is fixed by the route, not accepted from the request", async () => {
+  // The whole point of replacing `who` is that provenance is established where the code runs. A
+  // client-settable origin would be the same forgery in a new field, so the route names its own.
+  const s = seed();
+  await post({ depositionId: s.depositionId, sworn: true, why: "I administered the oath on the record.", origin: "AUTOMATION" });
+  const [entry] = readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE });
+  assert.equal(entry.origin, "OPENING", "the request's origin is not consulted");
+  assert.equal(JSON.stringify(entry).includes("AUTOMATION"), false);
+
+  // The behavioural check above cannot see a route that forwards an origin the call site ignores.
+  // That is inert today and one edit away from forgery, so the wiring is asserted directly -- the
+  // same instrument this repo already uses for the honorific route's `who`.
+  const api = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
+  assert.equal(/attestWitnessSworn\([^)]*origin:/.test(api), false, "the route hands the store no origin to honour");
 });
 
 test("an attestation with no reason is refused, and nothing is written", async () => {
@@ -77,11 +98,27 @@ test("an attestation with no reason is refused, and nothing is written", async (
   assert.equal(readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE }).length, 0, "and the log is untouched");
 });
 
-test("a deposition with no reporter on its record cannot attest", async () => {
+test("a deposition with no reporter on its record can still attest", async () => {
+  // This used to be refused, with "nobody to attribute an oath attestation to". The refusal existed
+  // only to source the attestor name, and it made an unrelated setup step block a fact about the
+  // WITNESS: whether they were sworn is true or false regardless of whose profile is filled in.
+  //
+  // NOTHING IS LOOSENED WHERE A MISSING REPORTER ACTUALLY MATTERS. That requirement belongs to
+  // certification and is owned there per field, measured against a full Texas state template:
+  //
+  //   no reporter profile   -> 6 blocking, incl. UNEXPECTED_BLANK reporter.name, reporter.csrNumber
+  //                            and CERT_FIRM_REGISTRATION_UNRESOLVED
+  //   name removed alone    -> UNEXPECTED_BLANK fieldValues.reporter.name
+  //   CSR number alone      -> UNEXPECTED_BLANK fieldValues.reporter.csrNumber
+  //   full profile          -> no reporter finding
+  //
+  // Each field isolates: removing exactly one adds exactly one blocking finding. So the guard is
+  // real, it is granular, and it is not this route's. Re-adding a reporter precondition here would
+  // duplicate it in the one layer that has no business asserting it -- an append to a log.
   const s = seed({ reporter: false });
   const response = await post({ depositionId: s.depositionId, sworn: true, why: "I administered the oath." });
-  assert.equal(response.status, 400);
-  const body = await response.json();
-  assert.match(body.error, /nobody to attribute/i, "and it says why, rather than failing silently");
-  assert.equal(readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE }).length, 0);
+  assert.equal(response.status, 200);
+  const [entry] = readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE });
+  assert.equal(entry.origin, "OPENING");
+  assert.equal(entry.to, true);
 });

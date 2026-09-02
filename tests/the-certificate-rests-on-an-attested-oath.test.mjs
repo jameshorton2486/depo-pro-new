@@ -140,11 +140,11 @@ test("changing the Opening oath selector does not attest anything", (t) => {
     "and must not append to the correction log");
 });
 
-test("the attestation is a distinct act, and it carries who, why and at", (t) => {
+test("the attestation is a distinct act, and it carries origin, why and at", (t) => {
   const s = scratch(t);
   attestWitnessSworn(null, {
     depositionId: s.depositionId, storageRoot: s.storageRoot, sworn: false,
-    who: "Riley Reporter, Texas CSR 1234", why: "The witness declined to swear and affirmed on the record.",
+    why: "The witness declined to swear and affirmed on the record.",
   });
   const rec = JSON.parse(fs.readFileSync(path.join(s.folder, "intake", "canonical-deposition-record.json"), "utf8"));
   assert.equal(rec.deposition.witnessSworn.value, false, "false is an answer, not an absence");
@@ -155,16 +155,38 @@ test("the attestation is a distinct act, and it carries who, why and at", (t) =>
   assert.equal(log.length, 1);
   assert.equal(log[0].path, "deposition.witnessSworn");
   assert.equal(log[0].to, false);
-  assert.ok(log[0].who.trim() && log[0].why.trim() && !Number.isNaN(Date.parse(log[0].at)), "who, why and at are all present");
+  assert.equal(log[0].origin, "OPENING");
+  assert.ok(log[0].why.trim() && !Number.isNaN(Date.parse(log[0].at)), "origin, why and at are all present");
+  // The reporter's own words are what survives. An oath attestation IS a personal legal act, and the
+  // temptation is to sign it -- but the application cannot see who is at the keyboard, so a name here
+  // would assert the one thing it cannot establish. `why` is typed by a human and is required; that
+  // is a claim somebody actually made, rather than one the software made on their behalf.
+  assert.match(log[0].why, /declined to swear/);
+  assert.equal("who" in log[0], false, "and no name is manufactured to stand behind it");
 });
 
-test("an attestation without attribution is refused", (t) => {
+test("the origin is the call site's to state, not its caller's", (t) => {
+  // Kills the half of the forgery that lives here. Replacing a forgeable `who` with a forgeable
+  // `origin` would move the defect rather than repair it, and the endpoint test cannot see this on
+  // its own: a call site that honoured its caller's origin is inert until some route forwards one,
+  // so each half passes alone. This is the half that does not need a route to be wrong.
+  const s = scratch(t);
+  attestWitnessSworn(null, { depositionId: s.depositionId, storageRoot: s.storageRoot, sworn: true,
+    why: "I administered the oath on the record.", origin: "AUTOMATION" });
+  const log = readDepositionCorrections(null, s.depositionId, { storageRoot: s.storageRoot });
+  assert.equal(log[0].origin, "OPENING", "the path that ran names itself");
+  assert.equal(JSON.stringify(log[0]).includes("AUTOMATION"), false);
+});
+
+test("an attestation with no stated basis is refused, and one cannot be signed", (t) => {
   const s = scratch(t);
   const base = { depositionId: s.depositionId, storageRoot: s.storageRoot, sworn: true };
-  assert.throws(() => attestWitnessSworn(null, { ...base, who: "", why: "x" }), /requires who/);
-  assert.throws(() => attestWitnessSworn(null, { ...base, who: "Riley", why: "  " }), /requires why/);
-  assert.throws(() => attestWitnessSworn(null, { ...base, who: "Riley", why: "x", sworn: undefined }), /true or false/);
-  assert.throws(() => attestWitnessSworn(null, { ...base, who: "Riley", why: "x", sworn: "OATH" }), /true or false/);
+  assert.throws(() => attestWitnessSworn(null, { ...base, why: "  " }), /requires why/);
+  assert.throws(() => attestWitnessSworn(null, { ...base, why: "x", sworn: undefined }), /true or false/);
+  assert.throws(() => attestWitnessSworn(null, { ...base, why: "x", sworn: "OATH" }), /true or false/);
+  // A caller who supplies a name is refused outright rather than quietly ignored, because a caller
+  // who believes they attributed something and did not is worse off than one told they cannot.
+  assert.throws(() => attestWitnessSworn(null, { ...base, why: "x", who: "Riley Reporter, Texas CSR 1234" }), /may not name its author/);
   assert.equal(readDepositionCorrections(null, s.depositionId, { storageRoot: s.storageRoot }).length, 0,
     "nothing reached the log");
 });

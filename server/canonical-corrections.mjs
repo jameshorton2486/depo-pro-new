@@ -22,6 +22,27 @@ import crypto from "node:crypto";
 
 export const CORRECTION_LOG_VERSION = "1.0.0";
 
+/**
+ * How a correction was made, which is the only part of "who did this" the application can know.
+ *
+ * IT HAS NO SIGNED-IN USER. No login, no session, no identity of any kind -- the local API binds
+ * loopback and trusts everything that reaches it. So a field naming a person could only ever hold a
+ * guess, and the guess this code used to make was the deposition's own court reporter.
+ *
+ * That is not hypothetical. A correction to Production Trial #1 was signed "Miah Bardot, Texas CSR
+ * 12129" for a value she never entered, because the writer resolved the author from the record
+ * rather than from anything that knew who was acting. The value was right; the signature was not. A
+ * later reader relying on that name would have been relying on nothing.
+ *
+ * So the log records WHAT HAPPENED and THROUGH WHICH PATH, and nothing about a person. An enum
+ * rather than a string, so it cannot drift back into looking like a name.
+ *
+ * Where a human genuinely asserts something -- an oath attestation is the case -- the assertion
+ * lives in `why`, in the reporter's own words, which they typed. That is a claim somebody actually
+ * made, rather than one the software made on their behalf.
+ */
+export const CORRECTION_ORIGINS = Object.freeze(["WORKSPACE", "OPENING"]);
+
 /** A field envelope, as canonical-deposition-record.mjs builds them. */
 const isField = value => Boolean(value) && typeof value === "object" && !Array.isArray(value)
   && "value" in value && "source" in value && "state" in value;
@@ -55,7 +76,10 @@ const sameValue = (left, right) => JSON.stringify(left ?? null) === JSON.stringi
  * quietly acquire new identities and a duplicate append is visible rather than merely present.
  */
 export function correctionId(entry) {
-  const material = JSON.stringify([entry.depositionId ?? null, entry.path, entry.from ?? null, entry.to ?? null, entry.who, entry.at]);
+  // `who ?? origin` keeps every id already written reproducible. Entries in the existing logs carry
+  // `who`; new ones carry `origin` in the same slot. Changing the material outright would give an
+  // old entry a new id on replay, and an append-only history whose identities move is not a history.
+  const material = JSON.stringify([entry.depositionId ?? null, entry.path, entry.from ?? null, entry.to ?? null, entry.who ?? entry.origin, entry.at]);
   return crypto.createHash("sha256").update(material).digest("hex").slice(0, 32);
 }
 
@@ -68,12 +92,19 @@ export function correctionId(entry) {
  */
 export function validateCorrection(record, input) {
   const path = String(input?.path ?? "").trim();
-  const who = String(input?.who ?? "").trim();
+  const origin = String(input?.origin ?? "").trim();
   const why = String(input?.why ?? "").trim();
   const at = String(input?.at ?? "").trim();
 
   if (!path) return { ok:false, message:"A correction requires the path of the field it changes." };
-  if (!who) return { ok:false, message:`A correction to ${path} requires who made it.` };
+  // A named author is refused rather than ignored. A default nobody passes is still a door, and
+  // this one was open: the honorific route forwarded a caller-supplied name straight into the log.
+  if (input?.who !== undefined) {
+    return { ok:false, message:`A correction to ${path} may not name its author. Depo-Pro has no signed-in user and cannot establish who acted; record the execution path in origin, and what the value rests on in why.` };
+  }
+  if (!CORRECTION_ORIGINS.includes(origin)) {
+    return { ok:false, message:`A correction to ${path} requires a supported origin (${CORRECTION_ORIGINS.join(", ")}), which is how it was made rather than by whom.` };
+  }
   if (!why) return { ok:false, message:`A correction to ${path} requires why it was made. A certified record has to say what a value rests on.` };
   if (!at || Number.isNaN(Date.parse(at))) return { ok:false, message:`A correction to ${path} requires an ISO 8601 timestamp.` };
 
@@ -91,7 +122,7 @@ export function validateCorrection(record, input) {
     schemaVersion: CORRECTION_LOG_VERSION,
     recordType: "CANONICAL_FIELD_CORRECTION",
     depositionId: input.depositionId ?? null,
-    path, from: input.from ?? null, to: input.to, who, why, at,
+    path, from: input.from ?? null, to: input.to, origin, why, at,
   };
   return { ok:true, entry: { ...entry, id: correctionId(entry) } };
 }

@@ -341,15 +341,12 @@ const server = http.createServer(async (req,res) => {
     // state save would make a dropdown change indistinguishable from an attestation, which is the
     // failure ADR-0021 exists to prevent. See docs/opening-procedures/.
     //
-    // `who` is read from the canonical record rather than accepted from the client. A client-
-    // supplied attestor is a forgeable one, and this value ends up in a certified record's history.
+    // No attestor is named. Reading the deposition's own reporter looked safer than trusting the
+    // client, and it was -- but it still put a person's name against an act nobody could show they
+    // performed. The entry records origin OPENING_SCREEN; what the reporter asserts is in `why`.
     if(req.url==="/api/opening/oath-attestation"&&req.method==="POST"){
       const input=await body(req,64*1024);
-      const projection=getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
-      const name=projection.canonical?.reporter?.fullName?.value??null,csr=projection.canonical?.reporter?.csrNumber?.value??null;
-      if(!String(name??"").trim())return json(res,400,{error:"This deposition has no court reporter on its canonical record, so there is nobody to attribute an oath attestation to."},origin);
-      const who=csr?`${name}, Texas CSR ${csr}`:String(name);
-      attestWitnessSworn(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,sworn:input.sworn,who,why:input.why});
+      attestWitnessSworn(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,sworn:input.sworn,why:input.why});
       return json(res,200,getOpeningProjection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}),origin);
     }
     if(req.url?.startsWith("/api/transcript/rendered?")&&req.method==="GET"){
