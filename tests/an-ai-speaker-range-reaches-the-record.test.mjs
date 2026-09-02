@@ -19,6 +19,7 @@ import { RANGE_ACCEPTANCE_REFUSED, acceptRangeProposal } from "../server/range-p
 import { SPEAKER_RANGE_CORRECTION_TYPES, buildSpeakerRangePrompt, speakerRangeTool } from "../server/speaker-range-prompt.mjs";
 import { clustersBySegment, runSpeakerRangePass } from "../server/speaker-range-pass.mjs";
 import { speakerEvidenceBuckets, validateSpeakerSuggestions } from "../server/speaker-attribution-pass.mjs";
+import { validateProposals } from "../server/correction-validator.mjs";
 import { STALE_CORRECTION_PROPOSAL, computeReviewStateHash } from "../server/review-state-hash.mjs";
 import { applyOverlay } from "../server/reporter-overlay.mjs";
 import { renderTranscript } from "../server/transcript-render.mjs";
@@ -33,6 +34,10 @@ const W = n => `${JOB}:word:${n}`;
 // Six utterances. Cluster 3 is the mixed one: the witness, then counsel, then speech nobody can
 // place. Cluster 7 holds one witness answer among strangers, which is the 78:52 shape.
 const SEGMENTS = [
+  // The oath, before any examination has begun. Cluster 3 answers it, and that answer is NOT an
+  // answer in the transcript sense -- which is the distinction pinned at the end of this file.
+  { id: "s0a", cluster: 0, identity: "reporter", role: "COURT_REPORTER", text: "Do you solemnly swear to tell the truth" },
+  { id: "s0b", cluster: 3, identity: null, role: null, text: "Yes maam I do" },
   { id: "s1", cluster: 0, identity: "attorney-1", role: "QUESTIONING_ATTORNEY", text: "Please state your name for the record" },
   { id: "s2", cluster: 3, identity: null, role: null, text: "Yes maam I do" },
   { id: "s3", cluster: 3, identity: null, role: null, text: "We will reserve our questions until the time of trial" },
@@ -593,5 +598,65 @@ test("counsel who is not examining produces colloquy, not a question", () => {
     const paragraph = result.paragraphs.find(item => (item.asrWordIds ?? []).includes(range[0]));
     assert.equal(paragraph.speakerIdentity, "attorney-2");
     assert.notEqual(paragraph.label, "Q.", "the defending attorney is not the examiner, so this is not a question");
+  });
+});
+
+test("the text rules do not run against a speaker range, including the one only a lexicon triggers", () => {
+  // R9, R12 and R14 are all rules about changing words, and a speaker assignment changes none. The
+  // third of them was the gap: R14 fires only when a pass carries a lexicon, and the speaker-range
+  // pass carries none -- so an unscoped R14 would have sat here unnoticed exactly as the unscoped
+  // R12 did before it was measured. The lexicon below is passed deliberately for that reason.
+  const words = ["I", "was", "42", "then"].map((text, index) => ({ id: `j:word:${index + 1}`, text, editable: true }));
+  const chunk = { chunkId: "c1", passId: "p1", reviewStateHash: "h1", utterances: [{ id: "u1", editable: true, words }] };
+  const say = proposals => ({ chunkId: "c1", passId: "p1", reviewStateHash: "h1", proposals });
+  const base = { wordId: "j:word:1", endWordId: "j:word:4", correctionType: "speaker_assignment", speakerIdentity: "witness", confidenceScore: 0.9, evidenceSource: "transcript" };
+  const options = { chunk, roster: new Set(["witness"]), allowedCorrectionTypes: ["speaker_assignment"], lexicon: ["etminan", "baier"] };
+
+  // R9 would demand a value, R12 would compare "42" against a name, R14 would ask the lexicon for it.
+  const absent = validateProposals(say([{ ...base }]), options);
+  assert.equal(absent.accepted.length, 1, "no proposedValue at all, and a lexicon in force");
+  assert.deepEqual(absent.declined, []);
+  assert.equal(validateProposals(say([{ ...base, proposedValue: null }]), options).accepted.length, 1, "an explicit null is the same proposal");
+
+  // And the input space really is only those two, because R15 closes the rest. An empty string and
+  // the identity itself are both text, and neither reaches a text rule to be judged by it.
+  for (const carried of ["", "witness", "Jennifer Baier"]) {
+    const verdict = validateProposals(say([{ ...base, proposedValue: carried }]), options);
+    assert.equal(verdict.accepted.length, 0, `${JSON.stringify(carried)} is text`);
+    assert.equal(verdict.declined[0].code, "SPEAKER_ASSIGNMENT_CARRIES_TEXT");
+    assert.equal(verdict.declined[0].rule, "R15");
+  }
+});
+
+test("witness speech before examination is not an answer, and an accepted range does not make it one", () => {
+  // The oath boundary, found live in the browser gate rather than here. Cluster 3 answers the oath
+  // at 05:00 in Trial #1, and after the reporter accepted it the printed page read
+  // "THE WITNESS: Yes, ma'am." -- not "A.", because examination had not begun.
+  //
+  // That is the existing label model being MORE right than an assertion would have been, and the
+  // reason this pass is forbidden to propose Q. or A. at all. Pinned here so a later change to the
+  // label model has to break a test rather than a certified transcript.
+  withFixture(value => {
+    const oath = segmentWords(value, "s0b");
+    accept(value, { ...propose(oath[0], oath.at(-1), "witness"), reviewStateHash: currentHash(value) });
+
+    const result = renderTranscript({
+      working: jobs.getWorkingTranscript(null, store(value)),
+      evidence: [JSON.parse(fs.readFileSync(path.join(value.directory, "deepgram", "jobs", JOB, "asr-evidence.json"), "utf8"))],
+      speakerCandidates: jobs.getSpeakerCandidates(null, store(value)).candidates,
+      examinerIdentity: "attorney-1",
+      overlay: jobs.readReporterOverlay(null, store(value)),
+    });
+    const paragraph = result.paragraphs.find(item => (item.asrWordIds ?? []).includes(oath[0]));
+    assert.equal(paragraph.speakerIdentity, "witness", "the range was accepted");
+    assert.notEqual(paragraph.label, "A.", "but witness speech before examination is not an answer");
+    assert.equal(paragraph.label, "THE WITNESS:", "it reads as colloquy under the witness's own designation");
+    assert.equal(paragraph.deepgramSpeaker, 3, "and the cluster survives under it");
+
+    // The same person, after examination begins, does derive A. -- so the distinction above is the
+    // examination boundary doing its job, not the label model failing to fire.
+    const answer = segmentWords(value, "s6");
+    assert.equal(result.paragraphs.find(item => (item.asrWordIds ?? []).includes(answer[0])).label ?? null, null,
+      "and that one is still unattributed until its own range is accepted");
   });
 });
