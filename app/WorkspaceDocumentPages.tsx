@@ -100,9 +100,34 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
   useEffect(()=>{
     const onHide=()=>{if(document.visibilityState==="hidden"&&guardAction("hide",activeEditRef.current)==="flush")void saveRef.current()};
     const onUnload=(event:BeforeUnloadEvent)=>{if(guardAction("unload",activeEditRef.current)!=="warn")return;event.preventDefault();event.returnValue=""};
+    // CLICKING AWAY CLOSES THE EDITOR, and until now only clicking another paragraph did.
+    //
+    // The reporter could open a paragraph and then have no way to put it away: clicking the page
+    // margin, the header, the tools panel or the desktop left the box sitting open over the
+    // transcript. Blur already SAVED the draft -- that part worked -- but nothing closed the box,
+    // so the only exit was to open a different paragraph, which is not an exit.
+    //
+    // pointerdown rather than click, because it fires before focus moves and catches the intent
+    // even when the target is not focusable -- the page background being the obvious case. The
+    // tools panel is a separate subtree, so closing here does not disturb a button being pressed
+    // there; its click still lands on the element it started on.
+    //
+    // Saving rather than discarding, because click-away-saves is the behaviour everywhere else in
+    // this editor and a second meaning for the same gesture would lose work.
+    const dismiss=()=>{ if(!activeEditRef.current)return; void (async()=>{ await saveRef.current(); setActiveEdit(null); })(); };
+    const onPointerDown=(event:PointerEvent)=>{
+      const editor=document.querySelector(".workspace-direct-editor");
+      if(!editor||editor.contains(event.target as Node))return;
+      dismiss();
+    };
+    // Leaving the window entirely -- another application, the desktop -- closes it too. A box left
+    // open behind a switched-away window is one the reporter comes back to and has to remember.
+    const onWindowBlur=()=>dismiss();
+    document.addEventListener("pointerdown",onPointerDown,true);
+    window.addEventListener("blur",onWindowBlur);
     document.addEventListener("visibilitychange",onHide);
     window.addEventListener("beforeunload",onUnload);
-    return()=>{document.removeEventListener("visibilitychange",onHide);window.removeEventListener("beforeunload",onUnload)};
+    return()=>{document.removeEventListener("pointerdown",onPointerDown,true);window.removeEventListener("blur",onWindowBlur);document.removeEventListener("visibilitychange",onHide);window.removeEventListener("beforeunload",onUnload)};
   },[]);
   function openEdit(paragraphId:string,lineKey:string,offset:number){const paragraph=paragraphById.get(paragraphId);if(!paragraph)return;setActiveEdit({paragraphId,lineKey,draft:paragraph.text,baseText:paragraph.text,caret:Math.min(offset,paragraph.text.length),status:"editing"})}
   async function save(){
