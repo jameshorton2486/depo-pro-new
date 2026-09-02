@@ -58,3 +58,25 @@ export function overlayMutationRequest({ depositionId, operations, reviewStateHa
 export function overlayHistoryRequest({ depositionId, reviewStateHash } = {}) {
   return { depositionId:requireDeposition(depositionId), expectedReviewStateHash:requireHash(reviewStateHash) };
 }
+
+/**
+ * The body for POST /api/transcript/range-proposal/accept.
+ *
+ * Accepting an AI speaker range is an overlay mutation like any other, so it carries the hash like
+ * any other -- and it is built here so a call site cannot forget, which is the whole point of this
+ * module.
+ *
+ * What it deliberately does NOT carry is operations. The server plans those, against the projection
+ * the proposal was analyzed against. A client that sent its own plan would be choosing how the
+ * record is written from the side of the wire that cannot check the transcript has not moved.
+ *
+ * @param {{ depositionId?:string, proposal?:object|null, reviewStateHash?:string|null }} [input]
+ */
+export function rangeAcceptanceRequest({ depositionId, proposal, reviewStateHash } = {}) {
+  const id = requireDeposition(depositionId);
+  if (!proposal || proposal.correctionType !== "speaker_assignment") {
+    throw new Error("Only a speaker-range proposal can be accepted this way.");
+  }
+  if (!proposal.wordId || !proposal.endWordId) throw new Error("A speaker-range proposal must carry both ends of its range.");
+  return { depositionId:id, proposal, expectedReviewStateHash:requireHash(reviewStateHash) };
+}

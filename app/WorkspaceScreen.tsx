@@ -6,7 +6,8 @@ import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
 import { splitSpeakerChoices, splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
-import { overlayHistoryRequest, overlayMutationRequest } from "./overlay-mutation.mjs";
+import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
+import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
 
 // One empty set, so "no low-confidence marks" is the same reference on every render.
 const EMPTY_WORD_IDS: Set<string> = new Set();
@@ -93,7 +94,11 @@ type Audit = { uploadId:string; originalName:string; selectedSource:string };
 type Job = { jobId:string; uploadId:string; startedAt?:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
 type NameProposal = { wordId:string; proposedValue:string; confidenceScore:number; evidenceSource:string };
 type SpeakerSuggestion = { sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string|null; missingParticipantName:string|null; transcriptRole:string|null; confidence:number; evidence:string };
-type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; errors:string[] };
+// A range proposal and a bucket proposal are different claims, so they are different types. A
+// SpeakerSuggestion says "cluster 3 is this person"; a RangeProposal says "these words are". The
+// reporter is owed the difference, and a shared type would have hidden it.
+type RangeProposal = { wordId:string; endWordId:string; speakerIdentity:string; correctionType:string; confidenceScore:number; evidenceSource:string; reviewStateHash:string; text:string; wordCount:number; startTime:number|null; endTime:number|null; deepgramSpeakers:number[]; currentSpeakerIdentity:string|null };
+type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; ranges:{ accepted:RangeProposal[] }|null; errors:string[] };
 export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
 const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
@@ -493,13 +498,14 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   },[buckets,savedAssignment]);
 
   async function correctTranscript(){
-    setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setError("");
+    setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setRangeApplied(false);setError("");
     const request=(path:string)=>fetch(`${API}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,additionalInstructions:correctionInstructions})}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"The AI correction check failed.");return payload});
-    const [names,speakers]=await Promise.allSettled([request("/api/correction/entity-pass"),request("/api/transcript/speaker-suggestions")]);
+    const [names,speakers,ranges]=await Promise.allSettled([request("/api/correction/entity-pass"),request("/api/transcript/speaker-suggestions"),request("/api/correction/speaker-range-pass")]);
     const errors:string[]=[];
     if(names.status==="rejected")errors.push(`Names: ${names.reason instanceof Error?names.reason.message:String(names.reason)}`);
     if(speakers.status==="rejected")errors.push(`Speakers: ${speakers.reason instanceof Error?speakers.reason.message:String(speakers.reason)}`);
-    const result:CorrectionResult={names:names.status==="fulfilled"?names.value:null,speakers:speakers.status==="fulfilled"?speakers.value:null,errors};
+    if(ranges.status==="rejected")errors.push(`Speaker ranges: ${ranges.reason instanceof Error?ranges.reason.message:String(ranges.reason)}`);
+    const result:CorrectionResult={names:names.status==="fulfilled"?names.value:null,speakers:speakers.status==="fulfilled"?speakers.value:null,ranges:ranges.status==="fulfilled"?ranges.value:null,errors};
     setCorrectionResult(result);setSelectedCorrections(new Set(result.names?.accepted.map(item=>item.wordId)??[]));setCorrecting(false);
   }
   function proposalOriginal(proposal:NameProposal){for(const paragraph of rendered?.paragraphs??[]){const word=paragraph.words.find(item=>item.id===proposal.wordId);if(word)return word.text}return "(word unavailable)"}
@@ -510,6 +516,32 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       setCorrectionResult(current=>current?{...current,names:current.names?{...current.names,accepted:current.names.accepted.filter(item=>!selectedCorrections.has(item.wordId))}:null}:null);
       setSelectedCorrections(new Set());
     }
+  }
+  // Accepting sends WHICH proposal, and nothing else. No operations are built here: the server
+  // plans them against the projection the proposal was analyzed against, and applies the whole plan
+  // as one transaction. A client that worked out its own operations would be deciding how the
+  // record is written from the side of the wire that cannot check the transcript has not moved.
+  const [acceptingRange,setAcceptingRange]=useState("");
+  const [rangeApplied,setRangeApplied]=useState(false);
+  const rangeKey=(proposal:RangeProposal)=>rangeProposalKey(proposal);
+  function dropRange(proposal:RangeProposal){
+    setCorrectionResult(current=>current?{...current,ranges:current.ranges?{...current.ranges,accepted:remainingAfterRejection(current.ranges.accepted,proposal)}:null}:null);
+  }
+  async function acceptRange(proposal:RangeProposal){
+    if(!printModel)return;
+    setAcceptingRange(rangeKey(proposal));setError("");
+    try{
+      const response=await fetch(`${API}/api/transcript/range-proposal/accept`,{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify(rangeAcceptanceRequest({depositionId,proposal,reviewStateHash:printModel.source.reviewStateHash}))});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||"This speaker proposal could not be applied.");
+      // Every remaining proposal was generated against the state this acceptance just changed, so
+      // they are all stale now. Clearing them is honest; leaving them offers a button that refuses.
+      setRangeApplied(true);
+      setCorrectionResult(current=>current?{...current,ranges:{accepted:remainingAfterAcceptance()}}:null);
+      setAwaitingRecord(true);reloadTranscript();
+    }catch(reason){setError(reason instanceof Error?reason.message:"This speaker proposal could not be applied.")}
+    finally{setAcceptingRange("")}
   }
   function acceptSpeakerSuggestion(suggestion:SpeakerSuggestion){
     const key=`${suggestion.sourceJobIdentity}:${suggestion.deepgramSpeaker}`;
@@ -654,6 +686,30 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               <span><strong>{proposalOriginal(proposal)} → {proposal.proposedValue}</strong><small>{Math.round(proposal.confidenceScore*100)}% confidence · {proposal.evidenceSource}</small></span>
             </div>)}
             <button type="button" disabled={!selectedCorrections.size||busy} onClick={()=>void applySelectedCorrections()}>Apply selected word corrections ({selectedCorrections.size})</button>
+          </section>
+          {/* Range proposals sit in their own section and say so in their heading, because a
+              reporter accepting one is being asked to believe something narrower than a whole
+              cluster: THESE words, which they can read here, were spoken by this person. A
+              surface that mixed the two would be asking the wrong question about half of them.
+
+              Every proposal is accepted or rejected on its own. There is no Select All: a bulk
+              action over speaker attributions is a reporter agreeing to claims they did not read. */}
+          <section><h3>Speaker range proposals ({correctionResult.ranges?.accepted.length??0})</h3>
+            <p className="workspace-hint">Each of these covers a specific stretch of words, not a whole machine speaker. Accepting one changes only the words shown.</p>
+            {!correctionResult.ranges?.accepted.length&&<p>{emptyRangeListMessage({accepted:rangeApplied})}</p>}
+            {correctionResult.ranges?.accepted.map(proposal=>{const shown=rangeProposalSummary(proposal,candidates);return <div className="workspace-range-proposal" key={shown.key}>
+              <p className="workspace-range-words">&ldquo;{shown.text}&rdquo;</p>
+              <p><strong>{shown.speakerLabel}</strong>{shown.speakerRole?` · ${ROLE_FOR(shown.speakerRole)}`:""}{shown.currentSpeakerLabel?` · currently ${shown.currentSpeakerLabel}`:" · currently unattributed"}</p>
+              <small>
+                {clock(shown.startTime)}&ndash;{clock(shown.endTime)} · {shown.wordCount} {shown.wordCount===1?"word":"words"}
+                {shown.deepgramSpeakers.length?` · machine speaker ${shown.deepgramSpeakers.join(", ")}`:""}
+                {` · ${Math.round((shown.confidenceScore??0)*100)}% confidence · ${shown.evidenceSource}`}
+              </small>
+              <div className="workspace-range-actions">
+                <button type="button" className="primary-button" disabled={busy||acceptingRange===rangeKey(proposal)} onClick={()=>void acceptRange(proposal)}>{acceptingRange===rangeKey(proposal)?"Applying…":"Accept"}</button>
+                <button type="button" disabled={busy} onClick={()=>dropRange(proposal)}>Reject</button>
+              </div>
+            </div>})}
           </section>
           <section><h3>Speaker and label proposals ({correctionResult.speakers?.proposals.length??0})</h3>
             {correctionResult.speakers?.proposals.map(proposal=>{const candidate=candidates.find(item=>item.id===proposal.speakerIdentity);return <div className="workspace-speaker-proposal" key={`${proposal.sourceJobIdentity}:${proposal.deepgramSpeaker}`}>
