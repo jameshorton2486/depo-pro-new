@@ -21,6 +21,10 @@ test("professional testimony surface retains editing, structural, review, audio,
   for(const marker of ["Split here","Join to previous","Join to next"])assert.ok(tools.includes(marker),marker);
   assert.ok(workspace.includes("structureActions("),"the panel gets its structural controls from the tested module");
   for(const marker of ["autosave on","onJoinPrevious","onJoinNext","onPlayParagraph"])assert.ok(pages.includes(marker),marker);
+  // The on-screen instructions must not promise a keystroke that no longer does anything. This one
+  // told the reporter to press Enter to split for as long as it took somebody to read the screen.
+  assert.equal(pages.includes("Press Enter at the cursor to split"),false,"Enter no longer splits");
+  assert.ok(pages.includes("Use Split here in the transcript tools"),"and the help says what does");
   assert.ok(api.includes("/api/transcript/final-document-docx"));
 });
 

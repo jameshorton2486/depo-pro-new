@@ -42,7 +42,11 @@ test("a continuation-page word opens its canonical paragraph editor immediately"
   assert.match(pages,/if\(!\(await save\(\)\)\)return;/);
   assert.match(pages,/onSelect\(paragraphId,wordId,shiftKey\)/);
   assert.match(pages,/if\(!shiftKey\)openEdit\(paragraphId,lineKey,offset\)/);
-  assert.match(pages,/Press Enter at the cursor to split there/);
+  // The on-screen instructions, which used to promise that Enter split a paragraph. It stopped
+  // doing so when a structural change to a court record stopped being something a reflex during
+  // typing could cause, and the help text outlived the behaviour by a whole browser gate.
+  assert.match(pages,/Use Split here in the transcript tools/);
+  assert.match(pages,/Ctrl\+S saves; Escape cancels/);
 });
 
 test("modeled line timestamps are visible playback controls",()=>{

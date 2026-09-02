@@ -130,7 +130,11 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
       {activeEdit&&<span className={`workspace-edit-status ${activeEdit.status}`} role="status">{activeEdit.status==="saving"?"Saving…":activeEdit.status==="saved"?"Saved ✓":activeEdit.status==="conflict"?"Conflict detected · local draft preserved":activeEdit.status==="failed"?"Save failed · local draft preserved":"Editing · autosave on"}</span>}
       <span className="workspace-geometry-note">Shared-model pages · one-paragraph editing</span>
     </nav>
-    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Press Enter at the cursor to split there; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
+    {/* This still told the reporter that the Enter key would split a paragraph, after Enter stopped
+        doing so. That is worse than saying nothing: it instructs somebody to press a key that now
+        does nothing, and they would reasonably conclude the application was broken. Caught by
+        looking at the screen, not by a test -- so the test below pins the absence. */}
+    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
       {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
     </div>
