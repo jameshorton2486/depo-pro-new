@@ -33,7 +33,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
         it. Before this it was a fixed 108px box with a drop shadow -- anchored to the line, but
         covering four or five lines of the surrounding record while the reporter typed, which is
         the one thing a reporter correcting a deposition cannot afford to lose sight of. */}
-    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey,lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
+    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey,lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {lineAudioStart!==null&&lineAudioStart!==undefined&&<button type="button" className="workspace-line-time" aria-label={`Save the open paragraph and play audio from ${audioClock(lineAudioStart)}`} onClick={()=>onPlayAt(lineAudioStart)}>▶ {audioClock(lineAudioStart)}</button>}
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
@@ -41,7 +41,21 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
         onChange={event=>onChange(event.target.value,event.target.selectionStart)} onBlur={onSave}
         onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==="s"){event.preventDefault();onSave();return}if(event.key==="Enter"&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey){event.preventDefault();return}if(event.key==="Backspace"&&event.currentTarget.selectionStart===0&&event.currentTarget.selectionEnd===0){event.preventDefault();onJoinPrevious();return}if(event.key==="Delete"&&event.currentTarget.selectionStart===activeEdit.draft.length&&event.currentTarget.selectionEnd===activeEdit.draft.length){event.preventDefault();onJoinNext();return}if(event.key==="Escape"){event.preventDefault();onCancel()}}}/>
       :<code>{line.fragments.length?line.fragments.map((fragment,index)=>fragment.kind==="generated"
-        ? <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>
+        // The designation -- SPEAKER 4:, Q., THE WITNESS: -- selects the paragraph it belongs to.
+        //
+        // The reporter reported this as "the WHO SPOKE? buttons are disabled". They had clicked
+        // SPEAKER 4:, which is exactly where you aim when you want to change who spoke, and it was
+        // generated text with no handler: the click did nothing, and dragging across it left a grey
+        // browser text-selection that reads as a selection. Nothing was wrong with the controls.
+        // Nothing had been selected.
+        //
+        // Only the fragment carrying the designation. The generated single spaces between words are
+        // left as text, because a button per space is not a target, it is a hazard.
+        ? (line.paragraphId&&fragment.text.trim()&&page.editable!==false
+          ? <button type="button" className="workspace-page-label" data-evidence="false" key={`${fragment.id}:${index}`}
+              title="Select this paragraph"
+              onClick={event=>{event.stopPropagation();const first=line.fragments.find(item=>item.kind!=="generated");if(first)onActivate(line.paragraphId as string,first.id,false,lineKey,0,false)}}>{fragment.text}</button>
+          : <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>)
         : <button type="button" className={`workspace-page-token ${fragment.kind} ${selectedWordId===fragment.id?"picked":""} ${activePlaybackWordId===fragment.id?"playing":""} ${lowConfidenceWordIds.has(fragment.id)?"low-confidence":""}`}
             data-token-id={fragment.id} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
             onClick={event=>{event.stopPropagation();if(page.editable===false||!line.paragraphId)return;onActivate(line.paragraphId,fragment.id,event.shiftKey,lineKey,fragment.sourceStart??0,event.altKey)}}>{fragment.text}</button>):line.content}</code>}

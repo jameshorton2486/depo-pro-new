@@ -49,6 +49,25 @@ test("a continuation-page word opens its canonical paragraph editor immediately"
   assert.match(pages,/Ctrl\+S saves; Escape cancels/);
 });
 
+test("the designation selects its own paragraph, and a blank line is never selected",()=>{
+  // Both found by a reporter on the real record, reported as "the WHO SPOKE? buttons are disabled".
+  //
+  // They had clicked SPEAKER 4: -- which is exactly where you aim when you want to change who spoke
+  // -- and it was generated text with no handler. The click did nothing, and dragging across it
+  // left a grey browser text-selection that reads as a selection. Nothing was wrong with the
+  // controls; nothing had been selected.
+  const pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(pages,/workspace-page-label/,"the designation is a control");
+  assert.match(pages,/title="Select this paragraph"/);
+  assert.match(pages,/fragment\.text\.trim\(\)/,"and only the fragment carrying it -- a button per space is a hazard, not a target");
+
+  // 21 blank lines on the last page rendered as selected at the same time. A page holding neither
+  // the old nor the new selection is held back by pageRenderEqual, so it keeps selectedParagraphId
+  // as null -- and a blank line's own paragraphId is null, so null matched null.
+  assert.match(pages,/line\.paragraphId&&line\.paragraphId===selectedParagraphId\?"selected":""/,
+    "a line with no paragraph cannot be the selected paragraph");
+});
+
 test("modeled line timestamps are visible playback controls",()=>{
   const pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
   assert.match(pages,/workspace-line-time/);
