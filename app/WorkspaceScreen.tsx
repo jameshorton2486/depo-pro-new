@@ -8,7 +8,7 @@ import CounselEditor from "./CounselEditor";
 import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
 import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
 import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
-import { currentSpeakerDescription, globalScopeOption, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
 
 // One empty set, so "no low-confidence marks" is the same reference on every render.
 const EMPTY_WORD_IDS: Set<string> = new Set();
@@ -410,7 +410,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // split, each one cost a split and then a label addressed at a derived id the caller had to
   // rebuild. One click, one operation, one undo.
   function relabel(paragraph:Paragraph, speakerIdentity:string|null, transcriptRole:string|null) {
-    const startsHere = splitWithSpeakerOperation({ paragraph, selectedWordId:selected?.wordId ?? null, speakerIdentity, transcriptRole });
+    // Scope is what the reporter CHOSE, not where they happened to click. Passing the selected word
+    // unconditionally is what turned "this paragraph is the witness" into "cut counsel's question in
+    // half and give the second half away" on the real record.
+    const cutAt = speakerScope === "here" ? (selected?.wordId ?? null) : null;
+    const startsHere = splitWithSpeakerOperation({ paragraph, selectedWordId:cutAt, speakerIdentity, transcriptRole });
     if (startsHere) { setSelected(null); void append([startsHere]); return; }
     const anchor = paragraph.words.find(word=>!word.authored)?.id;
     if(!anchor) return;
@@ -459,6 +463,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const speakerList = useMemo(()=>speakerActions({ candidates, labels:rendered?.labels ?? {}, examinerIdentity:examiner || null }),[candidates,examiner,rendered]);
   const [showDetails,setShowDetails] = useState(false);
   const [showSetup,setShowSetup] = useState(false);
+  // Always the safe reading after a selection moves. A destructive scope that persisted across
+  // clicks would be the same defect wearing a different hat.
+  //
+  // Derived from the selection rather than reset by an effect: the choice is remembered against the
+  // selection it was made for, so moving the selection returns to "this whole paragraph" without
+  // anything having to fire.
+  const [scopeChoice,setScopeChoice] = useState<{ key:string; scope:"paragraph"|"here" }|null>(null);
+  const selectionKey = `${selected?.paragraphId ?? ""}:${selected?.wordId ?? ""}`;
+  const speakerScope = scopeChoice?.key === selectionKey ? scopeChoice.scope : "paragraph";
+  const setSpeakerScope = (scope:"paragraph"|"here") => setScopeChoice({ key:selectionKey, scope });
+  const scopeChoices = useMemo(()=>speakerScopeChoices({ paragraph:active, selectedWordId:selected?.wordId ?? null }),[active,selected]);
   // What the paragraph prints as now, and how big the other scope would be. Both read from the
   // record rather than being spelled here.
   const currentSpeaker = useMemo(()=>currentSpeakerDescription({ paragraph:active, labels:rendered?.labels ?? {} }),[active,rendered]);
@@ -937,13 +952,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               they just clicked. The gate failed on exactly this: the control was present and could
               not be found. */}
           <h2>Who spoke?</h2>
-          <p className="workspace-scope">
-            <strong>This passage only.</strong>{" "}
-            {range?`${rangeWords} words, from the first of them.`
-              :active&&selected?.wordId&&splitWithSpeakerControl({paragraph:active,selectedWordId:selected.wordId}).beforeWordId
-                ?"A new paragraph starts at the selected word."
-                :"The whole selected paragraph."}
-          </p>
+          {/* The scope is chosen, and the safe one is chosen already. Before this the panel read it
+              off the click position and said so in a sentence -- which is how counsel's question
+              ended up attributed to the witness, mid-sentence, from one click. */}
+          {active&&<div className="workspace-scope-choice" role="radiogroup" aria-label="What the speaker applies to">
+            {range
+              ? <p className="workspace-scope"><strong>These {rangeWords} words.</strong></p>
+              : scopeChoices.map(choice=>(
+                  <button type="button" key={choice.key} role="radio" aria-checked={speakerScope===choice.key}
+                    className={`workspace-scope-option ${speakerScope===choice.key?"chosen":""}`}
+                    onClick={()=>setSpeakerScope(choice.key as "paragraph"|"here")}>{choice.label}</button>
+                ))}
+          </div>}
           {speakerList.map(action=>action.kind==="other"
             ? <button type="button" key={action.key} className="workspace-speaker-other" disabled={busy||awaitingRecord} onClick={()=>{
                 document.getElementById("workspace-add-missing-counsel")?.click();

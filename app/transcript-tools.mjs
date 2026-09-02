@@ -216,6 +216,37 @@ export function speakerActions({ candidates = [], labels = {}, examinerIdentity 
 }
 
 /**
+ * The two things "who spoke" can mean, offered as a choice instead of inferred from a click.
+ *
+ * THE DEFECT THIS EXISTS TO PREVENT, found on the real record. The panel used to decide scope from
+ * WHERE the reporter happened to click: the paragraph's first word relabelled the paragraph, any
+ * other word cut the paragraph in half and gave the tail away. The reporter clicked a word in the
+ * middle of counsel's question meaning "this is the witness", and got a split at "what" --
+ * so counsel's own question, mid-sentence, became the witness's answer.
+ *
+ * It then derived correctly from that wrong input: the false answer consumed the pending question,
+ * and the witness's real "Yes." two lines later printed THE WITNESS: instead of A. One misplaced
+ * click, two wrong designations, and nothing on screen said why.
+ *
+ * So the safe reading is the DEFAULT and the destructive one has to be chosen, by name. The second
+ * option quotes the word it would cut at, because "a new paragraph starts at the selected word" is
+ * only meaningful if you can see which word that is.
+ *
+ * @param {{ paragraph?:Paragraph|null, selectedWordId?:string|null }} [input]
+ */
+export function speakerScopeChoices({ paragraph, selectedWordId = null } = {}) {
+  if (!paragraph) return [];
+  const words = paragraph.words ?? [];
+  // The first word the microphone produced. Splitting before it would leave an empty head, so
+  // selecting it can only mean the whole paragraph.
+  const first = words.find(word => !word.authored)?.id ?? null;
+  const choices = [{ key: "paragraph", label: "This whole paragraph", wordId: first, wordText: null }];
+  const word = selectedWordId && selectedWordId !== first ? words.find(item => item.id === selectedWordId) : null;
+  if (word) choices.push({ key: "here", label: `New paragraph at “${word.text}”`, wordId: word.id, wordText: word.text });
+  return choices;
+}
+
+/**
  * The structural actions that apply to this paragraph, and only those.
  *
  * @param {{ paragraph?:Paragraph|null, index?:number, total?:number, selectedWordId?:string|null, examinerColloquyAvailable?:boolean, examinationAvailable?:boolean }} [input]

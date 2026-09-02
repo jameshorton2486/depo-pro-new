@@ -10,7 +10,7 @@
 // rather than an acceptance queue.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { currentSpeakerDescription, globalScopeOption, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
 
 const CANDIDATES = [
   { id: "reporter", label: "Miah Bardot", defaultRole: "COURT_REPORTER" },
@@ -169,6 +169,27 @@ test("a cluster with one passage offers no global scope, because there is nothin
   assert.equal(globalScopeOption({ paragraph: { deepgramSpeaker: 5 }, paragraphs: [{ deepgramSpeaker: 5 }] }), null);
   assert.equal(globalScopeOption({ paragraph: { deepgramSpeaker: null }, paragraphs: [] }), null);
   assert.equal(globalScopeOption({ paragraph: null, paragraphs: [] }), null);
+});
+
+test("the safe scope is the default, and the destructive one has to be chosen by name", () => {
+  // Found on the real record. The panel decided scope from WHERE the reporter clicked: the first
+  // word relabelled the paragraph, any other word cut it in half and gave the tail away. A click on
+  // "what", inside counsel's question, meaning "this is the witness", split counsel's sentence and
+  // attributed the second half to her. It then derived correctly from that: the false answer
+  // consumed the pending question, so the witness's real "Yes." two lines later printed
+  // THE WITNESS: instead of A. One click, two wrong designations, nothing on screen saying why.
+  const paragraph = { words: [{ id: "w1", text: "And" }, { id: "w2", text: "what" }, { id: "w3", text: "I" }] };
+  const mid = speakerScopeChoices({ paragraph, selectedWordId: "w2" });
+  assert.equal(mid[0].key, "paragraph", "the safe reading is first, and the component selects it");
+  assert.equal(mid[0].label, "This whole paragraph");
+  assert.equal(mid[1].key, "here");
+  assert.match(mid[1].label, /New paragraph at .what./, "and it quotes the word it would cut at");
+
+  // Selecting the paragraph's own first word cannot mean "start a new paragraph here" -- there
+  // would be no head left -- so only one scope is offered.
+  assert.deepEqual(speakerScopeChoices({ paragraph, selectedWordId: "w1" }).map(item => item.key), ["paragraph"]);
+  assert.deepEqual(speakerScopeChoices({ paragraph }).map(item => item.key), ["paragraph"]);
+  assert.deepEqual(speakerScopeChoices({ paragraph: null }), []);
 });
 
 // --- which structural actions apply -------------------------------------------------------------
