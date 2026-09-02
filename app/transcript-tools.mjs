@@ -84,6 +84,54 @@ export function selectedParagraphSummary({ paragraph, pages = [], labels = {}, s
   };
 }
 
+/**
+ * What the selected paragraph prints as RIGHT NOW, in the words the reporter can see on the page.
+ *
+ * An unattributed paragraph prints `SPEAKER 3:` in the transcript, so the panel says `SPEAKER 3` --
+ * not "no speaker recorded", which is true but does not match anything on screen. The reporter is
+ * looking at one and reading the other, and the whole job here is to connect them.
+ *
+ * The number is the diarization cluster index, exactly as the print model derives it. A number that
+ * cannot be carried from one control to another is worse than no number.
+ *
+ * @param {{ paragraph?:Paragraph|null, labels?:Record<string,string> }} [input]
+ */
+export function currentSpeakerDescription({ paragraph, labels = {} } = {}) {
+  if (!paragraph) return null;
+  const identity = paragraph.speakerIdentity ?? null;
+  if (identity) return { known: true, text: String(labels[identity] ?? identity).replace(/:$/, "") };
+  const cluster = paragraph.deepgramSpeaker;
+  if (Number.isInteger(cluster)) return { known: false, text: `SPEAKER ${cluster}` };
+  return { known: false, text: "SPEAKER UNKNOWN" };
+}
+
+/**
+ * The other scope, described so its size is impossible to miss.
+ *
+ * Assigning a speaker from the panel changes THIS PASSAGE. Mapping a whole diarization cluster
+ * changes every passage in it, and Trial #1 proved that is often wrong: cluster 3 there holds 86
+ * passages, of which at least four are not the witness -- including opposing counsel reserving
+ * questions till the time of trial. A reporter who clicks a name should never discover afterwards
+ * that they moved 86 passages.
+ *
+ * So this returns the count and leaves the action elsewhere. It is a signpost, not a button.
+ *
+ * @param {{ paragraph?:Paragraph|null, paragraphs?:Paragraph[] }} [input]
+ */
+export function globalScopeOption({ paragraph, paragraphs = [] } = {}) {
+  const cluster = paragraph?.deepgramSpeaker;
+  if (!Number.isInteger(cluster)) return null;
+  const sharing = paragraphs.filter(item => item.deepgramSpeaker === cluster);
+  if (sharing.length < 2) return null;
+  return {
+    deepgramSpeaker: cluster,
+    passages: sharing.length,
+    // Named the way the transcript names it, so the two can be compared.
+    label: `SPEAKER ${cluster}`,
+    unresolved: sharing.filter(item => !item.speakerIdentity).length,
+  };
+}
+
 /** Roles that print a designation from the role alone, so they need no name to be usable. */
 const PROCEDURAL_ROLES = Object.freeze([
   { role: "VIDEOGRAPHER", label: "Videographer" },

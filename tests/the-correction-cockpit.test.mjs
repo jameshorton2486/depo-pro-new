@@ -10,7 +10,7 @@
 // rather than an acceptance queue.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
 
 const CANDIDATES = [
   { id: "reporter", label: "Miah Bardot", defaultRole: "COURT_REPORTER" },
@@ -126,6 +126,49 @@ test("an unattributed paragraph says so rather than naming a diarization cluster
   const shown = selectedParagraphSummary({ paragraph: { ...PARAGRAPH, speakerIdentity: null, label: null }, pages: PAGES });
   assert.equal(shown.speakerLabel, null, "the component reads this as 'no speaker recorded'");
   assert.equal(shown.details.deepgramSpeaker, 2, "the cluster is a diagnostic, not a speaker");
+});
+
+// --- the words the reporter can see on the page -------------------------------------------------
+
+test("an unattributed paragraph is named the way the transcript names it", () => {
+  // The visual gate failed here. The panel said "No speaker recorded" while the page said
+  // "SPEAKER 3:", leaving the reporter to connect two different descriptions of one thing -- which
+  // is the entire job this panel exists to do for them.
+  assert.deepEqual(currentSpeakerDescription({ paragraph: { ...PARAGRAPH, speakerIdentity: null, deepgramSpeaker: 3 } }),
+    { known: false, text: "SPEAKER 3" });
+  // The number is the diarization cluster index, exactly as the print model derives it. A number
+  // that cannot be carried from one control to another is worse than no number.
+  assert.equal(currentSpeakerDescription({ paragraph: { ...PARAGRAPH, speakerIdentity: null, deepgramSpeaker: 7 } }).text, "SPEAKER 7");
+  assert.equal(currentSpeakerDescription({ paragraph: { ...PARAGRAPH, speakerIdentity: null, deepgramSpeaker: null } }).text, "SPEAKER UNKNOWN");
+  assert.equal(currentSpeakerDescription({ paragraph: null }), null);
+});
+
+test("an attributed paragraph is named by the person", () => {
+  const shown = currentSpeakerDescription({ paragraph: PARAGRAPH, labels: { witness: "THE WITNESS" } });
+  assert.deepEqual(shown, { known: true, text: "THE WITNESS" });
+  assert.equal(currentSpeakerDescription({ paragraph: PARAGRAPH }).text, "witness", "and by its id when no label exists, rather than by a cluster");
+});
+
+test("the other scope is described with its size, and is not a one-click action", () => {
+  // Trial #1's cluster 3 holds 86 passages and at least four are not the witness -- including
+  // opposing counsel reserving questions till the time of trial. A reporter who clicked a name in
+  // WHO SPOKE? must never discover afterwards that they moved 86 passages.
+  const paragraphs = [
+    { id: "a", deepgramSpeaker: 3 }, { id: "b", deepgramSpeaker: 3, speakerIdentity: "witness" },
+    { id: "c", deepgramSpeaker: 3 }, { id: "d", deepgramSpeaker: 6, speakerIdentity: "attorney-1" },
+  ];
+  const scope = globalScopeOption({ paragraph: paragraphs[0], paragraphs });
+  assert.deepEqual(scope, { deepgramSpeaker: 3, passages: 3, label: "SPEAKER 3", unresolved: 2 });
+  // It carries no speakerIdentity and no operation: it is a signpost, and the action lives in
+  // speaker setup where a whole-cluster decision belongs.
+  assert.equal("speakerIdentity" in scope, false);
+  assert.equal("transcriptRole" in scope, false);
+});
+
+test("a cluster with one passage offers no global scope, because there is nothing global about it", () => {
+  assert.equal(globalScopeOption({ paragraph: { deepgramSpeaker: 5 }, paragraphs: [{ deepgramSpeaker: 5 }] }), null);
+  assert.equal(globalScopeOption({ paragraph: { deepgramSpeaker: null }, paragraphs: [] }), null);
+  assert.equal(globalScopeOption({ paragraph: null, paragraphs: [] }), null);
 });
 
 // --- which structural actions apply -------------------------------------------------------------

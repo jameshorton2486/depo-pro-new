@@ -8,7 +8,7 @@ import CounselEditor from "./CounselEditor";
 import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
 import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
 import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
-import { proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
 
 // One empty set, so "no low-confidence marks" is the same reference on every render.
 const EMPTY_WORD_IDS: Set<string> = new Set();
@@ -458,6 +458,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // on the roster holds -- the videographer Trial #1 could name a role for and never a person.
   const speakerList = useMemo(()=>speakerActions({ candidates, labels:rendered?.labels ?? {}, examinerIdentity:examiner || null }),[candidates,examiner,rendered]);
   const [showDetails,setShowDetails] = useState(false);
+  const [showSetup,setShowSetup] = useState(false);
+  // What the paragraph prints as now, and how big the other scope would be. Both read from the
+  // record rather than being spelled here.
+  const currentSpeaker = useMemo(()=>currentSpeakerDescription({ paragraph:active, labels:rendered?.labels ?? {} }),[active,rendered]);
+  const globalScope = useMemo(()=>globalScopeOption({ paragraph:active, paragraphs:rendered?.paragraphs ?? [] }),[active,rendered]);
   const selectedSummary = useMemo(()=>selectedParagraphSummary({ paragraph:active, pages:printModel?.pages??[], labels:rendered?.labels??{}, saveState:(busy||awaitingRecord)?"saving":"saved" }),[active,printModel,rendered,busy,awaitingRecord]);
   // What the examination button will record, so it can be checked against the screen before it is
   // pressed. A control reading "Record" leaves the reporter to remember which two lists they set.
@@ -897,9 +902,15 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 {selectedSummary.location?<strong>Page {selectedSummary.location.page}, line {selectedSummary.location.line}</strong>:<strong>Not yet paginated</strong>}
                 <span> · {clock(selectedSummary.start)}–{clock(selectedSummary.end)}</span>
               </p>
+              {/* "Current: SPEAKER 3" rather than "no speaker recorded". The reporter is looking at
+                  SPEAKER 3: on the page; saying something true but differently worded leaves them to
+                  connect the two, which is the whole job this panel exists to do. */}
               <p className="workspace-who">
-                {selectedSummary.speakerLabel?<strong>{selectedSummary.speakerLabel}</strong>:<em>No speaker recorded</em>}
-                {selectedSummary.designation?<span className="workspace-designation"> prints as {selectedSummary.designation}</span>:null}
+                <span className="workspace-current-label">Current</span>
+                {currentSpeaker
+                  ? <strong className={currentSpeaker.known?"":"workspace-unresolved"}>{currentSpeaker.text}</strong>
+                  : <em>Nothing selected</em>}
+                {selectedSummary.designation?<span className="workspace-designation"> · prints as {selectedSummary.designation}</span>:null}
               </p>
               <div className="workspace-row">
                 <button type="button" disabled={multiVolume||!selectedSummary.playable||!playbackSource} onClick={()=>playParagraph(active)}>Play</button>
@@ -921,12 +932,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           {/* One place for who spoke, built from this deposition's own record. Q. and A. are not
               buttons here: they are derived from the speaker and the examination state, and a
               button offering one would be the panel deciding something the transcript decides. */}
-          <h2>Speaker</h2>
-          <p className="workspace-hint">
-            {range?`${rangeWords} words selected. The speaker applies from the first of them.`
+          {/* A question, not a noun. "Speaker" names a topic; "Who spoke?" names the decision the
+              reporter came here to make, and it is the first actionable thing under the paragraph
+              they just clicked. The gate failed on exactly this: the control was present and could
+              not be found. */}
+          <h2>Who spoke?</h2>
+          <p className="workspace-scope">
+            <strong>This passage only.</strong>{" "}
+            {range?`${rangeWords} words, from the first of them.`
               :active&&selected?.wordId&&splitWithSpeakerControl({paragraph:active,selectedWordId:selected.wordId}).beforeWordId
                 ?"A new paragraph starts at the selected word."
-                :"Applies to the whole selected paragraph."}
+                :"The whole selected paragraph."}
           </p>
           {speakerList.map(action=>action.kind==="other"
             ? <button type="button" key={action.key} className="workspace-speaker-other" disabled={busy||awaitingRecord} onClick={()=>{
@@ -939,6 +955,15 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 {action.label}
                 {action.note?<small>{action.note}</small>:action.role?<small>{ROLE_FOR(action.role)}{action.examiner?" · examining":""}</small>:null}
               </button>)}
+
+          {/* The OTHER scope, named with its size and deliberately not a one-click action here.
+              Trial #1's cluster 3 holds 86 passages and at least four of them are not the witness,
+              including opposing counsel reserving questions. A reporter who clicked a name should
+              never discover afterwards that they moved 86 passages. */}
+          {globalScope&&<p className="workspace-global-scope">
+            All {globalScope.passages} passages the recording grouped as <strong>{globalScope.label}</strong>?{" "}
+            <button type="button" className="workspace-linklike" onClick={()=>{setShowSetup(true);setShowSpeakers(true);window.setTimeout(()=>document.getElementById("workspace-speakers")?.scrollIntoView({behavior:"smooth",block:"center"}),0)}}>Map the whole speaker in Speaker setup</button>
+          </p>}
 
           {/* ---- STRUCTURE -------------------------------------------------------------- */}
           <h2>Structure</h2>
@@ -1051,11 +1076,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             </div>}
           </div>)}
 
-          {/* ---- PARTICIPANTS ------------------------------------------------------------ */}
-          {/* Who was in the room, and which voice is which. Not per-paragraph work, so it sits
-              below the correction controls rather than among them. */}
-          <h2>Participants</h2>
-          {unresolvedHonorifics.length>0&&<section className="workspace-review-tools" aria-label="Unresolved participant honorifics">
+          {/* ---- SPEAKER SETUP ------------------------------------------------------------ */}
+          {/* Deposition-level work: who was in the room, which voice is which, how each name is
+              titled. None of it is per-paragraph, and all of it used to sit in the same scroll as
+              the correction controls -- which is how a reporter looking for "who spoke this
+              paragraph" ended up reading a Counsel Editor. Collapsed by default; the correction
+              controls above never move because of what is in here. */}
+          <h2>Speaker setup</h2>
+          <button type="button" className="workspace-setup-toggle" aria-expanded={showSetup} onClick={()=>setShowSetup(value=>!value)}>
+            {showSetup?"Hide participants and speaker map":"Participants, speaker map and honorifics"}
+          </button>
+          {showSetup&&<>
+          {showSetup&&unresolvedHonorifics.length>0&&<section className="workspace-review-tools" aria-label="Unresolved participant honorifics">
             {/* Beside the participants rather than in the per-paragraph tools: an honorific is a
                 fact about a person, settled once, not a decision made per paragraph. */}
             <h3>Honorifics</h3>
@@ -1142,6 +1174,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               {candidates.filter(candidate=>candidate.defaultRole.includes("ATTORNEY")).map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
             </select>
           </div>
+          </>}
         </aside>
       </div>
     </main>
