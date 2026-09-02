@@ -71,7 +71,22 @@ function withPreviewLabels(paragraphs) {
     if(paragraph.derived)return paragraph;
     const speaker=paragraph.deepgramSpeaker;
     const key=speaker===null||speaker===undefined?null:`${paragraph.sourceJobIdentity??"unknown-job"}:${speaker}`;
-    if(key&&!fallbackLabels.has(key))fallbackLabels.set(key,`SPEAKER ${fallbackLabels.size+1}:`);
+    // The number is the Deepgram cluster index, not a counter over first appearances.
+    //
+    // It used to be `fallbackLabels.size+1`, and that made "Speaker N" mean two different things on
+    // one screen: the transcript numbered by order of appearance while the Counsel Editor's selector
+    // numbers by cluster index. On Production Trial #1 it showed Pablo Rivera as "SPEAKER 5:" in the
+    // body while the selector correctly read "Speaker 1 - 109 words". Cluster 5 is a different voice,
+    // two words long and still unidentified. The reporter compared the two and concluded the
+    // application had assigned the wrong speaker; it had not. A number that cannot be carried from one
+    // control to another is worse than no number.
+    //
+    // Two recordings can each have a cluster 0, which is the ambiguity the counter avoided. That is
+    // disambiguated rather than renumbered, so the index read in the selector is the index read here.
+    if(key&&!fallbackLabels.has(key)){
+      const sharesIndex=[...fallbackLabels.keys()].some(other=>other.endsWith(`:${speaker}`));
+      fallbackLabels.set(key,sharesIndex?`SPEAKER ${speaker} (${String(paragraph.sourceJobIdentity??"").slice(0,8)}):`:`SPEAKER ${speaker}:`);
+    }
     return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:",previewLabel:true};
   });
 }

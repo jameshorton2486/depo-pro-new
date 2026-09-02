@@ -60,13 +60,17 @@ const finalize = printModel => buildCompleteTranscriptModel({
 
 test("a participant the record does not list stops the final document", async () => {
   // The Word gate's own case: the transcript has a videographer, the canonical record does not, and
-  // three paragraphs printed SPEAKER 1: on a 217-page certified document.
+  // three paragraphs printed a placeholder speaker on a 217-page certified document.
   const { printModel } = printModelFrom({ candidates:SPEAKER_CANDIDATES.filter(item => item.id !== "videographer") });
   assert.equal(printModel.previewLabelled.length, 3, "the print model must see the substitution");
 
   await assert.rejects(finalize(printModel), error => {
     assert.equal(error.code, "COMPLETE_TRANSCRIPT_UNRESOLVED_SPEAKER");
-    assert.match(error.message, /3 paragraph\(s\) would print a placeholder such as SPEAKER 1:/);
+    // The number is the Deepgram cluster index now, not a counter over first appearances -- the two
+  // schemes used to collide on screen and mislead a reporter about who had been assigned. What this
+  // test is about is unchanged: the refusal fires, and it names a placeholder the reporter can go and
+  // find rather than one that points at a different voice.
+  assert.match(error.message, /3 paragraph\(s\) would print a placeholder such as SPEAKER \d+:/);
     return true;
   });
 });
