@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
 
 const CANDIDATES = [
   { id: "reporter", label: "Miah Bardot", defaultRole: "COURT_REPORTER" },
@@ -238,6 +238,39 @@ test("splitting needs a word, and never the first one", () => {
 
 test("with nothing selected there are no structural actions at all", () => {
   assert.deepEqual(structureActions({ paragraph: null }), []);
+});
+
+test("striking a paragraph is one delete per word, and no new operation", () => {
+  // The reporter asked to be able to remove a whole paragraph. `delete` already existed and has
+  // been reachable one word at a time from TEXT all along, so this is the same act asked of a
+  // paragraph rather than a new authority over the record.
+  const paragraph = { words: [{ id: "w1", text: "Alrighty." }, { id: "w2", text: "Yes." }] };
+  const operations = strikeParagraphOperations({ paragraph });
+  assert.deepEqual(operations, [{ op: "delete", wordId: "w1" }, { op: "delete", wordId: "w2" }]);
+  for (const operation of operations) assert.equal(operation.op, "delete", "nothing new is invented");
+
+  // Already-struck words are skipped: re-striking writes operations that change nothing and
+  // lengthen the record of what the reporter did.
+  assert.deepEqual(strikeParagraphOperations({ paragraph: { words: [{ id: "w1", deleted: true }, { id: "w2" }] } }),
+    [{ op: "delete", wordId: "w2" }]);
+  assert.deepEqual(strikeParagraphOperations({ paragraph: { words: [{ id: "w1", deleted: true }] } }), []);
+  assert.deepEqual(strikeParagraphOperations({}), []);
+
+  // Reporter-authored words go too: leaving them would strike the testimony and keep the
+  // annotation sitting on it.
+  assert.deepEqual(strikeParagraphOperations({ paragraph: { words: [{ id: "overlay:1", authored: true }] } }),
+    [{ op: "delete", wordId: "overlay:1" }]);
+});
+
+test("striking is offered last, marked destructive, and withdrawn once there is nothing left", () => {
+  const actions = structureActions({ paragraph: { words: [{ id: "w1" }] }, index: 1, total: 5 });
+  const strike = actions.at(-1);
+  assert.equal(strike.key, "strike", "last, because everything above changes how a paragraph reads and this removes it");
+  assert.equal(strike.destructive, true);
+  assert.equal(strike.available, true);
+  const spent = structureActions({ paragraph: { words: [{ id: "w1", deleted: true }] }, index: 1, total: 5 }).at(-1);
+  assert.equal(spent.available, false);
+  assert.match(spent.unavailable, /already struck/);
 });
 
 // --- the worklist -------------------------------------------------------------------------------

@@ -268,7 +268,35 @@ export function structureActions({ paragraph, index = -1, total = 0, selectedWor
     { key: "examiner-colloquy", label: "Examiner colloquy", available: examinerColloquyAvailable, unavailable: "Only the examining attorney's own paragraphs can be marked as colloquy." },
     { key: "examination", label: "Examination begins here", available: examinationAvailable, unavailable: "An examination begins on an attorney's paragraph." },
     { key: "mark", label: "Mark for another listen", available: true, unavailable: null },
+    // Last, and its own thing: everything above changes how a paragraph reads, and this removes it.
+    { key: "strike", label: "Strike this paragraph", destructive: true,
+      available: words.some(word => !word.deleted),
+      unavailable: "Every word in this paragraph is already struck." },
   ];
+}
+
+/**
+ * Striking a whole paragraph: one delete per word it still holds.
+ *
+ * No new operation. `delete` already exists and is qualified, and the reporter has been able to
+ * strike one word at a time from TEXT all along -- this is the same act asked of a paragraph, and
+ * it applies as ONE transaction so a single undo brings the whole thing back.
+ *
+ * Words already struck are skipped rather than struck again: re-striking writes operations that
+ * change nothing and lengthen the record of what the reporter did.
+ *
+ * Reporter-authored words go too. They are text somebody typed into this paragraph, and leaving
+ * them behind would strike the testimony and keep the annotation on it.
+ *
+ * The evidence is untouched by all of it. A struck word is absent from the transcript projection
+ * and present in the ASR record, which is the distinction the whole overlay exists to keep.
+ *
+ * @param {{ paragraph?:Paragraph|null }} [input]
+ */
+export function strikeParagraphOperations({ paragraph } = {}) {
+  return (paragraph?.words ?? [])
+    .filter(word => !word.deleted)
+    .map(word => ({ op: "delete", wordId: word.id }));
 }
 
 /**

@@ -8,7 +8,7 @@ import CounselEditor from "./CounselEditor";
 import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
 import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
 import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
-import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
+import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
 
 // One empty set, so "no low-confidence marks" is the same reference on every render.
 const EMPTY_WORD_IDS: Set<string> = new Set();
@@ -1020,12 +1020,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               setSelected(null);
               void structuralTransaction([operation]);
             }}>{examinerColloquyLabel({ paragraph:active, labels:rendered?.labels??{} })}</button>:null;
-            const onClick=item.key==="split"?()=>{const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}
+            // Striking removes testimony, so it asks first and says how much. It is one transaction
+            // whatever the paragraph's length, so one Undo brings all of it back.
+            const onClick=item.key==="strike"?()=>{
+              const operations=strikeParagraphOperations({paragraph:active});
+              if(!operations.length)return;
+              const preview=active.words.filter(word=>!word.deleted).map(word=>word.text).join(" ");
+              if(!window.confirm(`Strike ${operations.length} word${operations.length===1?"":"s"} from the transcript?
+
+${preview.length>160?`${preview.slice(0,160)}…`:preview}
+
+The recording is not changed, and Undo restores this in one step.`))return;
+              setSelected(null);
+              void structuralTransaction(operations);
+            }
+              :item.key==="split"?()=>{const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}
               :item.key==="join-previous"?()=>void joinParagraph(active.id,"previous")
               :item.key==="join-next"?()=>void joinParagraph(active.id,"next")
               :flagSelection;
             const label=item.key==="mark"&&range?`Mark these ${rangeWords} words for another listen`:item.label;
-            return <button type="button" key={item.key} disabled={!item.available||busy||awaitingRecord} title={item.available?undefined:item.unavailable??undefined} onClick={onClick}>{label}</button>;
+            return <button type="button" key={item.key} className={item.destructive?"workspace-destructive":undefined} disabled={!item.available||busy||awaitingRecord} title={item.available?undefined:item.unavailable??undefined} onClick={onClick}>{label}</button>;
           })}
           {selectedWord?.flagged&&<button type="button" disabled={busy||awaitingRecord} onClick={()=>{const from=selectedWord.flaggedFrom;if(from)void append([{ op:"unflag", fromWordId:from }])}}>Clear this mark</button>}
 

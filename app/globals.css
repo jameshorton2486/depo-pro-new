@@ -562,6 +562,7 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .workspace-global-scope{margin:4px 0 0;font-size:11px;color:var(--muted);line-height:1.5}
 .workspace-linklike{border:0;background:none;padding:0;font:inherit;font-size:11px;color:var(--blue);text-decoration:underline;cursor:pointer;text-align:left}
 .workspace-setup-toggle{font-size:11px;color:var(--muted)}
+.workspace-menu .workspace-destructive{color:#a3242c;border-color:#e6c6c9}.workspace-menu .workspace-destructive:hover:not(:disabled){border-color:#a3242c;color:#a3242c;background:#fdf5f5}
 .workspace-history{display:flex;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--line)}.workspace-history button{flex:1;text-align:center;padding:6px 8px}
 .workspace-where{margin:0;font-size:11px;color:var(--muted)}.workspace-where strong{color:var(--navy)}
 .workspace-who{margin:2px 0 0;font-size:13px}.workspace-who em{color:var(--muted);font-style:italic}.workspace-designation{color:var(--muted);font-size:11px}
