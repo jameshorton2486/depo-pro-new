@@ -117,7 +117,24 @@ Note that `split` already carries a speaker (`{op:"split", beforeWordId, speaker
 transcriptRole}`) and `label` already addresses by word or segment. Establish whether an accepted
 range proposal can be expressed entirely in existing overlay operations.
 
-### 5. The bucket assumption
+### 5. Three levels of proposal, and which survive
+
+The audit must decide between three units of authority rather than assuming one replaces the others.
+
+**GLOBAL** - `DG cluster -> canonical person`. What exists today. Only safe when the whole bucket
+really is one person, which was true for five of Baier's eight clusters.
+
+**RANGE** - `word A .. word B -> canonical person`. Needed for mixed buckets like DG 3, and for
+isolated errors like DG 7 @ 78:52 where one utterance belongs to someone else.
+
+**BOUNDARY** - `a new speaker turn begins at word X`. Needed where diarization failed to create a real
+turn at all - Etminan's 224 missing boundaries are this case.
+
+**Do not automatically retire the bucket-level pass.** Determine whether GLOBAL remains useful as a
+fast proposal for demonstrably homogeneous clusters while RANGE and BOUNDARY provide the safe general
+mechanism. Five of eight clusters being clean is an argument for keeping it, not against.
+
+### 6. The bucket assumption
 
 Find every place that assumes one Deepgram id maps to one canonical person — the speaker map schema,
 `speakerEvidenceBuckets`, `validateSpeakerSuggestions`, the Counsel Editor's selector, the print
@@ -125,19 +142,19 @@ model's placeholder. **Mark them; change nothing.** Then determine whether a per
 sit above the evidence layer while the original `deepgramSpeaker` value survives untouched on every
 word.
 
-### 6. Paragraph identity
+### 7. Paragraph identity
 
 Trace raw words → segments → paragraphs → printed paragraphs. Establish what currently creates a
 paragraph boundary. Confirm that visual page boundaries are not part of paragraph identity — a
 correction may span a page break because pagination is a projection.
 
-### 7. Convergence
+### 8. Convergence
 
 Find where the streaming and prerecorded pipelines become structurally equivalent. The target is one
 review entry point after evidence normalisation. Report the convergence boundary; build two paths
 only if the evidence contracts genuinely differ.
 
-### 8. Trigger cost
+### 9. Trigger cost
 
 Before proposing "run on Workspace open", measure: how long a pass takes on 9,040 words, what it
 costs, what happens on a second visit, and what happens when the transcript has moved since the last
@@ -200,6 +217,24 @@ does this and must be used. Raw Deepgram evidence and timestamps survive untouch
 **Do not claim completion if the UI collects an instruction the server cannot validate and apply.**
 
 ---
+
+## Approved Workspace panel behaviour, recorded here so implementation does not have to re-ask
+
+Answered 2026-09-01, implementation deferred until this audit returns.
+
+- **Speaker establishes who spoke, and nothing more.** Q., A. and ordinary attorney colloquy are
+  derived from the approved speaker plus examination state where deterministic rules legitimately
+  support it. **Examiner colloquy stays a separate utterance-type override** and is not folded into
+  speaker identity - it is the third fact.
+- **Videographer is shown even when the name is unknown**, reading as *"Videographer - name not
+  established"*. The role can be established while the identity is not; Trial #1 proves it. It must
+  not manufacture a person. `Other...` remains for everyone else and never creates a participant
+  implicitly.
+- **Bare Enter does not split once editing is inline.** Too easy to trigger by reflex while typing. An
+  explicit *Split here* action only; a deliberate shortcut such as Ctrl+Enter may follow if real use
+  justifies it. Bare Enter must not create a structural transcript operation.
+- **Low-confidence workload stays visible but compact** - a count such as *"385 low-confidence words"*
+  beside REVIEW. Per-word and per-paragraph confidence belongs under Details.
 
 ## Sequencing risk
 
