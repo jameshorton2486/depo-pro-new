@@ -1,6 +1,7 @@
 import { counselSidePhrase } from "../../app/manual-intake.mjs";
 import { UFM_FREELANCE_LAYOUT_PROFILE } from "./layout-profile.mjs";
 import { selectInsertionVariant } from "./variants.mjs";
+import { currentCanonicalOpeningFacts } from "../canonical-opening-events.mjs";
 
 export function canonicalValue(value) {
   return value && typeof value === "object" && "value" in value ? value.value : value;
@@ -164,6 +165,7 @@ function recordedTimeUsed(record) {
 }
 
 export function assembleInsertionInput({ record, intake = {}, operator = {}, pagination = {}, template = null, layoutProfile = UFM_FREELANCE_LAYOUT_PROFILE }) {
+  const openingFacts = currentCanonicalOpeningFacts(record);
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
   const variant = selectInsertionVariant({ jurisdiction, signatureDisposition });
@@ -216,7 +218,8 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     //
     // null is MISSING -- nobody has attested -- and is distinct from false, which is an attestation
     // that the witness did not swear. Only false refuses. See docs/opening-procedures/.
-    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), videotaped: canonicalValue(record.deposition?.videotaped), witnessSworn: canonicalValue(record.deposition?.witnessSworn) },
+    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), videotaped: canonicalValue(record.deposition?.videotaped), witnessSworn: canonicalValue(record.deposition?.witnessSworn), oathAdministration: openingFacts.oathAdministration },
+    openingRecord: openingFacts,
     reporter,
     appearances: counsel,
     counselReconciliation: {

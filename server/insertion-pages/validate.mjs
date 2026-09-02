@@ -92,8 +92,17 @@ const isBlank = (value) => value == null || value === "" || (Array.isArray(value
 //
 // See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
 function validateOathBasis(input, findings) {
+  const administration = input.deposition?.oathAdministration;
   const sworn = input.deposition?.witnessSworn;
-  if (sworn === true) return;
+  if (administration?.selection === "AFFIRMATION") {
+    findings.push(blocking("CERT_AFFIRMATION_TEMPLATE_UNAVAILABLE", "deposition.oathAdministration.selection", "The canonical record establishes that the witness affirmed. The reviewed Texas certificate says the witness was duly sworn, so that certificate cannot be generated until an approved affirmation variant is supplied."));
+    return;
+  }
+  if (administration?.selection === "OATH" && sworn === true) return;
+  if (sworn === true && !administration) {
+    findings.push(blocking("CERT_STRUCTURED_OATH_MISSING", "deposition.oathAdministration", "The legacy sworn flag is true, but no attributable canonical oath-administration record supplies the form, exact wording, response, officer, time, and source. Record the administration in Opening before generating the certificate."));
+    return;
+  }
   if (sworn === false) {
     findings.push(blocking(
       "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",

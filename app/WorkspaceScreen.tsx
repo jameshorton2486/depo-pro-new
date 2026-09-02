@@ -102,7 +102,14 @@ type RangeProposal = { wordId:string; endWordId:string; speakerIdentity:string; 
 type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; ranges:{ accepted:RangeProposal[] }|null; errors:string[] };
 export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
-const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
+// Tool-language only. This never reaches the transcript renderer or its stored labels: it gives
+// the reporter the familiar deposition designation while they decide who spoke.
+const ROLE_FOR = (role:string) => ({
+  COURT_REPORTER:"THE REPORTER",
+  VIDEOGRAPHER:"THE VIDEOGRAPHER",
+  INTERPRETER:"THE INTERPRETER",
+  WITNESS:"THE WITNESS (A. during Q&A)",
+}[role.toUpperCase()] ?? role.replaceAll("_"," ").toLowerCase());
 function clock(seconds:number|null){ if(seconds===null||!Number.isFinite(seconds))return "--:--"; const total=Math.floor(seconds); return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`; }
 
 export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{ deposition:WorkspaceDeposition; audioIndex?:number; onBack:()=>void }) {
@@ -335,6 +342,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // it was true of a certified transcript and of a bare testimony body alike, which is exactly
   // what made it useless to the person deciding whether to send the file.
   async function generateDocx(){setBusy(true);setError("");try{const endpoint=documentState?.state===DOCUMENT_STATUS.READY?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(generationNotice({producedKind:result.documentKind,outputPath:result.outputPath}))}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
+  async function generatePdf(){setBusy(true);setError("");try{const response=await fetch(`${API}/api/transcript/complete-document-pdf`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The PDF could not be generated.");const download=await fetch(`${API}${result.downloadUrl}`);if(!download.ok)throw new Error("The PDF was generated but could not be downloaded.");const objectUrl=URL.createObjectURL(await download.blob()),link=document.createElement("a");link.href=objectUrl;link.download="complete-transcript.pdf";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(objectUrl);setNotice(`Searchable complete transcript PDF generated: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The PDF could not be generated.")}finally{setBusy(false)}}
   // Every overlay mutation is built in one place, where a missing review-state hash throws instead
   // of producing a request the server is certain to refuse. This helper used to send no hash at all,
   // so six reporter actions -- label and speaker correction, split-with-speaker, marking for another
@@ -743,6 +751,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             reason both controls are inert without a model: there is no observed state to act on. */}
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
+        <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate complete transcript PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
@@ -886,10 +895,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
-          :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
+        <div className="workspace-stage">
+          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
+            :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
+
+          <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
+            <strong>Quick tools</strong>
+            <span>{active ? "Selected paragraph" : "Select a word"}</span>
+            <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
+            <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
+            <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
+            <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
+            <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
+            <button type="button" title="Mark selection for review" aria-label="Mark selection for review" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>⚑<small>Review</small></button>
+            <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
+            <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
+            <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>
+          </aside>
+        </div>
 
         <button type="button" className="workspace-tools-toggle" onClick={()=>setToolsCollapsed(value=>!value)} aria-expanded={!toolsCollapsed}>{toolsCollapsed?"Open transcript tools":"Collapse transcript tools"}</button>
         {/* THE CORRECTION COCKPIT.

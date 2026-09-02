@@ -9,5 +9,21 @@ test("preparation panels cannot collapse the transcript tools out of view", () =
   assert.doesNotMatch(css, /\.workspace\s*\{[^}]*(?:^|[;{])\s*height:\s*100vh/m);
   assert.match(css, /\.workspace-body\s*\{[^}]*height:\s*calc\(100vh\s*-\s*24px\)[^}]*min-height:\s*640px/);
   assert.match(css, /@media \(max-width:900px\)[\s\S]*?\.workspace-menu\s*\{[^}]*order:\s*2[^}]*max-height:\s*min\(70vh,640px\)/);
-  assert.match(css, /\.workspace-document,\.workspace-transcript\s*\{\s*order:\s*3/);
+  assert.match(css, /\.workspace-stage\s*\{\s*order:\s*3/);
+});
+
+test("quick transcript actions remain outside the scrolling 25-line document", () => {
+  const source = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
+  assert.match(source, /<aside className="workspace-quick-tools" aria-label="Quick transcript actions">/);
+  assert.match(css, /\.workspace-stage\s*\{[^}]*display:flex/);
+  assert.match(css, /\.workspace-quick-tools\s*\{[^}]*position:sticky[^}]*top:14px/);
+  assert.match(css, /@media \(max-width:900px\)[\s\S]*?\.workspace-quick-tools\s*\{[^}]*position:absolute[^}]*bottom:14px/);
+});
+
+test("role names in tools are explicit without changing transcript rendering", () => {
+  const source = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
+  assert.match(source, /COURT_REPORTER:"THE REPORTER"/);
+  assert.match(source, /VIDEOGRAPHER:"THE VIDEOGRAPHER"/);
+  assert.match(source, /INTERPRETER:"THE INTERPRETER"/);
+  assert.match(source, /WITNESS:"THE WITNESS \(A\. during Q&A\)"/);
 });

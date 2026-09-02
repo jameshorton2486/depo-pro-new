@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { assembleInsertionInput, captionParties } from "../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-pages.mjs";
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
@@ -13,6 +14,7 @@ import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 const attested = (input) => {
   const rec = createCanonicalDepositionRecord(input);
   rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
   return rec;
 };
 
@@ -147,6 +149,13 @@ test("party names print in capitals though the record keeps the reporter's spell
     [{ name:"Delia DeLaGarza", role:"Plaintiff" }, { name:"Delta Company", role:"Defendant" }]);
   assert.equal(captionParties(input.record).plaintiffs[0], "Delia DeLaGarza", "the record was flattened to capitals");
   assert.ok(textOf(pages).includes("FOR THE PLAINTIFF: DELIA DELAGARZA"));
+});
+
+test("the reporter credential cannot be populated from the cause number", async () => {
+  const { input } = await generated([{ ...PAT, side:"PLAINTIFF" }]);
+  assert.equal(input.fieldValues["caption.causeNumber"],"2026-CI-10001");
+  assert.equal(input.fieldValues["reporter.csrNumber"],"1234");
+  assert.notEqual(input.fieldValues["reporter.csrNumber"],input.fieldValues["caption.causeNumber"]);
 });
 
 test("the caption and the appearance page join the same parties differently, deliberately", async () => {

@@ -43,7 +43,11 @@ type Deposition = {
   creationMode?: DepositionCreationMode;
   workflowStatus?: "scheduled" | "recording" | "recorded" | "transcribing" | "review" | "complete";
   createdAt: string;
+  updatedAt?: string;
 };
+
+type LibrarySort = "date" | "cause" | "case" | "witness";
+type SortDirection = "asc" | "desc";
 
 type CourtReporter = {
   id: string; name: string; company: string; email: string; phone: string;
@@ -113,6 +117,9 @@ export default function Home() {
   const [reporters, setReporters] = useState<CourtReporter[]>([]);
   const [query, setQuery] = useState("");
   const [caseId, setCaseId] = useState("");
+  const [librarySort,setLibrarySort]=useState<LibrarySort>("date");
+  const [sortDirection,setSortDirection]=useState<SortDirection>("desc");
+  const [showFilters,setShowFilters]=useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -169,11 +176,25 @@ export default function Home() {
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return depositions;
-    return depositions.filter((item) =>
+    const matches = term ? depositions.filter((item) =>
       [item.caseStyle, item.witness, item.id].some((value) => value.toLowerCase().includes(term)),
-    );
-  }, [depositions, query]);
+    ) : [...depositions];
+    const text=(item:Deposition)=>librarySort==="cause"?item.causeNumber:librarySort==="case"?item.caseStyle:librarySort==="witness"?item.witness:item.depositionDate;
+    return matches.sort((a,b)=>{
+      const compared=text(a).localeCompare(text(b),undefined,{numeric:true,sensitivity:"base"});
+      return sortDirection==="asc"?compared:-compared;
+    });
+  }, [depositions, query, librarySort, sortDirection]);
+
+  function selectLibrarySort(value:LibrarySort){
+    if(value===librarySort)setSortDirection(current=>current==="asc"?"desc":"asc");
+    else{setLibrarySort(value);setSortDirection(value==="date"?"desc":"asc")}
+  }
+  function libraryStatus(item:Deposition){
+    if(item.workflowStatus==="complete")return{label:"Ready",tone:"ready"};
+    if(item.workflowStatus==="scheduled")return{label:"Draft",tone:"draft"};
+    return{label:"In progress",tone:"progress"};
+  }
 
   async function createDeposition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -309,7 +330,7 @@ export default function Home() {
     return frame(<IntakeScreen onCancel={() => { setShowIntake(false); setActive(null); }} onRecordUnattached={() => { setShowIntake(false); setActive(null); setShowLiveCapture(true); }} onContinue={(draft) => { setIntakeDraft(draft); setShowIntake(false); setShowModal(true); }} />);
   }
   if (active) {
-    if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(true)}} />);
+    if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(active.creationMode==="live")}} />);
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
     if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} />);
@@ -346,23 +367,33 @@ export default function Home() {
       </section>
 
       <section className="library-section">
-        <div className="section-heading"><div><span className="eyebrow">YOUR WORK</span><h2>Recent depositions</h2></div><span className="count">{filtered.length} {filtered.length === 1 ? "deposition" : "depositions"}</span></div>
+        <div className="section-heading">
+          <div><span className="eyebrow">YOUR WORK</span><h2>Recent depositions</h2></div>
+          <div className="library-tools">
+            <span className="count">{filtered.length} {filtered.length===1?"deposition":"depositions"}</span>
+            <label className="sort-control"><span>Sort by</span><select value={librarySort} onChange={event=>selectLibrarySort(event.target.value as LibrarySort)} aria-label="Sort depositions"><option value="date">Deposition date</option><option value="cause">Cause number</option><option value="case">Case style</option><option value="witness">Witness</option></select></label>
+            <button type="button" className="sort-direction" onClick={()=>setSortDirection(current=>current==="asc"?"desc":"asc")} aria-label={`Sort ${sortDirection==="asc"?"descending":"ascending"}`} title={`Currently ${sortDirection==="asc"?"ascending":"descending"}`}>{sortDirection==="asc"?"↑":"↓"}</button>
+            <button type="button" className={`filter-toggle${showFilters?" active":""}`} aria-expanded={showFilters} onClick={()=>setShowFilters(current=>!current)}>Filters</button>
+          </div>
+        </div>
+        {showFilters&&<div className="library-filter-panel"><span>Showing <strong>{filtered.length}</strong> of {depositions.length} {depositions.length===1?"deposition":"depositions"}{query.trim()?` matching “${query.trim()}”`:""}.</span>{query.trim()&&<button type="button" onClick={()=>setQuery("")}>Clear search</button>}</div>}
         {filtered.length ? (
           <div className="card-grid">
-            {filtered.map((item) => (
-              <button className="deposition-card" key={item.id} onClick={() => setActive(item)}>
-                <div className="card-top"><span className="case-label">CASE</span><span className="workspace-pill">Workspace →</span></div>
+            {filtered.map((item) => {
+              const status=libraryStatus(item);
+              return <button className="deposition-card" key={item.id} onClick={() => setActive(item)} aria-label={`Open ${item.caseStyle} workspace`}>
+                <div className="card-top"><span className={`library-status ${status.tone}`}>{status.label}</span><span className="workspace-pill">Workspace →</span></div>
                 <h3>{item.caseStyle}</h3>
                 <code>{item.id}</code>
                 <div className="divider" />
-                <dl><div><dt>Witness</dt><dd>{item.witness}</dd></div><div><dt>Date</dt><dd>{formatDate(item.depositionDate)}</dd></div></dl>
+                <dl><div><dt>Witness</dt><dd>{item.witness}</dd></div><div><dt>Date</dt><dd>{formatDate(item.depositionDate)}</dd></div><div><dt>Cause number</dt><dd>{item.causeNumber}</dd></div></dl>
                 <div className="reporter-line"><span>Court Reporter</span><strong>{item.courtReporterName || "Not assigned"}</strong></div>
-                <div className="card-footer"><span>▤ Transcript</span><span>Updated {formatDate(item.createdAt)}</span></div>
+                <div className="card-footer"><span>{item.creationMode==="live"?"● Live deposition":"▤ Existing recording"}</span><span>Updated {formatDate(item.updatedAt||item.createdAt)}</span></div>
               </button>
-            ))}
+            })}
           </div>
         ) : (
-          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{!query && <button className="secondary-button" onClick={startNewDeposition}>New Deposition</button>}</div>
+          <div className="empty-state"><div className="empty-icon">＋</div><h3>{query ? "No matching depositions" : "No depositions yet"}</h3><p>{query ? "Try a different case name, witness, or ID." : "Create your first deposition to begin organizing your case work."}</p>{query?<button className="secondary-button" onClick={()=>setQuery("")}>Clear search</button>:<button className="secondary-button" onClick={startNewDeposition}>New Deposition</button>}</div>
         )}
       </section>
 

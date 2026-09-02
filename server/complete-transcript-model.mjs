@@ -213,6 +213,9 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   ];
   const unsigned={schemaVersion:COMPLETE_TRANSCRIPT_MODEL_VERSION,recordType:"COMPLETE_TRANSCRIPT_DOCUMENT_MODEL",deposition:printModel.deposition,layoutProfile:printModel.layoutProfile,
     source:{testimonyModelHash:printModel.modelHash,reviewStateHash:printModel.source.reviewStateHash,insertionPageSetHash:insertion.sha256,canonicalRecordVersion:record.schemaVersion},
+    // Verified administrative events travel with the final model as provenance. They do not
+    // synthesize or rewrite testimony; transcript colloquy remains the audio-backed body.
+    verifiedAdministrativeEvents:input.openingRecord,
     variant,signatureDisposition,pagination,sections,paragraphs:printModel.paragraphs,pages,findings:{transcript:printModel.findings,assembly:findings,horizontalOverflow}};
   return {...unsigned,modelHash:hash(unsigned)};
 }

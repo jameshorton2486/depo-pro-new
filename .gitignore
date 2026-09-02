@@ -15,6 +15,8 @@
 /.verify-*/
 /.milestone2-data/
 /.milestone2-corrected-data/
+/.browser-verification/
+/tmp/
 
 # next.js
 /.next/

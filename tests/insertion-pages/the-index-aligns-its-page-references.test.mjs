@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "../canonical-oath-fixture.mjs";
 import { assembleInsertionInput } from "../../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../../server/insertion-pages/build-pages.mjs";
 import { loadTemplateVariant } from "../../server/insertion-pages/templates.mjs";
@@ -34,6 +35,7 @@ function record() {
     reporterProfile:{ name:"Riley Reporter", licenseNumber:"1234", csrExpiration:"2027-12-31", company:"Reporter Firm", firmRegistrationNumber:"5678", address:"300 Main, San Antonio, Texas", phone:"210-555-0103" },
   });
   built.deposition.witnessSworn = { value:true, source:"REPORTER_ENTERED", state:"REPORTER_ADDED", confidence:null, citations:[] };
+  addCanonicalOath(built);
   built.deposition.remote = { value:true, source:"REPORTER_ENTERED", state:"REPORTER_ADDED", confidence:null, citations:[] };
   built.deposition.remotePlatform = { value:"Zoom", source:"REPORTER_ENTERED", state:"REPORTER_ADDED", confidence:null, citations:[] };
   return built;

@@ -41,5 +41,5 @@ test("the rule covers both fields that reach the reporter as review flags", () =
 
   const api = fs.readFileSync(path.join(root, "server", "local-api.mjs"), "utf8");
   assert.match(api, /Review flag: \$\{item\.detail/, "anomalies still render as review flags");
-  assert.match(api, /warnings:\[\.\.\.\(data\.setup\.warnings\|\|\[\]\)/, "and so do setup warnings");
+  assert.match(api, /warnings:\s*\[\s*\.\.\.\(data\.setup\.warnings\s*\|\|\s*\[\]\)/, "and so do setup warnings");
 });

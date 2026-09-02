@@ -7,6 +7,7 @@ import { appendReporterOperations, getWorkingTranscript, readReporterOverlay } f
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 import { ASSEMBLY_SCHEMA_VERSION, writeAssembly } from "../server/complete-transcript-assembly.mjs";
 import { EVIDENCE, WORKING } from "../tests/fixtures/etminan-evidence.mjs";
+import { addCanonicalOath } from "../tests/canonical-oath-fixture.mjs";
 
 const root=path.resolve(process.argv[2]??"");if(!root)throw new Error("Provide an isolated deposition storage root.");
 const directory=path.join(root,"milestone2_reporter","m2-cause","synthetic_complete_transcript"),id="DEP-20260826-M2FIX";
@@ -26,6 +27,7 @@ const record=createCanonicalDepositionRecord({jurisdictionType:"texas-state",cou
 // could carry all the way to a certificate, so it attests the oath as a reporter would --
 // through the same envelope, marked REPORTER_ADDED, never as a creation input.
 record.deposition.witnessSworn={value:true,source:"REPORTER_ENTERED",state:"REPORTER_ADDED",confidence:null,citations:[]};
+addCanonicalOath(record);
 record.counsel[0].honorific=field("MS.",{source:"REPORTER_ENTERED",state:"REPORTER_ADDED"});record.counsel[1].honorific=field("MR.",{source:"REPORTER_ENTERED",state:"REPORTER_ADDED"});
 record.participants.videographers=[{id:"videographer",fullName:field("Synthetic Videographer",{source:"REPORTER_ENTERED",state:"REPORTER_ADDED"})}];
 const operator={jurisdiction:"texas-state",signatureDisposition:"requested",signatureDispositionBasis:"Stated on the synthetic record",examiningCounselId:"counsel-bentley",courtHeadingLine:"IN THE DISTRICT COURT OF",countyCourtLine:"BEXAR COUNTY, TEXAS",judicialDistrictLine:"45TH JUDICIAL DISTRICT",proceedingHeading:"ORAL DEPOSITION OF",titleNarrative:["Dr. Synthetic Witness, produced as a witness and duly sworn,","was taken in San Antonio, Texas before Riley Reporter,","Certified Shorthand Reporter in and for Texas."],certification:{custodialAttorney:"Dennis J. Bentley",charges:"500.00",chargesResponsibleParty:"Plaintiff",submissionDate:"2026-08-26",returnDeadline:"2026-08-29",serviceDate:"2026-08-30",certificationDate:"2026-08-26",furtherCertificationDate:"2026-08-30",returnStatus:"2026-08-29"},timeUsed:{totalOnRecordMinutes:96,parties:[{name:"Dennis J. Bentley",minutes:48},{name:"Christian R. Ramon",minutes:48}]}};

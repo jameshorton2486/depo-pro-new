@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { buildCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../server/texas-freelance-deposition-profile.mjs";
 
@@ -11,6 +12,7 @@ import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../server/texas-freelance-deposit
 const attested = (input) => {
   const rec = createCanonicalDepositionRecord(input);
   rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
   return rec;
 };
 

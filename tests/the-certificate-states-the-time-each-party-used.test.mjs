@@ -21,6 +21,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { readDepositionAttorneyTime, writeDepositionAttorneyTime } from "../server/deposition-store.mjs";
 import { assembleInsertionInput } from "../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-pages.mjs";
@@ -34,6 +35,7 @@ import { TIME_USED_CERTIFIED, validateInsertionInput } from "../server/insertion
 const attested = (input) => {
   const rec = createCanonicalDepositionRecord(input);
   rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
   return rec;
 };
 

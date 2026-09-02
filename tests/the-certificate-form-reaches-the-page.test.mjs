@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { writeDepositionAttorneyTime, writeDepositionCertificateWorkflow, writeDepositionCertification } from "../server/deposition-store.mjs";
 import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/word-service.mjs";
 
@@ -14,6 +15,7 @@ import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/wor
 const attested = (input) => {
   const rec = createCanonicalDepositionRecord(input);
   rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
   return rec;
 };
 

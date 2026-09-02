@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { buildCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 import { renderTranscript } from "../server/transcript-render.mjs";
 import { buildTranscriptPrintModel } from "../server/transcript-print-model.mjs";
@@ -31,6 +32,7 @@ function canonicalRecord() {
     reporterProfile:{ name:"Sarah Jenkins", licenseNumber:"1234", csrExpiration:"2029-12-31", company:"Jenkins Reporting", firmRegistrationNumber:"5678", address:"300 Main, San Antonio, Texas", phone:"210-555-0103" },
   });
   record.deposition.witnessSworn = { value:true, source:"REPORTER_ENTERED", state:"REPORTER_ADDED", confidence:null, citations:[] };
+  addCanonicalOath(record);
   for (const [index, id] of ["counsel-alvarez", "counsel-whitfield", "counsel-ramirez"].entries()) record.counsel[index].id = id;
   return record;
 }

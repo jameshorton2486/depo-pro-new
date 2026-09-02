@@ -22,6 +22,7 @@ import path from "node:path";
 import test from "node:test";
 import { applyOverlay, emptyOverlay } from "../server/reporter-overlay.mjs";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { buildCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 import { createTranscriptDocxArtifact } from "../server/final-document-docx.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
@@ -37,6 +38,7 @@ import { EVIDENCE, SCALE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/long-de
 const attested = (input) => {
   const rec = createCanonicalDepositionRecord(input);
   rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
   return rec;
 };
 
