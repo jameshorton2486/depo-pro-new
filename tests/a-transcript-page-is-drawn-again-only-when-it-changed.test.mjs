@@ -129,7 +129,9 @@ test("an unstable handler draws the page rather than hiding the caller's defect"
   // container regresses, the screen goes slow again -- it does not go wrong. A comparator that
   // ignored handler identity would keep pages holding a stale closure over activeEdit, and the
   // editor would save the wrong paragraph text.
-  for (const key of ["onActivate", "onChange", "onSave", "onCancel", "onSplit", "onJoinPrevious", "onJoinNext", "onPlayAt"]) {
+  // onSplit left this list when bare Enter stopped splitting: the page component no longer splits
+  // at all, and Split here in the tools panel anchors to the selected word instead of a caret.
+  for (const key of ["onActivate", "onChange", "onSave", "onCancel", "onJoinPrevious", "onJoinNext", "onPlayAt"]) {
     assert.equal(pageRenderEqual(props(), props({ [key]:() => {} })), false, key);
   }
 });

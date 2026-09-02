@@ -92,7 +92,7 @@ export function pageRenderEqual(previous, next) {
 
   // The handlers must be stable references. If they are not, the caller has a defect this comparator
   // would hide, so it is checked rather than assumed.
-  for (const key of ["onActivate", "onChange", "onSave", "onCancel", "onSplit", "onJoinPrevious", "onJoinNext", "onPlayAt"]) {
+  for (const key of ["onActivate", "onChange", "onSave", "onCancel", "onJoinPrevious", "onJoinNext", "onPlayAt"]) {
     if (previous[key] !== next[key]) return false;
   }
 
