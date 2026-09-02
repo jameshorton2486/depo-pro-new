@@ -33,7 +33,15 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
         it. Before this it was a fixed 108px box with a drop shadow -- anchored to the line, but
         covering four or five lines of the surrounding record while the reporter typed, which is
         the one thing a reporter correcting a deposition cannot afford to lose sight of. */}
-    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey,lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
+    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,
+      // An editor whose paragraph is no longer the selected one is not shown. A speaker correction
+      // clears the selection deliberately -- the paragraph is dealt with -- and the editor used to
+      // stay open on it, so the page showed an active-looking paragraph beside a panel that had
+      // nothing selected. That is the same contradiction the reporter reported from the other end.
+      //
+      // A DIRTY draft is kept visible whatever the selection does. Hiding unsaved typing to tidy up
+      // a contradiction would be a worse bug than the contradiction.
+      editing=activeEdit?.lineKey===lineKey&&(activeEdit.paragraphId===selectedParagraphId||activeEdit.draft!==activeEdit.baseText),lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {lineAudioStart!==null&&lineAudioStart!==undefined&&<button type="button" className="workspace-line-time" aria-label={`Save the open paragraph and play audio from ${audioClock(lineAudioStart)}`} onClick={()=>onPlayAt(lineAudioStart)}>▶ {audioClock(lineAudioStart)}</button>}
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
