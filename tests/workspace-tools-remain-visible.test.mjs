@@ -18,7 +18,7 @@ test("quick transcript actions remain outside the scrolling 25-line document", (
   assert.match(source, /workspace-quick-tools-grid/);
   assert.match(css, /\.workspace-stage\s*\{[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden/);
   assert.match(css, /\.workspace-quick-tools\s*\{[^}]*order:-1[^}]*position:sticky[^}]*top:0/);
-  assert.match(css, /\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(5,[^}]*grid-template-rows:repeat\(2,52px\)/);
+  assert.match(css, /\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(6,[^}]*grid-template-rows:repeat\(2,56px\)/);
   assert.match(css, /@media\(max-width:700px\)[\s\S]*?\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(3/);
 });
 
