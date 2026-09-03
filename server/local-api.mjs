@@ -44,6 +44,7 @@ import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
 import { createTranscriptPdfArtifact } from "./final-document-pdf.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
+import { getFinalizationReadiness } from "./finalization-readiness.mjs";
 import {
   assignCaptureSession,
   captureRecordingParts,
@@ -1803,6 +1804,24 @@ const server = http.createServer(async (req, res) => {
           depositionId,
           storageRoot: depositionStorageRoot,
           examinerIdentity: url.searchParams.get("examinerIdentity") || null,
+        }),
+        origin,
+      );
+    }
+    if (
+      req.url?.startsWith("/api/finalization/readiness?") &&
+      req.method === "GET"
+    ) {
+      const depositionId = new URL(
+        req.url,
+        "http://localhost",
+      ).searchParams.get("depositionId");
+      return json(
+        res,
+        200,
+        await getFinalizationReadiness(root, {
+          depositionId,
+          storageRoot: depositionStorageRoot,
         }),
         origin,
       );
