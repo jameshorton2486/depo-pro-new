@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { filingIdentifier, formatFederalCaseNumber, reconcileFilingIdentifier } from "../server/filing-identifier.mjs";
+import { filingIdentifier, reconcileFilingIdentifier } from "../server/filing-identifier.mjs";
 import { certificationRoute } from "../server/insertion-pages/certification-route.mjs";
 import { currentCanonicalOpeningFacts } from "../server/canonical-opening-events.mjs";
 import { recordReviewElection, currentReviewElection } from "../server/canonical-review-election.mjs";
@@ -18,11 +18,18 @@ test("one canonical filing identifier receives a jurisdiction-specific label", (
   assert.throws(()=>reconcileFilingIdentifier({causeNumber:"A",caseNumber:"B"}),/CONFLICTING_FILING_IDENTIFIERS/);
 });
 
-test("complete federal case numbers receive the five-part court display format without changing Texas cause numbers", () => {
-  assert.equal(formatFederalCaseNumber("3:08-cv-1-n"), "3:08-CV-0001-N");
-  assert.equal(formatFederalCaseNumber("3:08-cv-1"), "3:08-cv-1", "a missing judge designation is not invented");
-  const texas={case:{causeNumber:{value:"2025CI06119"},jurisdictionType:{value:"texas-state"}}};
-  assert.equal(filingIdentifier(texas).value, "2025CI06119");
+test("jurisdiction changes the label but never rewrites a source-established filing identifier", () => {
+  const fixtures = [
+    ["texas-state", "2025CI06119", "Cause Number"],
+    ["texas-state", "2020-CI-12345", "Cause Number"],
+    ["federal", "3:08-CV-0001-N", "Civil Action No."],
+    ["federal", "3:08-cv-1-n", "Civil Action No."],
+  ];
+  for (const [jurisdiction, source, displayLabel] of fixtures) {
+    const projection = filingIdentifier({case:{causeNumber:{value:source},jurisdictionType:{value:jurisdiction}}});
+    assert.equal(projection.value, source);
+    assert.equal(projection.displayLabel, displayLabel);
+  }
 });
 
 test("certification routing preserves oath form and selects approved component combinations", () => {
