@@ -171,7 +171,7 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       // the unfiltered list put it back: the screen looked right because it renders words[],
       // while every consumer of paragraph.text -- an exporter, correction-pass chunking, a
       // certified page -- got the struck word again.
-      start, end, text:joinStyled(styled.filter(word => !word.deleted)) || paragraph.text || "", words:styled,
+      start, end, text:resolved.length ? joinStyled(styled.filter(word => !word.deleted)) : paragraph.text || "", words:styled,
       segmentIds:paragraph.segmentIds ?? [], asrWordIds:paragraph.asrWordIds ?? [],
     };
   });

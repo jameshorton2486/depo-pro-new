@@ -8,7 +8,7 @@ import CounselEditor from "./CounselEditor";
 import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
 import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
 import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
-import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
+import { currentSpeakerDescription, deleteSelectedParagraphOperations, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
 
 // One empty set, so "no low-confidence marks" is the same reference on every render.
 const EMPTY_WORD_IDS: Set<string> = new Set();
@@ -628,6 +628,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return { first:Math.min(from,to), last:Math.max(from,to) };
   },[selected,wordOrder]);
   const rangeWords = range ? range.last-range.first+1 : 0;
+  const paragraphDeleteOperations = useMemo(()=>deleteSelectedParagraphOperations({ paragraphs:rendered?.paragraphs??[], selectedParagraphId:selected?.paragraphId??null, wordIndexes:wordOrder, range }),[rendered,selected,wordOrder,range]);
+  const paragraphDeleteCount = useMemo(()=>new Set(paragraphDeleteOperations.map(operation=>{
+    for(const paragraph of rendered?.paragraphs??[]) if(paragraph.words.some(word=>word.id===operation.wordId)) return paragraph.id;
+    return null;
+  }).filter(Boolean)).size,[paragraphDeleteOperations,rendered]);
+  function deleteSelectedParagraphs(){
+    if(!paragraphDeleteOperations.length)return;
+    const label=paragraphDeleteCount===1?"this paragraph":`these ${paragraphDeleteCount} paragraphs`;
+    if(!window.confirm(`Delete ${label} from the transcript? The original audio, source words, and timestamps remain preserved. One Undo restores the entire action.`))return;
+    setSelected(null);void append(paragraphDeleteOperations);
+  }
 
   // Every flagged word in transcript order, and the passage each belongs to. The scopist works
   // through places rather than words, so the walker steps to the next passage, not the next word.
@@ -910,6 +921,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
             <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
             <button type="button" title="Mark selection for review" aria-label="Mark selection for review" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>⚑<small>Review</small></button>
+            <button type="button" title={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} aria-label={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} disabled={!paragraphDeleteOperations.length||busy||awaitingRecord} onClick={deleteSelectedParagraphs}>⌫<small>Delete</small></button>
             <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
             <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
             <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>

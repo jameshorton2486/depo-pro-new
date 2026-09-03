@@ -300,6 +300,21 @@ export function strikeParagraphOperations({ paragraph } = {}) {
 }
 
 /**
+ * Deletes complete selected paragraphs as one reversible overlay transaction.
+ * Selection may span only part of the first or last paragraph; the explicit paragraph action
+ * removes every paragraph touched by that range. Source words and their absolute audio timestamps
+ * remain immutable evidence and are never renumbered or rebased.
+ *
+ * @param {{ paragraphs?:Paragraph[], selectedParagraphId?:string|null, wordIndexes?:Map<string,number>, range?:{first:number,last:number}|null }} [input]
+ */
+export function deleteSelectedParagraphOperations({ paragraphs = [], selectedParagraphId = null, wordIndexes = new Map(), range = null } = {}) {
+  const selected = range
+    ? paragraphs.filter(paragraph => (paragraph.words ?? []).some(word => { const index = wordIndexes.get(word.id); return index !== undefined && index >= range.first && index <= range.last; }))
+    : paragraphs.filter(paragraph => paragraph.id === selectedParagraphId);
+  return selected.flatMap(paragraph => strikeParagraphOperations({ paragraph }));
+}
+
+/**
  * The review worklist: where the outstanding work is, category by category.
  *
  * COUNTS ARE OUTSTANDING ITEMS, not findings ever produced. A category whose work is done reads

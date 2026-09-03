@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { currentSpeakerDescription, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
+import { currentSpeakerDescription, deleteSelectedParagraphOperations, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, paragraphLocation, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "../app/transcript-tools.mjs";
 
 const CANDIDATES = [
   { id: "reporter", label: "Miah Bardot", defaultRole: "COURT_REPORTER" },
@@ -271,6 +271,23 @@ test("striking is offered last, marked destructive, and withdrawn once there is 
   const spent = structureActions({ paragraph: { words: [{ id: "w1", deleted: true }] }, index: 1, total: 5 }).at(-1);
   assert.equal(spent.available, false);
   assert.match(spent.unavailable, /already struck/);
+});
+
+test("a cross-paragraph selection deletes every touched paragraph without rebasing timestamps", () => {
+  const paragraphs = [
+    { id:"p1", start:34, end:52, words:[{id:"w1",start:34,end:35},{id:"w2",start:51,end:52}] },
+    { id:"p2", start:64, end:68, words:[{id:"w3",start:64,end:65},{id:"w4",start:67,end:68}] },
+    { id:"p3", start:230, end:236, words:[{id:"w5",start:230,end:231},{id:"w6",start:235,end:236}] },
+  ];
+  const indexes = new Map(paragraphs.flatMap(paragraph=>paragraph.words).map((word,index)=>[word.id,index]));
+  const operations = deleteSelectedParagraphOperations({ paragraphs, wordIndexes:indexes, range:{first:1,last:2} });
+  assert.deepEqual(operations,[{op:"delete",wordId:"w1"},{op:"delete",wordId:"w2"},{op:"delete",wordId:"w3"},{op:"delete",wordId:"w4"}]);
+  assert.equal(paragraphs[2].start,230,"the retained paragraph keeps its original 3:50 audio position");
+  assert.equal(operations.some(operation=>Object.hasOwn(operation,"start")||Object.hasOwn(operation,"end")),false);
+});
+
+test("a point selection deletes only its complete paragraph", () => {
+  assert.deepEqual(deleteSelectedParagraphOperations({ paragraphs:[{id:"p1",words:[{id:"w1",deleted:true},{id:"w2"}]},{id:"p2",words:[{id:"w3"}]}], selectedParagraphId:"p1" }),[{op:"delete",wordId:"w2"}]);
 });
 
 // --- the worklist -------------------------------------------------------------------------------

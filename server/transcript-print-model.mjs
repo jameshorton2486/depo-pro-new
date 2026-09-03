@@ -90,7 +90,7 @@ function withPreviewLabels(paragraphs) {
     return {...paragraph,label:key?fallbackLabels.get(key):"SPEAKER UNKNOWN:",previewLabel:true};
   });
 }
-function previewParagraphs(rendered){return renderedProjection({...rendered,paragraphs:withPreviewLabels(rendered?.paragraphs??[])}).paragraphs}
+function previewParagraphs(rendered){return renderedProjection({...rendered,paragraphs:withPreviewLabels(rendered?.paragraphs??[]).filter(paragraph=>paragraph.text||paragraph.derived)}).paragraphs}
 
 export function buildTranscriptPrintModel({ rendered, reviewStateHash, deposition, profile=TRANSCRIPT_BODY_LAYOUT_PROFILE }={}) {
   if (!rendered?.paragraphs) throw new Error("PRINT_RENDERED_TRANSCRIPT_REQUIRED: Print Model consumes the canonical rendered transcript.");
@@ -98,7 +98,7 @@ export function buildTranscriptPrintModel({ rendered, reviewStateHash, depositio
   const printFindings=[];
   if(!isLayoutProfileVerified(profile)) printFindings.push({ code:"PRINT_LAYOUT_PROFILE_UNVERIFIED", severity:"warning", target:"layoutProfile", message:"This is a simple readable preview. Its 25-line reading pages are not verified court-transcript geometry and are not intended for certified production output." });
   const projection=renderedProjection(rendered),paragraphs=previewParagraphs(rendered),renderedProjectionHash=hash(projection);
-  const sharedDocument=buildSharedDocumentModel({rendered,paragraphs:withPreviewLabels(rendered.paragraphs),profile});
+  const sharedDocument=buildSharedDocumentModel({rendered,paragraphs:withPreviewLabels(rendered.paragraphs).filter(paragraph=>paragraph.text||paragraph.derived),profile});
   printFindings.push(...sharedDocument.findings);
   const pages=sharedDocument.pages;
   // Which paragraphs are only readable because the preview named their speaker for them. Carried as

@@ -3,6 +3,7 @@ import test from "node:test";
 import { EVIDENCE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/etminan-evidence.mjs";
 import { ELEMENT } from "../server/transcript-labels.mjs";
 import { renderTranscript } from "../server/transcript-render.mjs";
+import { buildTranscriptPrintModel } from "../server/transcript-print-model.mjs";
 import { appendOperations, appendTransaction, applyOverlay, emptyOverlay, redoLastTransaction, undoLast, undoLastTransaction, validateOperation } from "../server/reporter-overlay.mjs";
 
 const overlayOf = (...operations) => ({ ...emptyOverlay("DEP-TEST"), operations });
@@ -39,6 +40,17 @@ test("I1: delete tombstones a word, keeping its id and its original text",()=>{
   assert.ok(word,"a struck word stays in the record");
   assert.equal(word.deleted,true);
   assert.equal(word.originalText, EVIDENCE.words.find(item => item.id === MIDWORD).punctuatedWord);
+});
+
+test("deleting a complete opening paragraph removes it from print without rebasing later audio",()=>{
+  const plain=render(overlayOf()),first=plain.paragraphs.find(paragraph=>paragraph.words.some(word=>Number.isFinite(word.start))),next=plain.paragraphs.find(paragraph=>paragraph.id!==first.id&&paragraph.words.some(word=>Number.isFinite(word.start)));
+  const deleted=render(overlayOf(...first.words.map(word=>({op:"delete",wordId:word.id}))));
+  const tombstone=deleted.paragraphs.find(paragraph=>paragraph.id===first.id);
+  assert.ok(tombstone.words.every(word=>word.deleted));assert.equal(tombstone.text,"");
+  const retained=deleted.paragraphs.find(paragraph=>paragraph.id===next.id);assert.equal(retained.start,next.start);
+  const print=buildTranscriptPrintModel({rendered:deleted,reviewStateHash:"frozen-timestamp-test",deposition:{id:"DEP-TEST"}});
+  assert.equal(print.paragraphs.some(paragraph=>paragraph.id===first.id),false);
+  assert.equal(print.paragraphs.find(paragraph=>paragraph.id===next.id).start,next.start);
 });
 
 test("I1: reporter-authored text carries no Deepgram anchor",()=>{
