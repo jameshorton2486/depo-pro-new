@@ -92,6 +92,18 @@ test("digital associations record server-computed bytes, MIME type and SHA-256",
   assert.equal(readiness.findings.some(item => item.code === "EXHIBIT_FILE_MISSING"), true);
 });
 
+test("reporter-selected digital files are copied into authoritative storage and content-qualified", t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "depo-exhibit-upload-")), storageRoot = path.join(root, "depositions");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const deposition = createDeposition(root, { deposition: { id: "DEP-20260903-UPL01", caseStyle: "A v. B", witness: "Witness", courtReporterName: "Reporter", causeNumber: "2", depositionDate: "2026-09-03", jurisdiction: "texas-state" } }, { storageRoot });
+  const pdf = Buffer.from("%PDF-1.4\n1 0 obj<</Type /Page>>endobj\n%%EOF");
+  const base = { label:"Exhibit 2", description:"Uploaded document", markedAt:"2026-09-03T10:00:00Z", markedBy:"Counsel", transcriptReferences:[{sourceAnchor:"transcript:p:w"}], custody:{status:"RESOLVED",holder:"Reporter",sourceAnchor:"transcript:p:w"}, sealedHandling:{status:"NOT_APPLICABLE"}, packageDisposition:"INCLUDED", sourceAnchor:"transcript:p:w" };
+  const saved = recordExhibit(root, { depositionId:deposition.id, storageRoot, actor:"Reporter", input:{...base,material:{kind:"DIGITAL_FILE",fileName:"Exhibit 2.pdf",fileBase64:pdf.toString("base64")}} });
+  const stored = path.join(storageRoot, ...deposition.storagePath.split("/"), ...saved.material.file.relativePath.split("/"));
+  assert.deepEqual(fs.readFileSync(stored), pdf); assert.equal(saved.material.file.sha256, crypto.createHash("sha256").update(pdf).digest("hex"));
+  assert.throws(() => recordExhibit(root, { depositionId:deposition.id, storageRoot, actor:"Reporter", input:{...base,label:"Bad",material:{kind:"DIGITAL_FILE",fileName:"fake.pdf",fileBase64:Buffer.from("not pdf").toString("base64")}} }), /contents do not match/);
+});
+
 test("reporter exhibit audits are append-only and server-bound to transcript state", async t => {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "depo-exhibit-audit-"));
   t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));

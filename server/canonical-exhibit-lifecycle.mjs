@@ -73,6 +73,24 @@ function safeStoredFile(directory, relativePath) {
   return { relativePath: path.relative(directory, file).replaceAll("\\", "/"), sha256: sha256(bytes), bytes: bytes.length, mimeType, pageCount };
 }
 
+function uploadedFile(directory, material) {
+  const name = path.basename(requireText(material?.fileName, "Choose a PDF, PNG, or JPEG exhibit file.", 255));
+  const extension = path.extname(name).toLowerCase();
+  if (![".pdf", ".png", ".jpg", ".jpeg"].includes(extension)) throw new Error("Digital exhibit files must be PDF, PNG, or JPEG.");
+  const encodedValue = String(material?.fileBase64 ?? "").trim();
+  if (encodedValue.length > 35 * 1024 * 1024) throw new Error("Digital exhibit files must not exceed 25 MB.");
+  const encoded = requireText(encodedValue, "The selected exhibit file is empty.", 35 * 1024 * 1024);
+  let bytes;
+  try { bytes = Buffer.from(encoded, "base64"); } catch { throw new Error("The selected exhibit file could not be decoded."); }
+  if (!bytes.length || bytes.length > 25 * 1024 * 1024) throw new Error("Digital exhibit files must be between 1 byte and 25 MB.");
+  const signatureOk = extension === ".pdf" ? bytes.subarray(0,5).toString() === "%PDF-" : extension === ".png" ? bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (!signatureOk) throw new Error("The selected exhibit file contents do not match its file type.");
+  const safeName = name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120), relativePath = `exhibits/source/${crypto.randomUUID()}-${safeName}`;
+  const file = path.join(directory, ...relativePath.split("/"));
+  fs.mkdirSync(path.dirname(file), { recursive:true }); fs.writeFileSync(file, bytes, { flag:"wx" });
+  return { identity:safeStoredFile(directory, relativePath), createdFile:file };
+}
+
 export function recordExhibitAudit(root, { depositionId, storageRoot, actor, input } = {}) {
   const result = clean(input?.result, 80);
   if (!EXHIBIT_AUDIT_RESULTS.includes(result)) throw new Error("Choose whether no exhibits were marked or exhibits were present.");
@@ -106,29 +124,35 @@ export function recordExhibit(root, { depositionId, storageRoot, actor, input } 
   const sealedHandlingStatus = clean(input?.sealedHandling?.status, 80) || "UNRESOLVED";
   if (!EXHIBIT_SEALED_HANDLING_STATUSES.includes(sealedHandlingStatus)) throw new Error("Choose a recognized confidential/sealed handling status.");
   if (packageDisposition === "EXCLUDED" && !clean(input?.packageDispositionReason, 2000)) throw new Error("Explain why the exhibit is excluded from the final package.");
-  const file = materialKind === "DIGITAL_FILE" ? safeStoredFile(state.directory, input?.material?.relativePath) : null;
   const transcriptReferences = (Array.isArray(input?.transcriptReferences) ? input.transcriptReferences : []).map(reference => ({
     sourceAnchor: requireText(reference?.sourceAnchor, "Each transcript reference requires a stable source anchor.", 500),
     paragraphId: clean(reference?.paragraphId, 500) || null,
     sourceWordId: clean(reference?.sourceWordId, 500) || null,
     quotedText: clean(reference?.quotedText, 2000) || null,
   }));
+  const label = requireText(input?.label, "Record the displayed exhibit number or label.", 200);
+  const description = requireText(input?.description, "Record an exhibit description.", 2000);
+  const markedAt = requireTime(input?.markedAt, "Record when the exhibit was marked.");
+  const markedBy = requireText(input?.markedBy, "Record who marked or identified the exhibit.", 500);
+  const attribution = attributed(actor, input);
+  let createdFile = null;
+  const uploaded = materialKind === "DIGITAL_FILE" && input?.material?.fileBase64 ? uploadedFile(state.directory, input.material) : null;
+  if (uploaded) createdFile = uploaded.createdFile;
+  const file = materialKind === "DIGITAL_FILE" ? uploaded?.identity ?? safeStoredFile(state.directory, input?.material?.relativePath) : null;
   const exhibitId = prior?.exhibitId ?? crypto.randomUUID();
   const event = {
     id: crypto.randomUUID(), exhibitId, kind: "CANONICAL_EXHIBIT_RECORDED", status,
-    label: requireText(input?.label, "Record the displayed exhibit number or label.", 200),
-    description: requireText(input?.description, "Record an exhibit description.", 2000),
-    markedAt: requireTime(input?.markedAt, "Record when the exhibit was marked."),
-    markedBy: requireText(input?.markedBy, "Record who marked or identified the exhibit.", 500),
+    label, description, markedAt, markedBy,
     transcriptReferences, material: { kind: materialKind, file },
     custody: { status: custodyStatus, holder: clean(input?.custody?.holder, 500) || null, sourceAnchor: clean(input?.custody?.sourceAnchor, 500) || null },
     sealedHandling: { status: sealedHandlingStatus, instructions: clean(input?.sealedHandling?.instructions, 2000) || null, sourceAnchor: clean(input?.sealedHandling?.sourceAnchor, 500) || null },
     packageDisposition, packageDispositionReason: clean(input?.packageDispositionReason, 2000) || null,
     replacementExhibitId: status === "SUBSTITUTED" ? requireText(input?.replacementExhibitId, "Identify the replacement exhibit.", 100) : null,
-    ...attributed(actor, input), correctionReason: clean(input?.correctionReason, 1000) || null,
+    ...attribution, correctionReason: clean(input?.correctionReason, 1000) || null,
     supersedesEventId: prior?.id ?? null,
   };
-  state.exhibits.exhibitEvents.push(event); atomicJson(state.file, state.record); return event;
+  try { state.exhibits.exhibitEvents.push(event); atomicJson(state.file, state.record); return event; }
+  catch (error) { if (createdFile) fs.rmSync(createdFile, { force:true }); throw error; }
 }
 
 export function resolveExhibitLifecycle(record, { transcriptModelHash = null, reviewStateHash = null } = {}) {
@@ -175,4 +199,4 @@ export function getExhibitReadiness(root, { depositionId, storageRoot } = {}) {
   return { ...resolved, status: findings.length ? (resolved.audit ? "EXHIBITS_PRESENT_INCOMPLETE" : "UNKNOWN") : resolved.status, ready: findings.length === 0 && resolved.ready, findings, source: evidence };
 }
 
-export const _testing = { currentEffective, currentExhibits, safeStoredFile };
+export const _testing = { currentEffective, currentExhibits, safeStoredFile, uploadedFile };
