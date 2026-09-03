@@ -116,9 +116,10 @@ const SCRIPT_DEFINITIONS = Object.freeze({
   },
 });
 
-function jurisdictionScripts(canonical, state) {
+export function jurisdictionScripts(canonical, state) {
   const federal =
     envelope(canonical.case?.jurisdictionType).value === "federal";
+  const remote = envelope(canonical.deposition?.remote).value === true;
   const affirmation = state.witnessOathSelection === "AFFIRMATION";
   const authority = {
     authorityVersion: OPENING_AUTHORITY_VERSION,
@@ -142,7 +143,9 @@ function jurisdictionScripts(canonical, state) {
         "After recording begins, before appearances and the oath or affirmation.",
       template: federal
         ? "We are on the record. I am [REPORTER], and my business address is [BUSINESS ADDRESS]. Today is [DATE], and the time is [ACTUAL TIME]. This is the oral deposition of [DEPONENT] in [CASE STYLE], pending in [COURT], Civil Action Number [CAUSE NUMBER]. This deposition is being taken at [PLACE]. For the identity of all persons present, please state your full name, whom you represent or your role, and your current location, beginning with the noticing attorney."
-        : "We are on the record. Today is [DATE], and the time is [ACTUAL TIME]. This is the oral deposition of [DEPONENT] in [CASE STYLE], pending in [COURT], Cause Number [CAUSE NUMBER]. This deposition is being taken at [PLACE]. I am [REPORTER], and I am serving as the deposition officer. Counsel, beginning with the noticing attorney, please state your name, the party you represent, and your location. After counsel, each other person present should identify themselves and their role.",
+        : remote
+          ? "Yes. This is Cause Number [CAUSE NUMBER], [CASE STYLE], in [COURT], [COUNTY]. This deposition is taking place via [REMOTE PLATFORM] in accordance with the Texas Rules of Civil Procedure. Reporter license in Texas, Number [REPORTER LICENSE NUMBER]. Counsel, will you please state your agreement for this remote deposition and the remote swearing of the witness by saying your name, who you represent, and the name of the city you are currently in, beginning with the noticing attorney."
+          : "We are on the record. Today is [DATE], and the time is [ACTUAL TIME]. This is the oral deposition of [DEPONENT] in [CASE STYLE], pending in [COURT], Cause Number [CAUSE NUMBER]. This deposition is being taken at [PLACE]. I am [REPORTER], and I am serving as the deposition officer. Counsel, beginning with the noticing attorney, please state your name, the party you represent, and your location. After counsel, each other person present should identify themselves and their role.",
       ...authority,
     },
     interpreterOath: federal
@@ -952,6 +955,7 @@ export const EDITABLE_PATHS = new Set([
 
 function tokenValues(canonical, state) {
   const get = (pathText) => envelope(valueAt(canonical, pathText)).value;
+  const filing = filingIdentifier(canonical);
   const examiner = canonical.counsel?.find(
     (item) => item.id === state.examiningAttorneyId,
   );
@@ -960,10 +964,12 @@ function tokenValues(canonical, state) {
     DATE: get("deposition.depositionDate"),
     DEPONENT: get("deposition.witness"),
     "CASE STYLE": get("case.caseStyle"),
-    "CAUSE NUMBER": get("case.causeNumber"),
+    "CAUSE NUMBER": filing.value,
     COURT: get("case.court"),
     COUNTY: get("case.county"),
     REPORTER: get("reporter.fullName"),
+    "REPORTER LICENSE NUMBER": get("reporter.csrNumber"),
+    "REMOTE PLATFORM": get("deposition.remotePlatform"),
     "BUSINESS ADDRESS": get("reporter.address"),
     PLACE: get("deposition.location"),
     INTERPRETER: envelope(

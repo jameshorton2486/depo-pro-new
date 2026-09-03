@@ -1,5 +1,12 @@
 const FEDERAL = "federal";
 
+export function formatFederalCaseNumber(value) {
+  const source = String(value ?? "").trim();
+  const match = /^(\d+)\s*:\s*(\d{2})\s*-\s*(cv|cr|mc|md)\s*-\s*(\d+)\s*-\s*([a-z]+)$/i.exec(source);
+  if (!match) return source;
+  return `${match[1]}:${match[2]}-${match[3].toUpperCase()}-${match[4].padStart(4, "0")}-${match[5].toUpperCase()}`;
+}
+
 /**
  * Jurisdiction-aware presentation for the single canonical filing identifier.
  *
@@ -14,7 +21,7 @@ export function filingIdentifier(recordOrCase = {}, jurisdictionOverride = null)
   const value = unwrap(caseRecord?.causeNumber);
   const federal = jurisdiction === FEDERAL;
   return {
-    value: value ?? null,
+    value: value == null ? null : federal ? formatFederalCaseNumber(value) : value,
     semantic: federal ? "CIVIL_ACTION_NUMBER" : "CAUSE_NUMBER",
     displayLabel: federal ? "Civil Action No." : "Cause Number",
     legacyPath: "case.causeNumber",

@@ -49,6 +49,11 @@ export function styleWord(text, { previous = "", next = "", exhibitNumber = fals
   const { body, tail } = split(String(text ?? ""));
   if (!body) return String(text ?? "");
 
+  // Deepgram can join this label and its digits ("Number12129"). This is a display-only
+  // spacing correction: the evidence token and its word id remain unchanged.
+  const joinedNumber = /^Number(\d+)$/i.exec(body);
+  if (joinedNumber) return `Number ${joinedNumber[1]}${tail}`;
+
   // 04/24/2026 -> April 24, 2026. The specimen contains no slashed date and four written ones;
   // the ASR emits 17 slashed. Day and month are read US-order, which is what the deposition's
   // own dates confirm: 09/15/2023 is the September crash pleaded in the notice.

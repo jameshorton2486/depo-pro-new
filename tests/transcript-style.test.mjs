@@ -13,6 +13,11 @@ test("a slashed date becomes a written one",()=>{
   assert.equal(styleWord("11/16/2023"),"November 16, 2023");
 });
 
+test("a joined reporter license label and number receives a visible space",()=>{
+  assert.equal(styleWord("Number12129."), "Number 12129.");
+  assert.equal(styleWord("NumberABC"), "NumberABC");
+});
+
 test("an impossible date is left exactly as it was",()=>{
   // 13/40/2026 is not a date, and a rule that guessed at one would put a fabricated day on a
   // court record. Leaving it visibly wrong is the reporter's cue to listen to that passage.
