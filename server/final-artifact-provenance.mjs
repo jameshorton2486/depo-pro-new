@@ -10,6 +10,7 @@ import { createTranscriptPdfArtifact } from "./final-document-pdf.mjs";
 import { getFinalizationReadiness } from "./finalization-readiness.mjs";
 
 export const FINAL_ARTIFACT_PROVENANCE_VERSION = "1.0.0";
+const generationLocks = new Map();
 const sha256 = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 const clean = value => String(value ?? "").trim();
 function atomicJson(file, value) { const temporary = `${file}.${crypto.randomUUID()}.tmp`; fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" }); fs.renameSync(temporary, file); }
@@ -42,21 +43,31 @@ async function assertRenderableState(root, options, finalization) {
   if (spec.sha256 !== bound.document.renderingSpecificationHash || spec.renderer !== bound.document.renderer) throw new Error("FINAL_ARTIFACT_RENDERING_SPEC_MISMATCH: Rendering authority does not match the requested final version.");
   return { readiness, model, spec };
 }
-export async function qualifyFinalArtifacts(root, { depositionId, storageRoot, finalVersionId, actor } = {}) {
-  if (!clean(actor)) throw new Error("FINAL_ARTIFACT_ACTOR_REQUIRED: Server-established generating actor is required.");
+async function withGenerationOwnership(key, work) {
+  const predecessor = generationLocks.get(key) ?? Promise.resolve();
+  let release;
+  const ownership = new Promise(resolve => { release = resolve; });
+  const tail = predecessor.then(() => ownership);
+  generationLocks.set(key, tail);
+  await predecessor;
+  try { return await work(); }
+  finally { release(); if (generationLocks.get(key) === tail) generationLocks.delete(key); }
+}
+async function generateOwned(root, { depositionId, storageRoot, finalVersionId, actor }, hooks = {}) {
   const options = { depositionId, storageRoot, finalVersionId }, location = locations(root, options), existing = readManifest(location.manifestFile);
   if (existing) return { ...verifyFinalArtifacts(root, options), created: false };
   const finalization = getFinalizationVersion(root, options), { model, spec } = await assertRenderableState(root, options, finalization);
   if (fs.existsSync(location.finalDirectory)) throw new Error("FINAL_ARTIFACT_INCOMPLETE_SET: Final-version storage exists without a valid manifest and will not be overwritten.");
   fs.mkdirSync(path.dirname(location.finalDirectory), { recursive: true });
-  const staging = fs.mkdtempSync(path.join(path.dirname(location.finalDirectory), `.${finalVersionId}-staging-`));
+  let staging = fs.mkdtempSync(path.join(path.dirname(location.finalDirectory), `.${finalVersionId}-staging-`));
   try {
-    createTranscriptDocxArtifact(root, { depositionId, storageRoot, printModel: model, outputDirectory: staging });
+    await hooks.afterOwnership?.({ staging, location });
+    const renderedDocx = createTranscriptDocxArtifact(root, { depositionId, storageRoot, printModel: model, outputDirectory: staging });
     createTranscriptPdfArtifact(root, { depositionId, storageRoot, printModel: model, outputDirectory: staging });
     const stagedDocx = path.join(staging, "complete-transcript.docx"), stagedPdf = path.join(staging, "complete-transcript.pdf");
     const docx = artifact(stagedDocx), pdf = artifact(stagedPdf);
-    fs.mkdirSync(location.finalDirectory);
-    fs.renameSync(stagedDocx, location.docxFile); fs.renameSync(stagedPdf, location.pdfFile);
+    fs.renameSync(stagedDocx, path.join(staging, "transcript.docx")); fs.renameSync(stagedPdf, path.join(staging, "transcript.pdf"));
+    fs.rmSync(renderedDocx.specPath, { force: true }); fs.rmSync(renderedDocx.mappingPath, { force: true });
     const manifest = {
       schemaVersion: FINAL_ARTIFACT_PROVENANCE_VERSION, recordType: "FINAL_ARTIFACT_MANIFEST", provenanceEventId: crypto.randomUUID(), depositionId, finalVersionId,
       finalizationEventId: finalization.id, finalizationBindingDigest: finalization.bindingDigest, generatedAt: new Date().toISOString(), generatedBy: clean(actor), verificationResult: "VERIFIED",
@@ -64,12 +75,17 @@ export async function qualifyFinalArtifacts(root, { depositionId, storageRoot, f
       parity: { status: "PASS", authority: "SHARED_FIXED_PAGE_RENDERING_SPEC", renderingSpecificationDigest: spec.sha256 },
       artifacts: { docx: { artifactId: crypto.randomUUID(), filename: "transcript.docx", relativePath: `final/${finalVersionId}/transcript.docx`, byteCount: docx.bytes, sha256: docx.sha256 }, pdf: { artifactId: crypto.randomUUID(), filename: "transcript.pdf", relativePath: `final/${finalVersionId}/transcript.pdf`, byteCount: pdf.bytes, sha256: pdf.sha256 } },
     };
-    assertStored(manifest.artifacts.docx, location.docxFile, "DOCX"); assertStored(manifest.artifacts.pdf, location.pdfFile, "PDF"); atomicJson(location.manifestFile, manifest);
+    assertStored(manifest.artifacts.docx, path.join(staging, "transcript.docx"), "DOCX"); assertStored(manifest.artifacts.pdf, path.join(staging, "transcript.pdf"), "PDF"); atomicJson(path.join(staging, "manifest.json"), manifest);
+    await hooks.beforePublish?.({ staging, location, manifest });
+    fs.renameSync(staging, location.finalDirectory); staging = null;
+    assertStored(manifest.artifacts.docx, location.docxFile, "DOCX"); assertStored(manifest.artifacts.pdf, location.pdfFile, "PDF");
     return { status: "FINAL_ARTIFACTS_QUALIFIED", verified: true, created: true, manifest };
-  } catch (error) {
-    if (!fs.existsSync(location.manifestFile) && fs.existsSync(location.finalDirectory)) fs.rmSync(location.finalDirectory, { recursive: true, force: true });
-    throw error;
-  } finally { fs.rmSync(staging, { recursive: true, force: true }); }
+  } finally { if (staging) fs.rmSync(staging, { recursive: true, force: true }); }
+}
+export async function qualifyFinalArtifacts(root, { depositionId, storageRoot, finalVersionId, actor } = {}) {
+  if (!clean(actor)) throw new Error("FINAL_ARTIFACT_ACTOR_REQUIRED: Server-established generating actor is required.");
+  const key = `${path.resolve(storageRoot ?? root)}\0${clean(depositionId)}\0${clean(finalVersionId)}`;
+  return withGenerationOwnership(key, () => generateOwned(root, { depositionId, storageRoot, finalVersionId, actor }));
 }
 
 export function getFinalArtifactStatus(root, options = {}) {
@@ -78,4 +94,4 @@ export function getFinalArtifactStatus(root, options = {}) {
   return verifyFinalArtifacts(root, options);
 }
 
-export const _testing = { locations, sha256 };
+export const _testing = { generateOwned, generationLocks, locations, sha256, withGenerationOwnership };

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { recordExhibit, recordExhibitAudit } from "../server/canonical-exhibit-lifecycle.mjs";
 import { recordTranscriptCompletion, requestFinalization } from "../server/canonical-finalization.mjs";
-import { getFinalArtifactStatus, qualifyFinalArtifacts, verifyFinalArtifacts } from "../server/final-artifact-provenance.mjs";
+import { _testing, getFinalArtifactStatus, qualifyFinalArtifacts, verifyFinalArtifacts } from "../server/final-artifact-provenance.mjs";
 import { appendReporterOperations, getWorkingTranscript, readReporterOverlay } from "../server/transcription-jobs.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 import { getTranscriptPrintModel } from "../server/transcript-print-model.mjs";
@@ -68,4 +68,20 @@ test("an exhibits-present final binds the qualified exhibit identity and renders
   const exhibit = recordExhibit(root, { ...f, actor: "Reporter", input: { label: "Exhibit 1", description: "Physical contract", markedAt: "2026-08-26T13:00:00Z", markedBy: "Counsel", transcriptReferences: [{ sourceAnchor: "transcript:8:2", paragraphId }], material: { kind: "PHYSICAL" }, custody: { status: "RESOLVED", holder: "Counsel", sourceAnchor: "transcript:20:2" }, sealedHandling: { status: "NOT_APPLICABLE" }, packageDisposition: "EXCLUDED", packageDispositionReason: "Retained by counsel.", sourceAnchor: "transcript:8:2" } });
   recordExhibitAudit(root, { ...f, actor: "Reporter", input: { result: "EXHIBITS_PRESENT", sourceAnchor: "reporter-review:exhibits" } }); await recordTranscriptCompletion(root, { ...f, actor: "Reporter", input: {} }); const final = (await requestFinalization(root, { ...f, actor: "Reporter" })).event;
   const result = await qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }); assert.equal(result.manifest.bindings.exhibits.state, "EXHIBITS_PRESENT_COMPLETE"); assert.equal(result.manifest.bindings.exhibits.currentEffective[0].exhibitId, exhibit.exhibitId); assert.equal(result.manifest.parity.status, "PASS");
+});
+
+test("concurrent requests for one FINAL-vN converge on one immutable result", async t => {
+  const f = fixture(t), final = await finalize(f); const results = await Promise.all([qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }), qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" })]);
+  assert.deepEqual(results.map(item => item.created).sort(), [false, true]); assert.equal(results[0].manifest.provenanceEventId, results[1].manifest.provenanceEventId); assert.equal(verifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId }).verified, true); assert.deepEqual(fs.readdirSync(path.join(f.directory, "final", final.finalVersionId)).sort(), ["manifest.json", "transcript.docx", "transcript.pdf"]);
+});
+
+test("a failing owner cleans only its staging and a waiting request can publish", async t => {
+  const f = fixture(t), final = await finalize(f), options = { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }, key = "controlled-final"; let releaseFailure; const gate = new Promise(resolve => { releaseFailure = resolve; });
+  const failing = _testing.withGenerationOwnership(key, () => _testing.generateOwned(root, options, { beforePublish: async () => { await gate; throw new Error("INJECTED_PUBLICATION_FAILURE"); } }));
+  const waiting = _testing.withGenerationOwnership(key, () => _testing.generateOwned(root, options)); releaseFailure(); await assert.rejects(failing, /INJECTED_PUBLICATION_FAILURE/); const result = await waiting;
+  assert.equal(result.created, true); assert.equal(verifyFinalArtifacts(root, options).verified, true); assert.equal(fs.readdirSync(path.join(f.directory, "final")).some(name => name.includes("staging")), false);
+});
+
+test("generation ownership is scoped so unrelated final identities can proceed", async () => {
+  let active = 0, maximum = 0, release; const gate = new Promise(resolve => { release = resolve; }); const work = () => _testing.withGenerationOwnership(crypto.randomUUID(), async () => { active += 1; maximum = Math.max(maximum, active); await gate; active -= 1; }); const first = work(), second = work(); await new Promise(resolve => setImmediate(resolve)); assert.equal(maximum, 2); release(); await Promise.all([first, second]); assert.equal(_testing.generationLocks.size, 0);
 });
