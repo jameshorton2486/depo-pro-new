@@ -8,6 +8,7 @@ import {
 import { captionJurisdiction } from "./insertion-pages/variants.mjs";
 import { appendCanonicalOpeningEvent, readCanonicalOpeningRecord } from "./canonical-opening-events.mjs";
 import { filingIdentifier } from "./filing-identifier.mjs";
+import { protectionProjection } from "./protected-records.mjs";
 
 export const OPENING_STATE_VERSION = "2.0.0";
 export const OPENING_AUTHORITY_VERSION =
@@ -1271,6 +1272,21 @@ export function getOpeningProjection(
       code: "EXAMINER",
       message: "Select the first examining attorney.",
     });
+  let protection;
+  try {
+    protection = protectionProjection(
+      depositionDirectory(root, depositionId, { storageRoot }),
+    );
+  } catch {
+    protection = {
+      protected: true,
+      reason: null,
+      unlocked: false,
+      unlockedUntil: null,
+      msRemaining: 0,
+      unlockCount: 0,
+    };
+  }
   return {
     depositionId,
     creationMode: depositionRecord.creationMode ?? "existing_recording",
@@ -1288,6 +1304,7 @@ export function getOpeningProjection(
     scripts,
     jurisdictionConflict,
     readiness,
+    protection,
     workflowStage,
     blockers,
     canStartRecording: preRecordValidated,
