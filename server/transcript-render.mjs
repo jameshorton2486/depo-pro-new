@@ -186,24 +186,24 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   // moved or rewritten -- the overlay stays the only authority on where an examination begins, and
   // this reads that authority rather than recording a second copy of it.
   //
-  // The implicit first examination gets neither. It has no anchor to place them at, and emitting
-  // them would change every existing single-examiner transcript. See EXAMINATION_HEADINGS.
+  // The implicit first examination has no stored boundary anchor. Its placement is nevertheless
+  // deterministic: it begins at the first rendered question asked by its resolved examiner. That
+  // lets the certified freelance-deposition form print EXAMINATION / BY [ATTORNEY] without
+  // inventing a synthetic overlay event or changing any spoken paragraph.
   const structural = [];
   for (const examination of examinationSequence) {
-    // The first examination is not announced, and this one test is what enforces it: it is always
-    // DIRECT, and DIRECT has no heading form. Guarding on `implicit` or on the missing anchor as
-    // well would be two more names for the same condition and two branches no test could reach --
-    // both were written, both survived deletion, and both are gone.
     const heading = EXAMINATION_HEADINGS[examination.type];
     if (!heading) continue;
-    const index = paragraphs.findIndex(paragraph => (paragraph.asrWordIds ?? []).includes(examination.atWordId));
+    const index = examination.implicit
+      ? paragraphs.findIndex(paragraph => paragraph.elementType === ELEMENT.QUESTION && paragraph.speakerIdentity === examination.examinerPersonId)
+      : paragraphs.findIndex(paragraph => (paragraph.asrWordIds ?? []).includes(examination.atWordId));
     // Defence, and unreachable through renderTranscript today: applyOverlay resolves boundaries
     // against segment order and drops any whose anchor no longer exists, so an unresolvable one
     // never reaches this sequence. Kept because the alternative to a finding here is a heading
     // silently going missing from a certified page.
     if (index < 0) {
       findings.push({ code:"EXAMINATION_ANCHOR_NOT_RENDERED", wordId:examination.atWordId,
-        message:`The ${examination.type} examination is anchored to a word that appears in no paragraph, so its heading was not placed.` });
+        message:`The ${examination.type} examination could not be located at a rendered question, so its heading was not placed.` });
       continue;
     }
     const label = labels[examination.examinerPersonId] ?? null;
@@ -214,9 +214,10 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
     const shared = { speakerIdentity:null, transcriptRole:null, deepgramSpeaker:null, unlabeledSpeaker:false,
       sourceJobIdentity:paragraphs[index].sourceJobIdentity, start:null, end:null, words:[], segmentIds:[], asrWordIds:[],
       derived:true, examinationType:examination.type, examinerPersonId:examination.examinerPersonId };
-    const rows = [{ ...shared, id:`examination:${examination.type}:${examination.atWordId}`, elementType:ELEMENT.HEADING,
+    const structuralAnchor = examination.atWordId ?? paragraphs[index].asrWordIds?.[0] ?? paragraphs[index].id;
+    const rows = [{ ...shared, id:`examination:${examination.type}:${structuralAnchor}`, elementType:ELEMENT.HEADING,
       label:null, byLine:null, layout:LAYOUT[ELEMENT.HEADING], text:heading }];
-    if (label) rows.push({ ...shared, id:`examination:${examination.type}:${examination.atWordId}:by`, elementType:ELEMENT.BY_LINE,
+    if (label) rows.push({ ...shared, id:`examination:${examination.type}:${structuralAnchor}:by`, elementType:ELEMENT.BY_LINE,
       label:null, byLine:null, layout:LAYOUT[ELEMENT.BY_LINE], text:`BY ${label}:` });
     structural.push({ index, rows });
   }

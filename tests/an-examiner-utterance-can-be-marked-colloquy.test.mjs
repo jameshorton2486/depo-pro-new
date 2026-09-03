@@ -127,8 +127,10 @@ test("a mark changes only the paragraph it was placed on", () => {
   // a second paragraph would be a rule the reporter did not state.
   const marked = render(overlayOf(mark(EXAMINER_WORD)));
   const plain = render(overlayOf());
-  const changed = marked.paragraphs
-    .map((paragraph, index) => ({ paragraph, plain:plain.paragraphs[index], index }))
+  const spokenMarked = marked.paragraphs.filter(paragraph => !paragraph.derived);
+  const spokenPlain = plain.paragraphs.filter(paragraph => !paragraph.derived);
+  const changed = spokenMarked
+    .map((paragraph, index) => ({ paragraph, plain:spokenPlain[index], index }))
     .filter(pair => pair.paragraph.elementType !== pair.plain.elementType);
 
   // Two, and the second one is right. This anchor sits on the examiner's actual question, so the
@@ -153,9 +155,10 @@ test("a mark changes no word, no timing and no speaker", () => {
   const words = result => result.paragraphs.flatMap(paragraph => paragraph.words)
     .map(word => ({ id:word.id, text:word.text, start:word.start, end:word.end }));
   assert.deepEqual(words(marked), words(plain));
-  assert.deepEqual(marked.paragraphs.map(item => item.speakerIdentity), plain.paragraphs.map(item => item.speakerIdentity),
+  const spoken = result => result.paragraphs.filter(item => !item.derived);
+  assert.deepEqual(spoken(marked).map(item => item.speakerIdentity), spoken(plain).map(item => item.speakerIdentity),
     "who spoke is recorded elsewhere and is not touched");
-  assert.deepEqual(marked.paragraphs.map(item => item.transcriptRole), plain.paragraphs.map(item => item.transcriptRole));
+  assert.deepEqual(spoken(marked).map(item => item.transcriptRole), spoken(plain).map(item => item.transcriptRole));
 });
 
 test("a mark does not disturb the examination sequence", () => {

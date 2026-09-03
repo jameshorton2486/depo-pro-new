@@ -27,7 +27,8 @@ test("every evidence word is rendered exactly once",()=>{
 
 test("paragraphs carry transcript labels, not role enums",()=>{
   const result = render();
-  const shape = result.paragraphs.map(paragraph => [paragraph.elementType, paragraph.label]);
+  const spoken = result.paragraphs.filter(paragraph => !paragraph.derived);
+  const shape = spoken.map(paragraph => [paragraph.elementType, paragraph.label]);
   assert.deepEqual(shape[0],[ELEMENT.COLLOQUY,"THE VIDEOGRAPHER:"]);
   assert.deepEqual(shape[1],[ELEMENT.COLLOQUY,"THE REPORTER:"]);
   assert.deepEqual(shape[2],[ELEMENT.QUESTION,"Q."]);
@@ -45,12 +46,13 @@ test("an objection becomes colloquy and the next question resumes with a by-line
 
 test("each paragraph seeks to a measured word time, not a derived segment boundary",()=>{
   const result = render();
-  for (const paragraph of result.paragraphs) {
+  const spoken = result.paragraphs.filter(paragraph => !paragraph.derived);
+  for (const paragraph of spoken) {
     assert.ok(Number.isFinite(paragraph.start),`${paragraph.id} has no seek target`);
     assert.equal(paragraph.start, paragraph.words[0].start, "start must be the first word's own measured time");
     assert.ok(paragraph.end >= paragraph.start);
   }
-  const starts = result.paragraphs.map(paragraph => paragraph.start);
+  const starts = spoken.map(paragraph => paragraph.start);
   assert.deepEqual(starts,[...starts].sort((a,b)=>a-b),"paragraphs must be in playable order");
 });
 

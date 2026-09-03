@@ -7,8 +7,8 @@
 // and no segment -- a heading is something the record's structure says, not something a microphone
 // heard, and a borrowed timestamp would let a click seek audio to a line nobody spoke.
 //
-// The implicit first examination gets neither, and that is a characterized decision rather than an
-// oversight. See EXAMINATION_HEADINGS in transcript-labels.mjs.
+// The implicit first examination is anchored to its first rendered question, so it receives the
+// same structural treatment without storing a redundant synthetic boundary.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EVIDENCE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/etminan-evidence.mjs";
@@ -29,12 +29,12 @@ const structural = result => result.paragraphs.filter(item => item.derived).map(
 
 test("a cross-examination announces itself once, and names who is conducting it", () => {
   const result = render(overlayOf(boundary(CROSS_WORD, "counsel-ramon", "CROSS")));
-  assert.deepEqual(structural(result), ["HEADING:CROSS-EXAMINATION", "BY_LINE:BY MR. RAMON:"]);
+  assert.deepEqual(structural(result), ["HEADING:EXAMINATION", "BY_LINE:BY MR. BENTLEY:", "HEADING:CROSS-EXAMINATION", "BY_LINE:BY MR. RAMON:"]);
 });
 
 test("the heading sits immediately before the examination it announces", () => {
   const result = render(overlayOf(boundary(CROSS_WORD, "counsel-ramon", "CROSS")));
-  const headingAt = result.paragraphs.findIndex(item => item.elementType === "HEADING");
+  const headingAt = result.paragraphs.findIndex(item => item.text === "CROSS-EXAMINATION");
   assert.equal(result.paragraphs[headingAt + 1].elementType, "BY_LINE");
   const first = result.paragraphs[headingAt + 2];
   assert.ok((first.asrWordIds ?? []).includes(CROSS_WORD), "the anchored paragraph follows the by-line");
@@ -47,20 +47,19 @@ test("redirect and recross carry their own headings", () => {
     boundary(REDIRECT_WORD, "counsel-bentley", "REDIRECT"),
   ));
   assert.deepEqual(structural(result), [
+    "HEADING:EXAMINATION", "BY_LINE:BY MR. BENTLEY:",
     "HEADING:CROSS-EXAMINATION", "BY_LINE:BY MR. RAMON:",
     "HEADING:REDIRECT EXAMINATION", "BY_LINE:BY MR. BENTLEY:",
   ]);
 });
 
-test("every heading form is the one the reporter stated, and DIRECT has none", () => {
-  assert.deepEqual(EXAMINATION_HEADINGS, { CROSS:"CROSS-EXAMINATION", REDIRECT:"REDIRECT EXAMINATION", RECROSS:"RECROSS-EXAMINATION" });
-  assert.equal(EXAMINATION_HEADINGS.DIRECT, undefined,
-    "the first examination is not announced; adding one would change every existing transcript");
+test("every examination uses the qualified freelance-deposition heading", () => {
+  assert.deepEqual(EXAMINATION_HEADINGS, { DIRECT:"EXAMINATION", CROSS:"CROSS-EXAMINATION", REDIRECT:"REDIRECT EXAMINATION", RECROSS:"RECROSS-EXAMINATION" });
 });
 
 test("the BY-line uses the canonical display name, not the raw identity", () => {
   const result = render(overlayOf(boundary(CROSS_WORD, "counsel-ramon", "CROSS")));
-  const byLine = result.paragraphs.find(item => item.elementType === "BY_LINE");
+  const byLine = result.paragraphs.find(item => item.text === "BY MR. RAMON:");
   assert.equal(byLine.text, `BY ${result.labels["counsel-ramon"]}:`,
     "one name formatter, the one that already refuses to guess an honorific");
   assert.doesNotMatch(byLine.text, /counsel-ramon/, "the canonical id is never printed");
@@ -71,7 +70,7 @@ test("an examiner with no label gets the heading and no blank BY-line", () => {
   // guessing. An examiner it cannot name at all would otherwise print "BY :" on a certified page.
   const result = renderTranscript({ working:WORKING, evidence:[EVIDENCE], speakerCandidates:[], examinerIdentity:"counsel-bentley",
     overlay:overlayOf(boundary(CROSS_WORD, "counsel-ramon", "CROSS")) });
-  assert.deepEqual(structural(result), ["HEADING:CROSS-EXAMINATION"]);
+  assert.deepEqual(structural(result), ["HEADING:EXAMINATION", "HEADING:CROSS-EXAMINATION"]);
   assert.ok(result.findings.some(finding => finding.code === "EXAMINATION_EXAMINER_UNLABELLED"),
     "and the reporter is told why the by-line is absent");
 });
@@ -101,8 +100,8 @@ test("the anchor word is untouched and still reads as it did", () => {
 test("Phase C labelling is unchanged, and objections stay colloquy", () => {
   const result = render(overlayOf(boundary(CROSS_WORD, "counsel-ramon", "CROSS")));
   const spoken = result.paragraphs.filter(item => !item.derived);
-  const plain = render(overlayOf());
-  assert.equal(spoken.length, plain.paragraphs.length, "no spoken paragraph was added or lost");
+  const plain = render(overlayOf()).paragraphs.filter(item => !item.derived);
+  assert.equal(spoken.length, plain.length, "no spoken paragraph was added or lost");
   const cross = spoken.find(item => (item.asrWordIds ?? []).includes(CROSS_WORD));
   assert.equal(cross.elementType, "QUESTION");
   assert.ok(spoken.some(item => item.elementType === "COLLOQUY"), "colloquy still exists in the transcript");
@@ -110,9 +109,9 @@ test("Phase C labelling is unchanged, and objections stay colloquy", () => {
 
 // --- nothing changes without a handover ----------------------------------------------------------
 
-test("a single-examiner deposition gains no heading and no by-line", () => {
+test("a single-examiner deposition begins with EXAMINATION and the canonical attorney by-line", () => {
   const result = render(emptyOverlay("DEP-TEST"));
-  assert.deepEqual(structural(result), []);
+  assert.deepEqual(structural(result), ["HEADING:EXAMINATION", "BY_LINE:BY MR. BENTLEY:"]);
   const plain = renderTranscript({ working:WORKING, evidence:[EVIDENCE], speakerCandidates:SPEAKER_CANDIDATES, examinerIdentity:"counsel-bentley", overlay:null });
   assert.deepEqual(result.paragraphs, plain.paragraphs, "the existing qualified output is untouched");
 });

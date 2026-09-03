@@ -133,17 +133,18 @@ function synthetic(paragraphsBeforeHandover, type = "CROSS") {
 }
 
 test("with the heading, by-line and first question on one page, the index cites that page", () => {
-  const laid = synthetic(21);
+  const laid = synthetic(19);
   assert.equal(laid.headingPage, 1);
   assert.equal(laid.firstQuestionPage, 1, "nothing straddles here");
   assert.equal(laid.cross.testimonyPage, 1);
 });
 
 test("an examination begins where its heading prints, even when its first question is overleaf", () => {
-  // The rule, made falsifiable. At 23 preceding paragraphs the heading takes line 24 and the
-  // by-line line 25, so the first Q. opens the next page; at 24 the heading itself takes line 25.
+  // The rule, made falsifiable. The opening EXAMINATION/BY lines occupy the first two slots, so at
+  // 21 preceding paragraphs the cross heading takes line 24 and the by-line line 25; at 22 the
+  // heading itself takes line 25.
   // In both the examination begins where the reader sees it announced.
-  for (const before of [23, 24]) {
+  for (const before of [21, 22]) {
     const laid = synthetic(before);
     assert.equal(laid.firstQuestionPage, laid.headingPage + 1, `${before}: the transition must straddle for this to prove anything`);
     assert.equal(laid.cross.testimonyPage, laid.headingPage,
@@ -151,20 +152,16 @@ test("an examination begins where its heading prints, even when its first questi
   }
 });
 
-test("an examination with no heading falls back to where its testimony begins", () => {
-  // Reachable, and this is the case that reaches it: a reporter may mark a second DIRECT -- another
-  // attorney taking the witness on direct rather than on cross -- and DIRECT has no heading form,
-  // so there is no heading paragraph to find. It is not implicit either, so page 1 is wrong. The
-  // fallback reads the first traced word of the examination, which is where it begins.
-  const laid = synthetic(23, "DIRECT");
-  assert.equal(laid.headingPage, null, "no heading is printed for a direct examination");
-  assert.equal(laid.cross.testimonyPage, laid.firstQuestionPage,
-    "so the index cites the page its first question prints on");
+test("a later direct examination also begins where its EXAMINATION heading prints", () => {
+  const laid = synthetic(21, "DIRECT");
+  assert.notEqual(laid.headingPage, null, "the freelance form prints EXAMINATION for direct examination");
+  assert.equal(laid.cross.testimonyPage, laid.headingPage,
+    "the index cites the page carrying its structural heading");
 });
 
 test("the implicit first examination begins on the first page of testimony", () => {
-  // Absolute, not merely equal to itself across two builds. It has no anchor and no heading, so
-  // page 1 is a definition rather than a lookup -- and a definition nothing asserts is a default.
+  // Absolute, not merely equal to itself across two builds. The first EXAMINATION heading starts
+  // the testimony on page 1.
   assert.equal(synthetic(21).direct.testimonyPage, 1);
 });
 
