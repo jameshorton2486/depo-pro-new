@@ -65,7 +65,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
               onClick={event=>{event.stopPropagation();const first=line.fragments.find(item=>item.kind!=="generated");if(first)onActivate(line.paragraphId as string,first.id,false,lineKey,0,false)}}>{fragment.text}</button>
           : <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>)
         : <button type="button" className={`workspace-page-token ${fragment.kind} ${selectedWordId===fragment.id?"picked":""} ${activePlaybackWordId===fragment.id?"playing":""} ${lowConfidenceWordIds.has(fragment.id)?"low-confidence":""}`}
-            data-token-id={fragment.id} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
+            data-token-id={fragment.id} data-paragraph-id={line.paragraphId??undefined} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
             onClick={event=>{event.stopPropagation();if(page.editable===false||!line.paragraphId)return;onActivate(line.paragraphId,fragment.id,event.shiftKey,lineKey,fragment.sourceStart??0,event.altKey)}}>{fragment.text}</button>):line.content}</code>}
     </li>})}</ol>
     <footer>Page {page.pageNumber}</footer>
@@ -121,6 +121,27 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
     if(!shiftKey&&!paragraphRangeMode)openEdit(paragraphId,lineKey,offset);
   }
   async function playAt(seconds:number){if(!(await save()))return;setActiveEdit(null);onPlayAt(seconds)}
+  async function captureHighlightedRange(){
+    const root=scroller.current,selection=window.getSelection();
+    if(!root||!selection||selection.isCollapsed||selection.rangeCount===0)return;
+    const browserRange=selection.getRangeAt(0);
+    const tokens=[...root.querySelectorAll<HTMLElement>(".workspace-page-token[data-token-id][data-paragraph-id]")]
+      .filter(token=>browserRange.intersectsNode(token));
+    const first=tokens[0],last=tokens[tokens.length-1];
+    if(!first?.dataset.tokenId||!first.dataset.paragraphId||!last?.dataset.tokenId||!last.dataset.paragraphId)return;
+    if(!(await save()))return;
+    setActiveEdit(null);
+    onSelect(first.dataset.paragraphId,first.dataset.tokenId,false);
+    onSelect(last.dataset.paragraphId,last.dataset.tokenId,true);
+    selection.removeAllRanges();
+  }
+  useEffect(()=>{
+    const root=scroller.current;
+    if(!root)return;
+    const capture=()=>{void captureHighlightedRange()};
+    root.addEventListener("mouseup",capture);
+    return()=>root.removeEventListener("mouseup",capture);
+  });
   // Joining only. Splitting is the tools panel's Split here, anchored to the selected word rather
   // than to a caret offset -- bare Enter used to do it, and a structural change to a court record
   // is not something a reflex during typing should cause.
@@ -156,7 +177,7 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
         doing so. That is worse than saying nothing: it instructs somebody to press a key that now
         does nothing, and they would reasonably conclude the application was broken. Caught by
         looking at the screen, not by a test -- so the test below pins the absence. */}
-    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
+    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Drag across multiple paragraphs to select them for the Quick Tools Delete action. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
     {quickTools}
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
       {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedParagraphIds={selectedParagraphIds} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }

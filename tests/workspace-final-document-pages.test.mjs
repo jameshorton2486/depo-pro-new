@@ -57,6 +57,11 @@ test("reporters can select a complete paragraph range across transcript pages",(
   assert.match(workspace,/selectedParagraphIds=\{selectedParagraphIds\}/);
   assert.match(pages,/selectedParagraphIds\.has\(line\.paragraphId\)/);
   assert.match(pages,/range-selected/);
+  assert.match(pages,/captureHighlightedRange/);
+  assert.match(pages,/browserRange\.intersectsNode\(token\)/);
+  assert.match(pages,/onSelect\(first\.dataset\.paragraphId,first\.dataset\.tokenId,false\)/);
+  assert.match(pages,/onSelect\(last\.dataset\.paragraphId,last\.dataset\.tokenId,true\)/);
+  assert.match(pages,/data-paragraph-id=\{line\.paragraphId\?\?undefined\}/);
 });
 
 test("the designation selects its own paragraph, and a blank line is never selected",()=>{
