@@ -751,7 +751,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             reason both controls are inert without a model: there is no observed state to act on. */}
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
-        <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate complete transcript PDF</button>
+        <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate Working PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">

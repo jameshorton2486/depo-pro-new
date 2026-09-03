@@ -27,7 +27,7 @@ test("the preview routes to the Workspace rather than generating anything itself
   let routes = false;
   const visit = node => {
     if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "button"
-        && node.children.map(child => child.getText()).join("").includes("Generate in the Workspace")) {
+        && node.children.map(child => child.getText()).join("").includes("Working exports in Workspace")) {
       routes = node.openingElement.attributes.getText().includes("onClick={onBack}");
     }
     ts.forEachChild(node, visit);

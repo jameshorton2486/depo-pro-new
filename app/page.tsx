@@ -333,7 +333,7 @@ export default function Home() {
     if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(active.creationMode==="live")}} />);
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
-    if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} />);
+    if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} onNavigate={(destination)=>{if(destination==="WORKSPACE")navigate("workspace");else if(destination==="OPENING")navigate("opening");else if(destination==="CERTIFICATION_PAGES")navigate("insertion-pages");else if(destination==="PRINT_PREVIEW")navigate("preview")}} />);
     // The Workspace is the default for an open deposition. It was the Transcript screen, whose
     // only irreplaceable control -- the transcribe step -- now lives here, and whose speaker map
     // is keyed by job here too. A stored session naming the retired "transcript" view lands here

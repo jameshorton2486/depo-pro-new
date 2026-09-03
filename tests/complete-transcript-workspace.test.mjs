@@ -37,5 +37,5 @@ test("the API exposes complete model, DOCX and PDF from one assembly authority",
   assert.ok(api.includes("/api/transcript/complete-document-model"));
   assert.ok(api.includes("/api/transcript/complete-document-docx"));
   assert.ok(api.includes("/api/transcript/complete-document-pdf"));
-  assert.ok(screen.includes("Generate complete transcript PDF"));
+  assert.ok(screen.includes("Generate Working PDF"));
 });

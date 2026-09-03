@@ -37,7 +37,7 @@ const GROUPS: Group[] = [
     items: [
       { view: "opening", label: "Opening", note: "Deposition Opening Procedures", needsDeposition: true },
       { view: "workspace", label: "Workspace", note: "Transcribe, assign speakers, correct the record", needsDeposition: true },
-      { view: "preview", label: "Print preview", note: "Continuous and 25-line body pages", needsDeposition: true },
+      { view: "preview", label: "Preview & Finalize", note: "Review, finalize, and retrieve verified files", needsDeposition: true },
       { view: "compare", label: "Compare transcripts", note: "Measured source selection", needsDeposition: true },
       { view: "insertion-pages", label: "Certification pages", note: "Approved Texas and federal variants", needsDeposition: true },
     ],

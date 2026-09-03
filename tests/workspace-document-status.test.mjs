@@ -63,7 +63,7 @@ test("blocked state: a deposition with no assembly authority reports blocked, na
     "title and caption", "appearances", "index",
     "changes and signature (when signature is requested)", "reporter's certification",
   ]);
-  assert.equal(documentControlLabel(status.state), "Generate testimony-only Word");
+  assert.equal(documentControlLabel(status.state), "Generate Working testimony-only DOCX");
 
   const notice = generationNotice({ producedKind: "testimony-only", outputPath: "X\\professional-testimony.docx" });
   assert.match(notice, /Testimony body only generated/);
@@ -84,6 +84,6 @@ test("ready state: a fixture-created deposition with complete assembly authority
   assert.equal(status.state, DOCUMENT_STATUS.READY);
   assert.equal(status.reason, "");
   assert.deepEqual(status.absentSections, []);
-  assert.equal(documentControlLabel(status.state), "Generate complete transcript Word");
+  assert.equal(documentControlLabel(status.state), "Generate Working DOCX");
   assert.match(generationNotice({ producedKind: "complete-transcript", outputPath: "X\\complete-transcript.docx" }), /Complete transcript generated/);
 });
