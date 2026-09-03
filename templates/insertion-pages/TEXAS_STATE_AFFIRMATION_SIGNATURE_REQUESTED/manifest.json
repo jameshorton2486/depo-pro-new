@@ -17,7 +17,7 @@
     "index": { "file": "../common/index.tmpl", "sha256": "648e04ea36c210ecd31f3a36e0bfb1d3993a3699b02a3e46f0fbd5668a4219f7" },
     "changes": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/changes.tmpl", "sha256": "ab768016863b43a9533b6d684fb27fc74e36fa7ddb8fdfa3f9f78a63e34d729d" },
     "signature": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/signature.tmpl", "sha256": "0604f487dcbc09c516881896ca07350f9eb28b71e0721027b34171c3b0cba8d7" },
-    "certification1": { "file": "../common/texas-affirmation-requested-certification-1.tmpl", "sha256": "468082dd1898788ea6de78eefd8566c85925c3af444dd3a58dca0fbea13e5f98" },
+    "certification1": { "file": "../common/texas-affirmation-requested-certification-1.tmpl", "sha256": "dde6c2caf023836640c105a8898024eda7f42aeeb125277fe7e245ced23b1899" },
     "certification2": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/certification-2.tmpl", "sha256": "524999a47c5a1ad315a42ad9c006f17cba1cae4ddc5d47536f458ae8216b08e9" },
     "certification3": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/certification-3.tmpl", "sha256": "05d5281cb7cac5eba3963fd8bd3fd9e74610396d6f9ebcddc635b5b7e0f8e273" }
   }

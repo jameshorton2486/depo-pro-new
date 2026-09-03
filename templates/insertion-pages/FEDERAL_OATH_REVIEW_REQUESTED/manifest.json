@@ -12,7 +12,7 @@
     "affirmationConstruction": ["1 U.S.C. § 1"]
   },
   "templates": {
-    "fieldInventory": { "file": "../common/federal-field-inventory.tmpl", "sha256": "b45cd03239d3502fd225bceae8df928373f8fc6199a4eb822e11dd6cd42fe8a8" },
-    "certification": { "file": "../common/federal-certification.tmpl", "sha256": "a1495f6c56c3d2ebe6ce39692d1343abb54e32449462d5be15b2bcbcad972e0c" }
+    "fieldInventory": { "file": "../common/federal-field-inventory.tmpl", "sha256": "64ef7b4b184a517fc3d3b148a30d242f8f43509f7b09506813df9eb196e10d27" },
+    "certification": { "file": "../common/federal-certification.tmpl", "sha256": "a69a118a9da6514a5868017da4d362ef19a75ee48638f721d0b5bec1952ad12f" }
   }
 }

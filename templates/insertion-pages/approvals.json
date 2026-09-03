@@ -7,7 +7,7 @@
   ],
   "approvals": {
     "FEDERAL_AFFIRMATION_REVIEW_NOT_REQUESTED": {
-      "contentDigest": "335fab0eb69cb16e4bf2d89926a8547748f92c44d07a65e626c9bf9b2477aea5",
+      "contentDigest": "bb15cbd0d869db39701d15c1684fc69fb40b6c601a40ee27463d26b1bf57e6b4",
       "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
@@ -15,7 +15,7 @@
       "approvedAt": "2026-09-02"
     },
     "FEDERAL_AFFIRMATION_REVIEW_REQUESTED": {
-      "contentDigest": "908dad8fef0451fc042351025751aa75926c74bee5fdc57f57daeb7847d974a4",
+      "contentDigest": "e9ef8cdada91a3a420b1d8f8f1fe6453a3e521d99fb067b8c1dc2878201ddb4a",
       "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
@@ -23,7 +23,7 @@
       "approvedAt": "2026-09-02"
     },
     "FEDERAL_OATH_REVIEW_NOT_REQUESTED": {
-      "contentDigest": "1c339b35147ea4813b0db7b36eef8288e67c450c5ef3135ca9aa63acc424d2c1",
+      "contentDigest": "7551bce0e146a06ba3722fd6fd7de4b7e8f793de277242e80c236e4cac05ac63",
       "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
@@ -31,7 +31,7 @@
       "approvedAt": "2026-09-02"
     },
     "FEDERAL_OATH_REVIEW_REQUESTED": {
-      "contentDigest": "cf26e35a73b7fbb904366491d00aa93fc1ed78f2f6c9dfde70033139bf2f31ba",
+      "contentDigest": "e0735c2138dbad1033b1dd537de7ee1a26d2df622636ca8f157ab9124fbd150a",
       "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
@@ -39,7 +39,7 @@
       "approvedAt": "2026-09-02"
     },
     "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED": {
-      "contentDigest": "073633145f48180f69aead65c752cdcc792531c1d05c6a4ba93b8bb7e5e867fe",
+      "contentDigest": "a4824fe9ca3696d3d998a1b6a21734cfd40dac5df2c6b37244efc480261d898c",
       "authorityDigest": "8bf8258f27477c469d73410308c228c3fc5a7f84dc909d000cda91a2ffcd72b8",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
@@ -47,7 +47,7 @@
       "approvedAt": "2026-09-02"
     },
     "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED": {
-      "contentDigest": "e47bddd27209d1ceae52f4f0d5a7c836507e342fc45b77733bd57a1c8810ad84",
+      "contentDigest": "b489c2972d805bf34f1f8357ea1b1b1c35ffe88af11cacca79178f064be26997",
       "authorityDigest": "8bf8258f27477c469d73410308c228c3fc5a7f84dc909d000cda91a2ffcd72b8",
       "approvedBy": "James Horton",
       "approverRole": "product owner",
