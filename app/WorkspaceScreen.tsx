@@ -132,6 +132,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // reporter extends. A range may cross paragraphs -- turn boundaries are the thing a correction
   // pass is meant to question, so a selection that could not span them would be useless for it.
   const [selected,setSelected] = useState<{ paragraphId:string; wordId:string; extentWordId:string|null }|null>(null);
+  const [paragraphRangeMode,setParagraphRangeMode] = useState(false);
   const [editing,setEditing] = useState<{ wordId:string; text:string }|null>(null);
   // Both facts the reporter states. Neither is preselected: a boundary names a person and a kind
   // of examination, and a default that prints a heading nobody chose is the §247 mistake in a new
@@ -395,9 +396,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.
   const selectWord = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>{
-    setSelected(previous=>shiftKey&&previous?{...previous,extentWordId:wordId}:{paragraphId,wordId,extentWordId:null});
+    setSelected(previous=>paragraphRangeMode&&previous&&!previous.extentWordId
+      ? {...previous,extentWordId:wordId}
+      : shiftKey&&previous
+        ? {...previous,extentWordId:wordId}
+        : {paragraphId,wordId,extentWordId:null});
     setEditing(null);
-  },[]);
+  },[paragraphRangeMode]);
   const selectPageFragment = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>selectWord(paragraphId,wordId,shiftKey),[selectWord]);
   const editWord = useCallback((wordId:string,text:string)=>setEditing({wordId,text}),[]);
 
@@ -633,11 +638,15 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     for(const paragraph of rendered?.paragraphs??[]) if(paragraph.words.some(word=>word.id===operation.wordId)) return paragraph.id;
     return null;
   }).filter(Boolean)).size,[paragraphDeleteOperations,rendered]);
+  const selectedParagraphIds = useMemo(()=>new Set((rendered?.paragraphs??[]).filter(paragraph=>{
+    if(!range)return paragraph.id===selected?.paragraphId;
+    return paragraph.words.some(word=>{const index=wordOrder.get(word.id);return index!==undefined&&index>=range.first&&index<=range.last});
+  }).map(paragraph=>paragraph.id)),[range,rendered,selected,wordOrder]);
   function deleteSelectedParagraphs(){
     if(!paragraphDeleteOperations.length)return;
     const label=paragraphDeleteCount===1?"this paragraph":`these ${paragraphDeleteCount} paragraphs`;
     if(!window.confirm(`Delete ${label} from the transcript? The original audio, source words, and timestamps remain preserved. One Undo restores the entire action.`))return;
-    setSelected(null);void append(paragraphDeleteOperations);
+    setSelected(null);setParagraphRangeMode(false);void append(paragraphDeleteOperations);
   }
 
   // Every flagged word in transcript order, and the passage each belongs to. The scopist works
@@ -907,14 +916,15 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
         <div className="workspace-stage">
-          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
+          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedParagraphIds={selectedParagraphIds} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} paragraphRangeMode={paragraphRangeMode} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
             :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
           <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
             <strong>Quick tools</strong>
-            <span>{active ? "Selected paragraph" : "Select a word"}</span>
+            <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word"}</span>
+            <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
             <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
             <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
             <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>

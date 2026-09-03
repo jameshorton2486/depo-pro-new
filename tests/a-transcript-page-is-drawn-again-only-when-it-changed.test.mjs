@@ -34,7 +34,7 @@ const HANDLERS = Object.freeze({
 const PROFILE = { id:"TEXAS_FREELANCE_DEPOSITION_V1", version:"1.0.0" };
 const props = (extra = {}) => ({
   page:PAGE, profile:PROFILE, selectedParagraphId:null, selectedWordId:null, activePlaybackWordId:null,
-  lowConfidenceWordIds:new Set(), activeEdit:null, ...HANDLERS, ...extra,
+  selectedParagraphIds:new Set(), lowConfidenceWordIds:new Set(), activeEdit:null, ...HANDLERS, ...extra,
 });
 
 // --- content ------------------------------------------------------------------------------------
@@ -88,6 +88,13 @@ test("the selection draws only the pages it moved between", () => {
   assert.equal(pageRenderEqual(props(), elsewhere), true, "a selection on another page leaves this one alone");
   assert.equal(pageRenderEqual(props(), props({ selectedParagraphId:"p1" })), false, "moving into this page draws it");
   assert.equal(pageRenderEqual(props({ selectedParagraphId:"p1" }), props()), false, "and moving out of it draws it too");
+});
+
+test("a complete-paragraph range redraws only pages touched by the range", () => {
+  const none=props(),here=props({selectedParagraphIds:new Set(["p1"])}),away=props({selectedParagraphIds:new Set(["p9"])});
+  assert.equal(pageRenderEqual(none,here),false);
+  assert.equal(pageRenderEqual(here,none),false);
+  assert.equal(pageRenderEqual(none,away),true);
 });
 
 test("the selected word draws only the pages it moved between", () => {

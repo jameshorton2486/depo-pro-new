@@ -41,12 +41,22 @@ test("a continuation-page word opens its canonical paragraph editor immediately"
   assert.match(pages,/onActivate\(line\.paragraphId,fragment\.id,event\.shiftKey,lineKey,fragment\.sourceStart\?\?0,event\.altKey\)/);
   assert.match(pages,/if\(!\(await save\(\)\)\)return;/);
   assert.match(pages,/onSelect\(paragraphId,wordId,shiftKey\)/);
-  assert.match(pages,/if\(!shiftKey\)openEdit\(paragraphId,lineKey,offset\)/);
+  assert.match(pages,/if\(!shiftKey&&!paragraphRangeMode\)openEdit\(paragraphId,lineKey,offset\)/);
   // The on-screen instructions, which used to promise that Enter split a paragraph. It stopped
   // doing so when a structural change to a court record stopped being something a reflex during
   // typing could cause, and the help text outlived the behaviour by a whole browser gate.
   assert.match(pages,/Use Split here in the transcript tools/);
   assert.match(pages,/Ctrl\+S saves; Escape cancels/);
+});
+
+test("reporters can select a complete paragraph range across transcript pages",()=>{
+  const workspace=fs.readFileSync(new URL("../app/WorkspaceScreen.tsx",import.meta.url),"utf8"),pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(workspace,/Select a range of complete paragraphs/);
+  assert.match(workspace,/Select the first paragraph/);
+  assert.match(workspace,/Select the last paragraph/);
+  assert.match(workspace,/selectedParagraphIds=\{selectedParagraphIds\}/);
+  assert.match(pages,/selectedParagraphIds\.has\(line\.paragraphId\)/);
+  assert.match(pages,/range-selected/);
 });
 
 test("the designation selects its own paragraph, and a blank line is never selected",()=>{

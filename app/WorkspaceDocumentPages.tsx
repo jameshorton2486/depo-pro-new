@@ -24,7 +24,7 @@ function audioClock(seconds:number){const total=Math.max(0,Math.floor(seconds));
 // pageRenderEqual compares what the page actually draws. It is deliberately strict about the
 // handlers too: if the container regresses to unstable ones the screen gets slow again, rather than
 // drawing pages that hold a stale closure over the open edit.
-export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,profile,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onActivate,onChange,onSave,onCancel,onJoinPrevious,onJoinNext,onPlayAt}:{page:DocumentPage;profile:LayoutProfile;selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onActivate:(paragraphId:string,wordId:string,shiftKey:boolean,lineKey:string,offset:number,play:boolean)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlayAt:(seconds:number)=>void}){
+export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,profile,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onActivate,onChange,onSave,onCancel,onJoinPrevious,onJoinNext,onPlayAt}:{page:DocumentPage;profile:LayoutProfile;selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onActivate:(paragraphId:string,wordId:string,shiftKey:boolean,lineKey:string,offset:number,play:boolean)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlayAt:(seconds:number)=>void}){
   const editor=useRef<HTMLTextAreaElement|null>(null);
   useEffect(()=>{if(!editor.current||!activeEdit)return;editor.current.focus();editor.current.setSelectionRange(activeEdit.caret,activeEdit.caret)},[activeEdit]);
   return <article className={`workspace-paper ${page.sectionKind??"testimony"}`} style={geometryStyle(profile)} data-layout-profile={`${profile.id}@${profile.version}`} data-page={page.pageNumber} data-page-role={page.role??"testimony"} aria-label={`${page.role??"Testimony"} page ${page.pageNumber}`}><div className="workspace-format-box" aria-hidden="true"/>
@@ -41,7 +41,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
       //
       // A DIRTY draft is kept visible whatever the selection does. Hiding unsaved typing to tidy up
       // a contradiction would be a worse bug than the contradiction.
-      editing=activeEdit?.lineKey===lineKey&&(activeEdit.paragraphId===selectedParagraphId||activeEdit.draft!==activeEdit.baseText),lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
+      editing=activeEdit?.lineKey===lineKey&&(activeEdit.paragraphId===selectedParagraphId||activeEdit.draft!==activeEdit.baseText),lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${line.paragraphId&&selectedParagraphIds.has(line.paragraphId)?"range-selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {lineAudioStart!==null&&lineAudioStart!==undefined&&<button type="button" className="workspace-line-time" aria-label={`Save the open paragraph and play audio from ${audioClock(lineAudioStart)}`} onClick={()=>onPlayAt(lineAudioStart)}>▶ {audioClock(lineAudioStart)}</button>}
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
@@ -72,7 +72,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
   </article>;
 },pageRenderEqual);
 
-export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
+export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
   const scroller=useRef<HTMLDivElement|null>(null),saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),activeEditRef=useRef<ActiveEdit|null>(null),savePromise=useRef<Promise<boolean>|null>(null),[currentPage,setCurrentPage]=useState(1),[storedEdit,setActiveEdit]=useState<ActiveEdit|null>(null);
   const total=pages.length,paragraphById=useMemo(()=>new Map(paragraphs.map(paragraph=>[paragraph.id,paragraph])),[paragraphs]);
   const savedCanonical=storedEdit?.status==="saved"?paragraphById.get(storedEdit.paragraphId)?.text:undefined;
@@ -118,7 +118,7 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
     setActiveEdit(null);
     onSelect(paragraphId,wordId,shiftKey);
     if(play){onPlayParagraph(paragraphId);return}
-    if(!shiftKey)openEdit(paragraphId,lineKey,offset);
+    if(!shiftKey&&!paragraphRangeMode)openEdit(paragraphId,lineKey,offset);
   }
   async function playAt(seconds:number){if(!(await save()))return;setActiveEdit(null);onPlayAt(seconds)}
   // Joining only. Splitting is the tools panel's Split here, anchored to the selected word rather
@@ -158,7 +158,7 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
         looking at the screen, not by a test -- so the test below pins the absence. */}
     <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
-      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
+      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedParagraphIds={selectedParagraphIds} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
     </div>
   </section>;
 }

@@ -51,6 +51,9 @@ export function samePageContent(a, b) {
 const holdsParagraph = (page, paragraphId) =>
   paragraphId !== null && paragraphId !== undefined && (page?.lines ?? []).some(line => line.paragraphId === paragraphId);
 
+const holdsAnyParagraph = (page, paragraphIds) =>
+  paragraphIds && paragraphIds.size > 0 && (page?.lines ?? []).some(line => line.paragraphId && paragraphIds.has(line.paragraphId));
+
 const holdsWord = (page, wordId) => {
   if (wordId === null || wordId === undefined) return false;
   for (const line of page?.lines ?? []) {
@@ -98,6 +101,9 @@ export function pageRenderEqual(previous, next) {
 
   if (previous.selectedParagraphId !== next.selectedParagraphId
     && (holdsParagraph(next.page, previous.selectedParagraphId) || holdsParagraph(next.page, next.selectedParagraphId))) return false;
+
+  if (!sameWordIdSet(previous.selectedParagraphIds, next.selectedParagraphIds)
+    && (holdsAnyParagraph(next.page, previous.selectedParagraphIds) || holdsAnyParagraph(next.page, next.selectedParagraphIds))) return false;
 
   if (previous.selectedWordId !== next.selectedWordId
     && (holdsWord(next.page, previous.selectedWordId) || holdsWord(next.page, next.selectedWordId))) return false;
