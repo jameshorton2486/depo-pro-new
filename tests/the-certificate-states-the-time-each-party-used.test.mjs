@@ -92,7 +92,14 @@ const textOf = (pages) => pages.pages.flatMap((page) => page.lines).map((line) =
 // and the manifests, not the validator, so it cannot agree with the validator by construction --
 // a new reviewed certificate that prints the clause and is left off the list fails here.
 test("every reviewed certificate that states the clause is on the list that guards it", async () => {
-  const variants = ["TEXAS_STATE_SIGNATURE_REQUESTED", "TEXAS_STATE_SIGNATURE_WAIVED", "FEDERAL_SIGNATURE_REQUESTED", "FEDERAL_SIGNATURE_WAIVED"];
+  const variants = [
+    "TEXAS_STATE_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_SIGNATURE_WAIVED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",
+    "FEDERAL_SIGNATURE_REQUESTED",
+    "FEDERAL_SIGNATURE_WAIVED",
+  ];
   const stating = [];
   for (const variant of variants) {
     const directory = path.resolve(DEFAULT_TEMPLATE_ROOT, variant);

@@ -18,11 +18,12 @@ test("one canonical filing identifier receives a jurisdiction-specific label", (
   assert.throws(()=>reconcileFilingIdentifier({causeNumber:"A",caseNumber:"B"}),/CONFLICTING_FILING_IDENTIFIERS/);
 });
 
-test("certification routing preserves oath form and leaves federal prose unavailable", () => {
+test("certification routing preserves oath form and selects approved component combinations", () => {
   assert.deepEqual(certificationRoute({jurisdiction:"texas-state",signatureDisposition:"waived",oathAdministration:{selection:"OATH"}}), {key:"TEXAS_STATE_SIGNATURE_WAIVED",available:true,reason:null});
-  assert.equal(certificationRoute({jurisdiction:"texas-state",signatureDisposition:"waived",oathAdministration:{selection:"AFFIRMATION"}}).reason,"TEXAS_AFFIRMATION_TEMPLATE_UNAVAILABLE");
+  assert.deepEqual(certificationRoute({jurisdiction:"texas-state",signatureDisposition:"waived",oathAdministration:{selection:"AFFIRMATION"}}), {key:"TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",available:true,reason:null});
   const federal=certificationRoute({jurisdiction:"federal",oathAdministration:{selection:"AFFIRMATION"},reviewElection:{status:"REQUESTED"}});
-  assert.deepEqual(federal,{key:"FEDERAL_AFFIRMATION_REVIEW_REQUESTED",available:false,reason:"FEDERAL_TEMPLATE_UNAPPROVED"});
+  assert.deepEqual(federal,{key:"FEDERAL_AFFIRMATION_REVIEW_REQUESTED",available:true,reason:null});
+  assert.equal(certificationRoute({jurisdiction:"federal",oathAdministration:{selection:"OATH"},reviewElection:null}).reason,"CERTIFICATION_FACTS_INCOMPLETE");
 });
 
 test("opening corrections retain history and expose the latest effective event", () => {

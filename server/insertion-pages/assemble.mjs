@@ -171,8 +171,11 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const openingFacts = currentCanonicalOpeningFacts(record);
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
-  const variant = selectInsertionVariant({ jurisdiction, signatureDisposition });
   const reviewElection = currentReviewElection(record);
+  const route = certificationRoute({ jurisdiction, signatureDisposition, oathAdministration:openingFacts.oathAdministration, reviewElection });
+  const variant = jurisdiction === "federal" || openingFacts.oathAdministration?.selection === "AFFIRMATION"
+    ? route.key
+    : selectInsertionVariant({ jurisdiction, signatureDisposition });
   // Counsel of record who did not appear are not appearances. Two certified specimens settle it
   // and they cover both shapes: on the Etminan page Marco Crawford is absent while MARCO CRAWFORD
   // LAW, PLLC still prints, because Bentley appeared from that firm; on the Thomas page both
@@ -214,7 +217,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     signatureDisposition,
     signatureDispositionBasis: operator.signatureDispositionBasis ?? null,
     variant,
-    certificationRoute: certificationRoute({ jurisdiction, signatureDisposition, oathAdministration:openingFacts.oathAdministration, reviewElection }),
+    certificationRoute: route,
     reviewElection,
     caption: { court, causeNumber, filingNumber:causeNumber, filingNumberLabel:filing.displayLabel, filingNumberSemantic:filing.semantic, caseStyle, label: operator.captionLabel ?? null },
     // witnessSworn is the reporter's attestation that an oath was administered, carried on the
@@ -275,7 +278,14 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.serviceDate": canonicalValue(record.certification?.serviceDate) ?? operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,
       "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? canonicalValue(record.certification?.furtherCertificationDate) ?? null,
+      "cert.administrationVerb": openingFacts.oathAdministration?.selection === "OATH" ? "sworn" : openingFacts.oathAdministration?.selection === "AFFIRMATION" ? "affirmed" : null,
+      "cert.reviewStatement": reviewElection?.status === "REQUESTED"
+        ? "Review of the transcript or recording was requested before the deposition was completed under Federal Rule of Civil Procedure 30(e)."
+        : reviewElection?.status === "NOT_REQUESTED"
+          ? "Review of the transcript or recording was not requested before the deposition was completed under Federal Rule of Civil Procedure 30(e)."
+          : null,
       "reporter.name": reporter.name,
+      "reporter.capacity": openingFacts.oathAdministration?.officer?.role ?? null,
       "reporter.csrNumber": reporter.csrNumber,
       "reporter.csrExpirationDate": reporter.csrExpirationDate,
       "reporter.firmRegistrationNumber": reporter.firmRegistrationNumber,

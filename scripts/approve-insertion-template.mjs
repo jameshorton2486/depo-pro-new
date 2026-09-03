@@ -14,16 +14,18 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../server/insertion-pages/page-model.mjs";
-import { APPROVALS_FILE, DEFAULT_TEMPLATE_ROOT, canonicalTemplateBody, templateContentDigest } from "../server/insertion-pages/templates.mjs";
+import { APPROVALS_FILE, DEFAULT_TEMPLATE_ROOT, canonicalTemplateBody, templateAuthorityDigest, templateContentDigest } from "../server/insertion-pages/templates.mjs";
 
 const [variant, ...rest] = process.argv.slice(2);
 const flag = (name) => { const at = rest.indexOf(`--${name}`); return at === -1 ? null : rest[at + 1] ?? null; };
 const approvedBy = flag("by");
 const approvedAt = flag("at") ?? new Date().toISOString().slice(0, 10);
 const root = flag("root") ?? DEFAULT_TEMPLATE_ROOT;
+const approverRole = flag("role") ?? "unspecified";
+const approvalScope = flag("scope") ?? variant;
 
 const fail = (message) => { console.error(message); process.exit(2); };
-if (!variant || !approvedBy) fail('Usage: node scripts/approve-insertion-template.mjs <VARIANT> --by "<name>" [--at YYYY-MM-DD] [--root <dir>]');
+if (!variant || !approvedBy) fail('Usage: node scripts/approve-insertion-template.mjs <VARIANT> --by "<name>" [--role "<role>"] [--scope "<scope>"] [--at YYYY-MM-DD] [--root <dir>]');
 
 const manifestPath = path.resolve(root, variant, "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -42,13 +44,14 @@ if (stale.length) fail([`${variant} manifest hashes do not describe the files on
 const approvalsPath = path.resolve(root, APPROVALS_FILE);
 const existing = await readFile(approvalsPath, "utf8").then(JSON.parse, (error) => { if (error?.code === "ENOENT") return {}; throw error; });
 const contentDigest = templateContentDigest(variant, manifest);
+const authorityDigest = templateAuthorityDigest(manifest);
 const previous = existing.approvals?.[variant] ?? null;
-if (previous?.contentDigest === contentDigest) {
+if (previous?.contentDigest === contentDigest && (!authorityDigest || previous?.authorityDigest === authorityDigest)) {
   console.log(`${variant} is already approved at ${contentDigest} by ${previous.approvedBy} on ${previous.approvedAt}. Nothing written.`);
   process.exit(0);
 }
 
-const approvals = { ...existing.approvals, [variant]: { contentDigest, approvedBy, approvedAt } };
+const approvals = { ...existing.approvals, [variant]: { contentDigest, authorityDigest, approvedBy, approverRole, approvalScope, approvedAt } };
 const document = {
   ...existing,
   approvals: Object.fromEntries(Object.keys(approvals).sort().map((key) => [key, approvals[key]])),

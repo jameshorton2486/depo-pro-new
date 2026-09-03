@@ -169,11 +169,11 @@ test("the waived variant is unchanged", async () => {
   assert.deepEqual(gained(deferred, established), [], "signature waived does not reach stage-one deferral");
 });
 
-test("the federal variant is unchanged", async () => {
+test("federal routing fails closed without a verified Rule 30(e) election", async () => {
   const assembled = await input({ jurisdiction: "federal" });
-  assert.equal(assembled.variant, "FEDERAL_SIGNATURE_REQUESTED");
+  assert.equal(assembled.variant, null);
   for (const field of DEFERRED) assert.equal(assembled.fieldValues[field], null);
-  assert.throws(() => build(assembled), /cannot render FEDERAL/, "and it is not this builder's document to print");
+  assert.throws(() => build(assembled), /cannot render/, "an unresolved federal route must not fall back to a legacy stub");
 });
 
 // --- the policy refuses to guess ----------------------------------------------------------------

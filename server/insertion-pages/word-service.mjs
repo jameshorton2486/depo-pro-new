@@ -7,11 +7,10 @@ import { fileURLToPath } from "node:url";
 import { depositionDirectory } from "../deposition-store.mjs";
 import { assertStorageRootIsLocal } from "../storage-config.mjs";
 import { assembleInsertionInput } from "./assemble.mjs";
-import { buildTexasInsertionPageSet } from "./build-pages.mjs";
+import { buildInsertionPageSet } from "./build-pages.mjs";
 import { createRenderingSpec, workspaceDocumentFromRenderingSpec } from "./rendering-spec.mjs";
 import { loadTemplateVariant } from "./templates.mjs";
 import { validateInsertionInput } from "./validate.mjs";
-import { selectInsertionVariant } from "./variants.mjs";
 
 const rendererScript = fileURLToPath(new URL("./python-docx-renderer.py", import.meta.url));
 const defaultFormatterRoot = path.join(os.homedir(), "transcript_formatter");
@@ -62,8 +61,9 @@ export async function prepareInsertionRenderingArtifact(root, depositionId, requ
   const canonicalPath = path.join(directory, "intake", "canonical-deposition-record.json");
   if (!fs.existsSync(canonicalPath)) throw new Error("Canonical deposition record was not found in the workspace.");
   const record = JSON.parse(fs.readFileSync(canonicalPath, "utf8"));
-  const variant = selectInsertionVariant(request.operator);
-  if (!variant) throw new Error("CERT_VARIANT_UNSPECIFIED: jurisdiction and signature disposition are required.");
+  const routingInput = assembleInsertionInput({ record, intake: request.intake ?? {}, operator: request.operator ?? {}, pagination: request.pagination ?? {}, template:null });
+  const variant = routingInput.variant;
+  if (!variant) throw new Error(`CERT_VARIANT_UNSPECIFIED: ${routingInput.certificationRoute?.reason ?? "jurisdiction and disposition facts are required"}.`);
   const template = await loadTemplateVariant(variant);
   const assembled = assembleInsertionInput({ record, intake: request.intake ?? {}, operator: request.operator ?? {}, pagination: request.pagination ?? {}, template });
   const findings = validateInsertionInput(assembled);
@@ -72,7 +72,7 @@ export async function prepareInsertionRenderingArtifact(root, depositionId, requ
   // The standalone path has no transcript behind it and therefore no authoritative pagination, so
   // what it renders is a certificate-only document with no index. The full document is generated
   // from the Workspace, through the complete-transcript model that owns the page numbers.
-  const pageSet = buildTexasInsertionPageSet(assembled, { setId: randomId(), depositionId, generatedAt: now(), certificateOnly: true });
+  const pageSet = buildInsertionPageSet(assembled, { setId: randomId(), depositionId, generatedAt: now(), certificateOnly: true });
   const renderingSpec = createRenderingSpec({ depositionId, insertionPageSet: pageSet, transcriptPages: readCanonicalTranscriptPages(directory, request), generatedAt: now() });
   const specPath = safeTranscriptPath(directory, request.renderingSpecRelativePath ?? "transcript/final-rendering-spec.json");
   writeJsonAtomic(specPath, renderingSpec);

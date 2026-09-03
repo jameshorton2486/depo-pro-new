@@ -413,7 +413,7 @@ function insertionRoles(input, certificateOnly = false) {
 // A field declared deferred with no width declared throws rather than receiving a generic blank --
 // deferredRule refuses. An approved deferred field is an approved presentation, not a default.
 function stageOneDeferredRules(variant, values) {
-  if (variant !== STAGE_ONE_DEFERRED_VARIANT) return values;
+  if (![STAGE_ONE_DEFERRED_VARIANT, "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED"].includes(variant)) return values;
   const printed = { ...values };
   for (const field of Object.keys(STAGE_ONE_DEFERRED_RULE_WIDTHS)) {
     const value = printed[field];
@@ -458,4 +458,23 @@ export function buildTexasInsertionPageSet(input, { setId, depositionId, generat
     templateHashes: Object.fromEntries(roles.map((role) => [role, templates[role].sha256])),
     intentionalBlanks: [],
   }, { profile });
+}
+
+export function buildFederalCertificatePageSet(input, { setId, depositionId, generatedAt }) {
+  if (!input.variant?.startsWith("FEDERAL_")) throw new Error(`Federal page builder cannot render ${input.variant ?? "an unspecified variant"}`);
+  const template = input.template?.templates?.certification;
+  if (!template) throw new Error(`FEDERAL_CERTIFICATE_TEMPLATE_UNAVAILABLE: ${input.variant}`);
+  const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
+  const pages = renderRolePages(template, certifiedDateValues(input.fieldValues), { role: "certification", profile });
+  pages.forEach((page, index) => { page.pageNumber = index + 1; });
+  return createInsertionPageSet({
+    setId, depositionId, variant: input.variant, generatedAt, pages,
+    templateHashes: { certification: template.sha256 }, intentionalBlanks: [],
+  }, { profile });
+}
+
+export function buildInsertionPageSet(input, options) {
+  return input.variant?.startsWith("FEDERAL_")
+    ? buildFederalCertificatePageSet(input, options)
+    : buildTexasInsertionPageSet(input, options);
 }

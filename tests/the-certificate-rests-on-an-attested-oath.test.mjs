@@ -112,19 +112,16 @@ test("an attested oath generates; an unattested record no longer does", async ()
   }
 });
 
-// FALSE is not MISSING, and the codes must stay apart. A witness who affirmed has already been
-// correctly attested; telling that reporter to go and attest would be telling them to redo work
-// they did right, and there is no wording that would let the page generate afterwards.
-test("a witness who affirmed and a witness nobody asked about are refused differently", async () => {
+// FALSE is not MISSING. A verified affirmation is now supported by its separately approved Texas
+// template; an absent administration event remains unresolved and must still stop generation.
+test("a verified affirmation is accepted while a missing administration remains unresolved", async () => {
   const affirmation=withSworn(false);
   addCanonicalOath(affirmation);
   affirmation.openingRecord.oathAdministrations[0].selection="AFFIRMATION";
   const affirmed = oathFindings(await assembled(affirmation));
   const unknown = oathFindings(await assembled(withSworn(null)));
-  assert.equal(affirmed[0].code, "CERT_AFFIRMATION_TEMPLATE_UNAVAILABLE");
+  assert.deepEqual(affirmed, []);
   assert.equal(unknown[0].code, "CERT_OATH_BASIS_UNRESOLVED");
-  assert.notEqual(affirmed[0].code, unknown[0].code, "collapsing these gives the reporter the wrong remedy");
-  assert.doesNotMatch(affirmed[0].message, /Scripts & Oaths/, "there is nothing for an affirmation to attest");
 });
 
 // The constraint the whole design rests on. If a dropdown ever writes the attestation, provenance is

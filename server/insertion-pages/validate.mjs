@@ -46,9 +46,13 @@ const RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR = Object.freeze(Object.keys(STAGE
 
 export const INTENTIONAL_BLANKS = Object.freeze({
   TEXAS_STATE_SIGNATURE_REQUESTED: RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR,
+  TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED: RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR,
   TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze([]),
-  FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
-  FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
+  TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED: Object.freeze([]),
+  FEDERAL_OATH_REVIEW_REQUESTED: Object.freeze([]),
+  FEDERAL_OATH_REVIEW_NOT_REQUESTED: Object.freeze([]),
+  FEDERAL_AFFIRMATION_REVIEW_REQUESTED: Object.freeze([]),
+  FEDERAL_AFFIRMATION_REVIEW_NOT_REQUESTED: Object.freeze([]),
 });
 
 // The reviewed certificates that state, in their own words, how much time each party used. Both
@@ -62,6 +66,7 @@ export const INTENTIONAL_BLANKS = Object.freeze({
 // bodies and asserts this set is exactly the ones carrying the caret.
 export const TIME_USED_CERTIFIED = Object.freeze([
   "TEXAS_STATE_SIGNATURE_REQUESTED", "TEXAS_STATE_SIGNATURE_WAIVED",
+  "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED", "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",
 ]);
 
 const blocking = (code, target, message, extra = {}) => ({ code, target, severity: "blocking", message, ...extra });
@@ -102,11 +107,7 @@ function validateOathBasis(input, findings) {
       return;
     }
   }
-  if (administration?.selection === "AFFIRMATION") {
-    findings.push(blocking("CERT_AFFIRMATION_TEMPLATE_UNAVAILABLE", "deposition.oathAdministration.selection", "The canonical record establishes that the witness affirmed. The reviewed Texas certificate says the witness was duly sworn, so that certificate cannot be generated until an approved affirmation variant is supplied."));
-    return;
-  }
-  if (administration?.selection === "OATH") return;
+  if (["OATH", "AFFIRMATION"].includes(administration?.selection)) return;
   if (input.deposition?.witnessSworn !== null && input.deposition?.witnessSworn !== undefined)
     findings.push(blocking("CERT_STRUCTURED_OATH_MISSING", "deposition.oathAdministration", "A legacy sworn flag exists, but only an attributable canonical administration record may select certificate wording. Record the administration in Opening before generating the certificate."));
   else
@@ -114,6 +115,32 @@ function validateOathBasis(input, findings) {
     "CERT_OATH_BASIS_UNRESOLVED", "deposition.witnessSworn",
     "The certification page states that the witness was duly sworn by the officer, and nothing on this record establishes that. Record the oath attestation in Opening, under Scripts & Oaths, before generating the certificate.",
   ));
+}
+
+function validateFederalCertificate(input, findings) {
+  if (input.jurisdiction !== "federal") return;
+  const administration = input.deposition?.oathAdministration;
+  const review = input.reviewElection;
+  if (!administration || !["OATH", "AFFIRMATION"].includes(administration.selection)) {
+    findings.push(blocking("FEDERAL_ADMINISTRATION_UNRESOLVED", "deposition.oathAdministration", "A verified oath or affirmation administration is required for the Federal certificate."));
+    return;
+  }
+  const reporterName = String(input.reporter?.name ?? "").trim().toLocaleLowerCase();
+  const officerName = String(administration.officer?.name ?? "").trim().toLocaleLowerCase();
+  if (!reporterName || !officerName || reporterName !== officerName) {
+    findings.push(blocking("FEDERAL_THIRD_PARTY_ADMINISTRATION_UNQUALIFIED", "deposition.oathAdministration.officer", "The approved Federal component covers only a certifying officer who personally administered the oath or affirmation. A different administering officer requires a separately approved component."));
+  }
+  if (!administration.verificationSource || !administration.sourceAnchor) {
+    findings.push(blocking("FEDERAL_ADMINISTRATION_EVIDENCE_REQUIRED", "deposition.oathAdministration.sourceAnchor", "Federal certification requires attributable administration evidence and a source anchor."));
+  }
+  if (!["REQUESTED", "NOT_REQUESTED"].includes(review?.status)) {
+    findings.push(blocking("FEDERAL_RULE_30E_UNRESOLVED", "reviewElection.status", "Record whether Rule 30(e) review was requested before generating the Federal certificate."));
+  } else if (!review.sourceAnchor || !review.recordedBy || !review.recordedAt) {
+    findings.push(blocking("FEDERAL_RULE_30E_EVIDENCE_REQUIRED", "reviewElection.sourceAnchor", "The Rule 30(e) election must be attributable and anchored to evidence."));
+  }
+  if (!input.fieldValues?.["cert.certificationDate"]) {
+    findings.push(blocking("FEDERAL_CERTIFICATION_DATE_REQUIRED", "cert.certificationDate", "Record the date on which the officer executes the Federal certificate."));
+  }
 }
 
 function validateVariant(input, findings) {
@@ -149,6 +176,7 @@ function validateVariant(input, findings) {
 }
 
 function validateCredentials(input, findings) {
+  if (input.jurisdiction === "federal") return;
   const reporter = input.reporter ?? {};
   const waived = reporter.firmRegistration?.applicable === false && Boolean(reporter.firmRegistration.reason);
   if (!reporter.firmRegistrationNumber && !waived) findings.push(blocking("CERT_FIRM_REGISTRATION_UNRESOLVED", "reporter.firmRegistrationNumber", "Reporter profile has no firm registration number and no explicit inapplicable reason.", { path: "reporter.firmRegistrationNumber" }));
@@ -322,6 +350,13 @@ function validateVideographer(input,findings){
 
 export function validateInsertionInput(input) {
   const findings = [];
+  if (input.jurisdiction === "federal") {
+    validateOathBasis(input, findings);
+    validateFederalCertificate(input, findings);
+    validateVariant(input, findings);
+    validateFields(input, findings);
+    return findings;
+  }
   validateVideographer(input,findings);
   validateOathBasis(input, findings);
   validateVariant(input, findings);

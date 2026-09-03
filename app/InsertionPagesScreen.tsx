@@ -142,6 +142,12 @@ type CertificateWorkflow = {
   returnDeadline: string;
   serviceDate: string;
 };
+type ReviewElection = {
+  id?: string;
+  status: "REQUESTED" | "NOT_REQUESTED";
+  requestedBy?: string | null;
+  sourceAnchor?: string | null;
+};
 const EMPTY_WORKFLOW: CertificateWorkflow = {
   submissionDate: "",
   returnDeadline: "",
@@ -179,6 +185,10 @@ export default function InsertionPagesScreen({
     Array<{ id?: string; fullName: string }>
   >([]);
   const [catalog, setCatalog] = useState<CatalogVariant[]>([]);
+  const [reviewElection, setReviewElection] = useState<ReviewElection | null>(null);
+  const [requestedBy, setRequestedBy] = useState("");
+  const [reviewCorrectionReason, setReviewCorrectionReason] = useState("");
+  const [administrationSelection, setAdministrationSelection] = useState<string | null>(null);
   // What is already on the record, before the reporter can overwrite it.
   //
   // This screen used to start at EMPTY_CERTIFICATE and never read. runPreview posts the whole
@@ -196,6 +206,7 @@ export default function InsertionPagesScreen({
           timeResponse,
           videographerResponse,
           catalogResponse,
+          openingResponse,
         ] = await Promise.all([
           fetch(
             `${API}/api/deposition/certification?depositionId=${encodeURIComponent(deposition.id)}`,
@@ -210,6 +221,7 @@ export default function InsertionPagesScreen({
             `${API}/api/deposition/videographers?depositionId=${encodeURIComponent(deposition.id)}`,
           ),
           fetch(`${API}/api/insertion-pages/catalog`),
+          fetch(`${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`),
         ]);
         if (cancelled) return;
         if (certResponse.ok) {
@@ -265,6 +277,20 @@ export default function InsertionPagesScreen({
             ((await catalogResponse.json()) as { variants?: CatalogVariant[] })
               .variants ?? [],
           );
+        if (openingResponse.ok) {
+          const body = (await openingResponse.json()) as {
+            canonicalOpening?: { oathAdministrations?: Array<{ selection?: string; supersedesEventId?: string | null; id?: string }> };
+            canonical?: { reviewElection?: { events?: ReviewElection[] } };
+          };
+          const administrations = body.canonicalOpening?.oathAdministrations ?? [];
+          const superseded = new Set(administrations.map((item) => item.supersedesEventId).filter(Boolean));
+          const effective = [...administrations].reverse().find((item) => !superseded.has(item.id));
+          setAdministrationSelection(effective?.selection ?? null);
+          const election = body.canonical?.reviewElection?.events?.at(-1) ?? null;
+          setReviewElection(election);
+          setRequestedBy(election?.requestedBy ?? "");
+          if (election) setSignatureDisposition(election.status === "REQUESTED" ? "requested" : "waived");
+        }
       } catch {
         /* an unreachable API leaves the form as it was; Preview still refuses on its own findings */
       }
@@ -282,7 +308,13 @@ export default function InsertionPagesScreen({
     (finding) => finding.severity === "blocking",
   );
   const warnings = findings.filter((finding) => finding.severity === "warning");
-  const ready = Boolean(jurisdiction && signatureDisposition && basis.trim());
+  const selectedFederalStatus = signatureDisposition === "requested" ? "REQUESTED" : "NOT_REQUESTED";
+  const correctingFederalElection = jurisdiction === "federal" && Boolean(reviewElection) && reviewElection?.status !== selectedFederalStatus;
+  const ready = Boolean(
+    jurisdiction && signatureDisposition && basis.trim() &&
+    (jurisdiction !== "federal" || signatureDisposition !== "requested" || requestedBy.trim()) &&
+    (!correctingFederalElection || reviewCorrectionReason.trim()),
+  );
 
   function request() {
     return {
@@ -315,6 +347,22 @@ export default function InsertionPagesScreen({
     setArtifact(null);
     setMessage("Assembling the certification pages…");
     try {
+      if (jurisdiction === "federal") {
+        const status = signatureDisposition === "requested" ? "REQUESTED" : "NOT_REQUESTED";
+        if (reviewElection?.status !== status) {
+          const election = (await post("/api/opening/rule-30e-election", {
+            depositionId: deposition.id,
+            election: {
+              status,
+              requestedBy: status === "REQUESTED" ? requestedBy.trim() : null,
+              requestedAt: status === "REQUESTED" ? new Date().toISOString() : null,
+              sourceAnchor: basis.trim(),
+              correctionReason: reviewElection ? reviewCorrectionReason.trim() : null,
+            },
+          })) as { election: ReviewElection };
+          setReviewElection(election.election);
+        }
+      }
       // Saved first, and to the record rather than into the render request: the certificate values
       // have to arrive carrying REPORTER_ENTERED provenance, and a field left alone is recorded
       // MISSING rather than as an empty string somebody could mistake for an answer.
@@ -564,13 +612,34 @@ export default function InsertionPagesScreen({
           ))}
         </fieldset>
 
+        {jurisdiction === "federal" && (
+          <fieldset className="insertion-field">
+            <legend>Canonical Federal certificate facts</legend>
+            <p className="insertion-help">
+              Administration: <strong>{administrationSelection ?? "Not recorded"}</strong>. This comes from the protected Opening attestation and cannot be changed here.
+            </p>
+            {signatureDisposition === "requested" && (
+              <label className="insertion-field">
+                <span>Who requested Rule 30(e) review</span>
+                <input type="text" value={requestedBy} onChange={(event) => setRequestedBy(event.target.value)} placeholder="Deponent or party" />
+              </label>
+            )}
+            {reviewElection && reviewElection.status !== (signatureDisposition === "requested" ? "REQUESTED" : "NOT_REQUESTED") && (
+              <label className="insertion-field">
+                <span>Reason for correcting the prior Rule 30(e) election</span>
+                <input type="text" value={reviewCorrectionReason} onChange={(event) => setReviewCorrectionReason(event.target.value)} placeholder="Required because this supersedes the prior event" />
+              </label>
+            )}
+          </fieldset>
+        )}
+
         <label className="insertion-field">
-          <span>How the disposition was established</span>
+          <span>{jurisdiction === "federal" ? "Evidence source anchor" : "How the disposition was established"}</span>
           <input
             type="text"
             value={basis}
             onChange={(event) => setBasis(event.target.value)}
-            placeholder="Stated on the record"
+            placeholder={jurisdiction === "federal" ? "Example: transcript:52:18 or media:recording-1@01:04:22" : "Stated on the record"}
           />
           <small>
             {jurisdiction === "texas-state"
@@ -583,7 +652,9 @@ export default function InsertionPagesScreen({
           <legend>Reporter&apos;s certificate</legend>
           {CERTIFICATE_FIELDS.filter(
             (item) =>
-              !item.requestedOnly || signatureDisposition === "requested",
+              jurisdiction === "federal"
+                ? item.key === "certificationDate"
+                : !item.requestedOnly || signatureDisposition === "requested",
           ).map((item) => (
             <label key={item.key} className="insertion-field">
               <span>{item.label}</span>
@@ -608,7 +679,7 @@ export default function InsertionPagesScreen({
           </p>
         </fieldset>
 
-        <fieldset className="insertion-field">
+        {jurisdiction === "texas-state" && <fieldset className="insertion-field">
           <legend>Certificate workflow events</legend>
           <p className="insertion-help">
             Record these only after the corresponding workflow event occurred.
@@ -676,7 +747,7 @@ export default function InsertionPagesScreen({
             An applicable event left blank blocks generation; the renderer no
             longer deletes the clause and certifies around it.
           </p>
-        </fieldset>
+        </fieldset>}
 
         <fieldset className="insertion-field">
           <legend>Document</legend>
