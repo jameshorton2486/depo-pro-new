@@ -76,4 +76,11 @@ export async function getCanonicalFinalizationStatus(root, { depositionId, stora
   return { schemaVersion: CANONICAL_FINALIZATION_VERSION, recordType: "CANONICAL_FINALIZATION_STATUS", depositionId, state, readiness, transcriptCompletion: completion ? { event: structuredClone(completion), current: completionCurrent } : null, currentFinalVersion: currentFinal ? structuredClone(currentFinal) : null, latestFinalVersion: latest ? structuredClone(latest) : null, history: structuredClone(ledger) };
 }
 
+export function getFinalizationVersion(root, { depositionId, storageRoot, finalVersionId } = {}) {
+  const location = paths(root, depositionId, storageRoot), ledger = readLedger(location.file, depositionId);
+  const event = ledger.finalizations.find(item => item.finalVersionId === clean(finalVersionId, 100));
+  if (!event) throw new Error("FINAL_VERSION_NOT_FOUND: The requested finalization version does not exist.");
+  return structuredClone(event);
+}
+
 export const _testing = { completionIsCurrent, completionState, currentEffective, digest };

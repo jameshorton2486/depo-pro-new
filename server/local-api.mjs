@@ -47,6 +47,7 @@ import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { getFinalizationReadiness } from "./finalization-readiness.mjs";
 import { getExhibitReadiness, recordExhibit, recordExhibitAudit } from "./canonical-exhibit-lifecycle.mjs";
 import { getCanonicalFinalizationStatus, recordTranscriptCompletion, requestFinalization } from "./canonical-finalization.mjs";
+import { getFinalArtifactStatus, qualifyFinalArtifacts, verifyFinalArtifacts } from "./final-artifact-provenance.mjs";
 import {
   assignCaptureSession,
   captureRecordingParts,
@@ -1854,6 +1855,18 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/api/finalization/finalize" && req.method === "POST") {
       const input = await body(req, 16 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
       return json(res, 200, await requestFinalization(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who }), origin);
+    }
+    if (req.url?.startsWith("/api/finalization/artifacts/status?") && req.method === "GET") {
+      const parameters = new URL(req.url, "http://localhost").searchParams;
+      return json(res, 200, getFinalArtifactStatus(root, { depositionId: parameters.get("depositionId"), finalVersionId: parameters.get("finalVersionId"), storageRoot: depositionStorageRoot }), origin);
+    }
+    if (req.url === "/api/finalization/artifacts/generate" && req.method === "POST") {
+      const input = await body(req, 16 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      return json(res, 200, await qualifyFinalArtifacts(root, { depositionId: input.depositionId, finalVersionId: input.finalVersionId, storageRoot: depositionStorageRoot, actor: who }), origin);
+    }
+    if (req.url === "/api/finalization/artifacts/verify" && req.method === "POST") {
+      const input = await body(req, 16 * 1024);
+      return json(res, 200, verifyFinalArtifacts(root, { depositionId: input.depositionId, finalVersionId: input.finalVersionId, storageRoot: depositionStorageRoot }), origin);
     }
     // documentKind is reported by whichever endpoint actually ran, read off the model that was
     // actually rendered. The Workspace used to name its output from its own cached record type,
