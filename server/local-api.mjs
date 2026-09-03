@@ -46,6 +46,7 @@ import { createTranscriptPdfArtifact } from "./final-document-pdf.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { getFinalizationReadiness } from "./finalization-readiness.mjs";
 import { getExhibitReadiness, recordExhibit, recordExhibitAudit } from "./canonical-exhibit-lifecycle.mjs";
+import { getCanonicalFinalizationStatus, recordTranscriptCompletion, requestFinalization } from "./canonical-finalization.mjs";
 import {
   assignCaptureSession,
   captureRecordingParts,
@@ -1840,6 +1841,19 @@ const server = http.createServer(async (req, res) => {
       const input = await body(req, 256 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
       const exhibit = recordExhibit(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.exhibit });
       return json(res, 200, { exhibit, readiness: getExhibitReadiness(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }) }, origin);
+    }
+    if (req.url?.startsWith("/api/finalization/status?") && req.method === "GET") {
+      const depositionId = new URL(req.url, "http://localhost").searchParams.get("depositionId");
+      return json(res, 200, await getCanonicalFinalizationStatus(root, { depositionId, storageRoot: depositionStorageRoot }), origin);
+    }
+    if (req.url === "/api/finalization/transcript-completion" && req.method === "POST") {
+      const input = await body(req, 64 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      const completion = await recordTranscriptCompletion(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.completion });
+      return json(res, 200, { completion }, origin);
+    }
+    if (req.url === "/api/finalization/finalize" && req.method === "POST") {
+      const input = await body(req, 16 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      return json(res, 200, await requestFinalization(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who }), origin);
     }
     // documentKind is reported by whichever endpoint actually ran, read off the model that was
     // actually rendered. The Workspace used to name its output from its own cached record type,

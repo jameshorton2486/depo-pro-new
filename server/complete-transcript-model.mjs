@@ -4,11 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { assembleInsertionInput } from "./insertion-pages/assemble.mjs";
-import { buildTexasInsertionPageSet } from "./insertion-pages/build-pages.mjs";
+import { buildInsertionPageSet } from "./insertion-pages/build-pages.mjs";
 import { horizontalOverflowFindings } from "./insertion-pages/page-model.mjs";
 import { loadTemplateVariant } from "./insertion-pages/templates.mjs";
 import { validateInsertionInput } from "./insertion-pages/validate.mjs";
-import { selectInsertionVariant } from "./insertion-pages/variants.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 
 export const COMPLETE_TRANSCRIPT_MODEL_VERSION="1.0.0";
@@ -155,7 +154,11 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   const signatureDisposition=operator.signatureDisposition??value(record?.signature?.status);
   const jurisdiction=operator.jurisdiction??value(record?.case?.jurisdictionType);
   const normalizedOperator={...operator,jurisdiction,signatureDisposition};
-  const variant=selectInsertionVariant(normalizedOperator);
+  // The insertion authority owns certification routing. In particular, Federal variants combine
+  // the current-effective OATH/AFFIRMATION administration with Rule 30(e) REQUESTED/NOT_REQUESTED;
+  // the legacy signature-only selector cannot name those approved variants.
+  const routed=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination:{},template:null});
+  const variant=routed.variant;
   if(!variant)throw new Error("COMPLETE_TRANSCRIPT_VARIANT_REQUIRED");
   const template=await loadTemplateVariant(variant);
   if(!template.available)throw new Error(`COMPLETE_TRANSCRIPT_TEMPLATE_UNAVAILABLE:${variant}`);
@@ -163,13 +166,13 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   let input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
   const findings=validateInsertionInput(input),blockers=findings.filter(finding=>finding.severity==="blocking");
   if(blockers.length)throw new Error(`COMPLETE_TRANSCRIPT_VALIDATION_BLOCKED:${blockers.map(item=>`${item.code}:${item.target}`).join(",")}`);
-  let insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
+  let insertion=buildInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
   const frontPages=insertion.pages.filter(page=>FRONT_ROLES.has(page.role)).length;
   const preCertificationPages=insertion.pages.filter(page=>["changes","signature"].includes(page.role)).length;
   const certificationPages=insertion.pages.filter(page=>page.role.startsWith("certification")).length;
   pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],examiner:examinerName(record,operator),frontPages,preCertificationPages,certificationPages,resolvedExaminations:printModel.examinations??[],record});
   input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
-  insertion=buildTexasInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
+  insertion=buildInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
   const front=insertion.pages.filter(page=>FRONT_ROLES.has(page.role));
   const back=insertion.pages.filter(page=>!FRONT_ROLES.has(page.role));
   const pages=[];
