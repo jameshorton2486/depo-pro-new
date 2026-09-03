@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
+import { protectionProjection } from "./protected-records.mjs";
 
 export const OPENING_STATE_VERSION = "1.0.0";
 export const OPENING_STEPS = Object.freeze([
@@ -86,6 +87,13 @@ function blankState(depositionId){return{
   examiningAttorneyId:null,
   updatedAt:null,
 }}
+
+// The screen reads protection from the same module the guard refuses with, so what the reporter is
+// told and what the write does cannot drift apart.
+function protectionFor(root,depositionId,storageRoot){
+  try{return protectionProjection(depositionDirectory(root,depositionId,{storageRoot}))}
+  catch{return{protected:true,reason:null,unlocked:false,unlockedUntil:null,msRemaining:0,unlockCount:0}}
+}
 
 function readCanonical(root,depositionId,storageRoot){
   const file=canonicalFile(root,depositionId,storageRoot);
@@ -181,5 +189,5 @@ export function getOpeningProjection(root,{depositionId,storageRoot,scriptDefini
     interpreterOath:state.interpreterDisposition==="NOT_APPLICABLE"||(state.interpreterDisposition==="REQUIRED"&&scriptReady("interpreterOath")),
     witnessOath:state.witnessOathSelection!=="UNRESOLVED"&&scriptReady("witnessOath"),examination:Boolean(state.examiningAttorneyId),
   };
-  return{depositionId,canonical,state,fields,participants,scripts,readiness,completeCount:OPENING_STEPS.filter(id=>readiness[id]).length,totalCount:OPENING_STEPS.length};
+  return{depositionId,canonical,state,fields,participants,scripts,readiness,protection:protectionFor(root,depositionId,storageRoot),completeCount:OPENING_STEPS.filter(id=>readiness[id]).length,totalCount:OPENING_STEPS.length};
 }

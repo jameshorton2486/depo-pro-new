@@ -21,6 +21,7 @@ import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
 import { RANGE_ACCEPTANCE_REFUSED, acceptRangeProposal } from "./range-proposal-acceptance.mjs";
 import { STALE_CORRECTION_PROPOSAL } from "./review-state-hash.mjs";
+import { DEPOSITION_PROTECTED, unlockDeposition } from "./protected-records.mjs";
 import { KEYTERM_PRODUCT_CAP, KEYTERM_TOKEN_BUDGET, estimateKeytermTokens } from "./keyterm-limits.mjs";
 import { mediaContentType, mediaResponse } from "./media-range.mjs";
 import { needsPlaybackProxy, probeMediaForPlayback, renderPlaybackProxy } from "./playback-proxy.mjs";
@@ -53,7 +54,7 @@ import { insertionTemplateCatalog } from "./insertion-pages/templates.mjs";
 import { createReporter, importReporters, listReporters, updateReporter } from "./reporter-store.mjs";
 import { inspectStorage } from "./storage-inventory.mjs";
 import { getOpeningProjection, saveOpeningState } from "./opening-procedures.mjs";
-import { attestWitnessSworn } from "./deposition-store.mjs";
+import { attestWitnessSworn, depositionDirectory } from "./deposition-store.mjs";
 import { COMPLETE_RECORD_TYPE } from "../app/document-status.mjs";
 import { AssemblyConflictError, AssemblyRefusedError, assemblyReadiness, writeAssembly } from "./complete-transcript-assembly.mjs";
 import { masterDataFromExtraction, projectDeepgramKeyterms, projectTexasFreelanceUfm } from "./master-deposition-data.mjs";
@@ -496,6 +497,18 @@ const server = http.createServer(async (req,res) => {
       // roster it is about to label against reflects what was just saved.
       return json(res,200,{...written,candidates:getSpeakerCandidates(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot}).candidates},origin);
     }
+    if(req.url==="/api/deposition/unlock-protected"&&req.method==="POST"){
+      // The one door through the guard, and it opens for a fixed window rather than toggling off.
+      // There is deliberately no matching lock route: a reporter who forgets is the ordinary case,
+      // and a protection that depends on being switched back on is one that is usually off.
+      //
+      // Nothing here establishes WHO opened it -- the application still has no identity. It
+      // establishes THAT a person did, at a time, through a screen, which is the fact the guard
+      // actually needs and the one an unattended process cannot produce.
+      const input=await body(req,16*1024);
+      const directory=depositionDirectory(root,input.depositionId,{storageRoot:depositionStorageRoot});
+      return json(res,200,unlockDeposition(directory,{reason:input.reason}),origin);
+    }
     if(req.url==="/api/deposition/honorific"&&req.method==="POST"){
       const input=await body(req,16*1024);
       return json(res,200,writeParticipantHonorific(root,{depositionId:input.depositionId,participantId:input.participantId,honorific:input.honorific??null,storageRoot:depositionStorageRoot}),origin);
@@ -590,6 +603,7 @@ const server = http.createServer(async (req,res) => {
     // generic handler below reported it as a 500 -- which tells the reporter the application
     // broke, when in fact it protected their transcript.
     if(error?.code===STALE_REPORTER_TRANSACTION)return json(res,409,{error:error.message,code:error.code,expected:error.expected,carried:error.carried},origin);
+    if(error?.code===DEPOSITION_PROTECTED)return json(res,423,{error:error.message,code:error.code},origin);
     if(error?.code===STALE_CORRECTION_PROPOSAL)return json(res,409,{error:error.message,code:error.code,reason:error.reason??null,expected:error.expected??null,carried:error.carried??null},origin);
     // A proposal the server will not apply is a refusal with a cause, not a fault. Reported as 422
     // so the reporter is told WHY rather than being shown a generic failure.

@@ -14,25 +14,52 @@ type Script={id:string;title:string;classification:string;whenToUse:string;text:
 type OpeningState={verifiedFields:Record<string,boolean>;verifiedParticipants:Record<string,boolean>;scripts:Record<string,{completedOnRecord:boolean;note:string}>;interpreterDisposition:string;witnessOathSelection:string;examiningAttorneyId:string|null};
 type Envelope2=Envelope|undefined;
 type Canonical={deposition?:{witnessSworn?:Envelope2};reporter?:{fullName?:Envelope2;csrNumber?:Envelope2}};
-type Projection={depositionId:string;canonical?:Canonical;state:OpeningState;fields:Field[];participants:Participant[];scripts:Script[];readiness:Record<string,boolean>;completeCount:number;totalCount:number};
+type Protection={protected:boolean;reason:string|null;unlocked:boolean;unlockedUntil:string|null;msRemaining:number;unlockCount:number};
+type Projection={depositionId:string;canonical?:Canonical;state:OpeningState;fields:Field[];participants:Participant[];scripts:Script[];readiness:Record<string,boolean>;protection:Protection|null;completeCount:number;totalCount:number};
 
 const value=(item?:Envelope)=>item?.value===null||item?.value===undefined||item?.value===""?"Missing":Array.isArray(item.value)?item.value.join(", "):String(item.value);
+const minutesLeft=(ms:number)=>Math.max(1,Math.round(ms/60000));
 const status=(item:Envelope,verified:boolean)=>verified?"Verified":item.state==="MISSING"?"Missing":item.source==="NOD_EXTRACTED"?"Extracted":item.state.replaceAll("_"," ").toLowerCase();
 
 export default function OpeningProceduresScreen({deposition,onBack,onContinue}:{deposition:{id:string;caseStyle:string;witness:string};onBack:()=>void;onContinue:()=>void}){
-  const [projection,setProjection]=useState<Projection|null>(null),[tab,setTab]=useState<"verify"|"appearances"|"scripts">("verify"),[error,setError]=useState(""),[busy,setBusy]=useState(false),[expandAll,setExpandAll]=useState(false),[attestSworn,setAttestSworn]=useState<""|"true"|"false">(""),[attestWhy,setAttestWhy]=useState("");
+  const [projection,setProjection]=useState<Projection|null>(null),[tab,setTab]=useState<"verify"|"appearances"|"scripts">("verify"),[error,setError]=useState(""),[busy,setBusy]=useState(false),[expandAll,setExpandAll]=useState(false),[attestSworn,setAttestSworn]=useState<""|"true"|"false">(""),[attestWhy,setAttestWhy]=useState(""),[unlockWhy,setUnlockWhy]=useState("");
   useEffect(()=>{let current=true;fetch(`${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);if(current)setProjection(body)}).catch(reason=>current&&setError(reason instanceof Error?reason.message:"Opening procedures could not be loaded."));return()=>{current=false}},[deposition.id]);
   async function save(state:OpeningState){setBusy(true);setError("");try{const response=await fetch(`${API}/api/opening`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId:deposition.id,state})}),body=await response.json();if(!response.ok)throw new Error(body.error);setProjection(body)}catch(reason){setError(reason instanceof Error?reason.message:"Opening procedures could not be saved.")}finally{setBusy(false)}}
   // Separate from save() on purpose. save() writes workflow values that carry no attribution; this
   // writes an attested fact to the canonical record through the correction log, which is the only
   // path allowed to influence a certified page. Changing the selector above must never call this.
   async function attest(sworn:boolean,why:string){setBusy(true);setError("");try{const response=await fetch(`${API}/api/opening/oath-attestation`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId:deposition.id,sworn,why})}),body=await response.json();if(!response.ok)throw new Error(body.error);setProjection(body);setAttestSworn("");setAttestWhy("")}catch(reason){setError(reason instanceof Error?reason.message:"The oath attestation could not be recorded.")}finally{setBusy(false)}}
+  // Deliberately re-reads the projection instead of setting a local "unlocked" flag. The guard reads
+  // the same file this reports, and a screen that decided for itself that the record was open could
+  // show an open door while every write was still refused.
+  async function unlock(){
+    setBusy(true);setError("");
+    try{
+      const response=await fetch(`${API}/api/deposition/unlock-protected`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId:deposition.id,reason:unlockWhy})});
+      const body=await response.json();if(!response.ok)throw new Error(body.error);
+      const refreshed=await fetch(`${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`);
+      const next=await refreshed.json();if(!refreshed.ok)throw new Error(next.error);
+      setProjection(next);setUnlockWhy("");
+    }catch(reason){setError(reason instanceof Error?reason.message:"This record could not be opened for editing.")}
+    finally{setBusy(false)}
+  }
+
   if(!projection)return <main className="opening-shell"><section className="opening-card"><button className="back-button" onClick={onBack}>← Back to Workspace</button><h1>Deposition Opening Procedures</h1><p>{error||"Loading the canonical deposition record…"}</p></section></main>;
   const state=projection.state;
   const verifyField=(path:string,checked:boolean)=>save({...state,verifiedFields:{...state.verifiedFields,[path]:checked}});
   const verifyParticipant=(id:string,checked:boolean)=>save({...state,verifiedParticipants:{...state.verifiedParticipants,[id]:checked}});
   const updateScript=(id:string,change:Partial<{completedOnRecord:boolean;note:string}>)=>save({...state,scripts:{...state.scripts,[id]:{...state.scripts[id],...change}}});
   return <main className="opening-shell">
+    {projection.protection?.protected&&<section className={`opening-protection ${projection.protection.unlocked?"open":"closed"}`}>
+        <div>
+          <strong>{projection.protection.unlocked?`Open for editing — about ${minutesLeft(projection.protection.msRemaining)} minute${minutesLeft(projection.protection.msRemaining)===1?"":"s"} left`:"This record is protected"}</strong>
+          <p>{projection.protection.reason??"Its canonical record and correction log are closed to writes."}{projection.protection.unlocked?" It will close again on its own.":" Nothing can change the canonical record — including an automated run — until you open it here."}</p>
+        </div>
+        {!projection.protection.unlocked&&<div className="opening-protection-unlock">
+          <label>Why are you opening it?<input value={unlockWhy} disabled={busy} onChange={event=>setUnlockWhy(event.target.value)} placeholder="Entering the on-record start time"/></label>
+          <button className="secondary-button" type="button" disabled={busy||!unlockWhy.trim()} onClick={()=>void unlock()}>Open for editing</button>
+        </div>}
+      </section>}
     <header className="opening-header"><div><span className="eyebrow">OPEN DEPOSITION</span><h1>Deposition Opening Procedures</h1><p>{deposition.caseStyle} · {deposition.witness}</p></div><div className="opening-progress"><strong>{projection.completeCount}/{projection.totalCount}</strong><span>Opening readiness</span></div></header>
     <section className="opening-card">
       <div className="opening-tabs" role="tablist" aria-label="Opening procedure sections">
@@ -50,7 +77,7 @@ export default function OpeningProceduresScreen({deposition,onBack,onContinue}:{
         return <div className="opening-section" style={{marginTop:"1rem"}}>
           <div className="opening-section-heading"><div>
             <h2>Oath attestation</h2>
-            <p>A separate act from the selection above. The selection is your working note; this is the fact the certificate rests on, and it is written to the deposition record with your name and the time.</p>
+            <p>A separate act from the selection above. The selection is your working note; this is the fact the certificate rests on, and it is written to the deposition record in your own words, with the time.</p>
           </div></div>
           {attested
             ? <p className="opening-when"><strong>{sworn?.value===true?"Attested: the witness was sworn.":"Attested: the witness was not sworn."}</strong>{" "}
