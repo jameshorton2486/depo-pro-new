@@ -15,9 +15,11 @@ test("preparation panels cannot collapse the transcript tools out of view", () =
 test("quick transcript actions remain outside the scrolling 25-line document", () => {
   const source = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
   assert.match(source, /<aside className="workspace-quick-tools" aria-label="Quick transcript actions">/);
-  assert.match(css, /\.workspace-stage\s*\{[^}]*display:flex/);
-  assert.match(css, /\.workspace-quick-tools\s*\{[^}]*position:sticky[^}]*top:14px/);
-  assert.match(css, /@media \(max-width:900px\)[\s\S]*?\.workspace-quick-tools\s*\{[^}]*position:absolute[^}]*bottom:14px/);
+  assert.match(source, /workspace-quick-tools-grid/);
+  assert.match(css, /\.workspace-stage\s*\{[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden/);
+  assert.match(css, /\.workspace-quick-tools\s*\{[^}]*order:-1[^}]*position:sticky[^}]*top:0/);
+  assert.match(css, /\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(5,[^}]*grid-template-rows:repeat\(2,52px\)/);
+  assert.match(css, /@media\(max-width:700px\)[\s\S]*?\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(3/);
 });
 
 test("role names in tools are explicit without changing transcript rendering", () => {

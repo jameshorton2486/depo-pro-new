@@ -922,8 +922,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
           <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
-            <strong>Quick tools</strong>
-            <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word"}</span>
+            <div className="workspace-quick-tools-copy">
+              <strong>Quick tools</strong>
+              <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word or range"}</span>
+            </div>
+            <div className="workspace-quick-tools-grid">
             <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
             <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
             <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
@@ -935,6 +938,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
             <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
             <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>
+            </div>
           </aside>
         </div>
 
