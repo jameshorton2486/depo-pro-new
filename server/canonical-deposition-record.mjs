@@ -427,8 +427,12 @@ export function createCanonicalDepositionRecord(
     // Events are append-only so requests, stipulations, corrections, and completion remain
     // independently attributable.
     reviewElection: {
-      schemaVersion: "1.0.0",
+      schemaVersion: "2.0.0",
       events: [],
+      notifications: [],
+      completions: [],
+      corrections: [],
+      overrides: [],
     },
     // certificationDate and furtherCertificationDate are two dates, not one printed twice. The
     // certificate says so itself: certification-2 closes "Further certification requirements

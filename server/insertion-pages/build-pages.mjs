@@ -466,6 +466,23 @@ export function buildFederalCertificatePageSet(input, { setId, depositionId, gen
   if (!template) throw new Error(`FEDERAL_CERTIFICATE_TEMPLATE_UNAVAILABLE: ${input.variant}`);
   const profile = input.layoutProfile?.id === TEXAS_FREELANCE_DEPOSITION_V1.id ? input.layoutProfile : TEXAS_FREELANCE_DEPOSITION_V1;
   const pages = renderRolePages(template, certifiedDateValues(input.fieldValues), { role: "certification", profile });
+  const corrections=input.reviewLifecycle?.qualifyingCorrections ?? [];
+  if (corrections.length) {
+    const source=[{text:"RULE 30(e) CHANGES",fields:[]},{text:"",fields:[]}];
+    for (const item of corrections) source.push(
+      {text:`Target: ${item.target}`,fields:[]},
+      {text:`Original: ${item.originalText}`,fields:[]},
+      {text:`Change: ${item.proposedChange}`,fields:[]},
+      {text:`Reason: ${item.reason}`,fields:[]},
+      {text:"",fields:[]},
+    );
+    const wrapped=source.flatMap(line=>wrapAdministrativeLine(line,profile.charactersPerLine));
+    for (let offset=0;offset<wrapped.length;offset+=profile.linesPerPage) {
+      const lines=wrapped.slice(offset,offset+profile.linesPerPage);
+      while(lines.length<profile.linesPerPage) lines.push({text:"",fields:[]});
+      pages.push({pageNumber:0,role:"rule30eChanges",lines:lines.map((line,index)=>({line:index+1,text:line.text,fields:[]}))});
+    }
+  }
   pages.forEach((page, index) => { page.pageNumber = index + 1; });
   return createInsertionPageSet({
     setId, depositionId, variant: input.variant, generatedAt, pages,

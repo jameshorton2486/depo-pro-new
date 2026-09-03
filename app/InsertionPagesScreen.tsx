@@ -148,6 +148,11 @@ type ReviewElection = {
   requestedBy?: string | null;
   sourceAnchor?: string | null;
 };
+type ReviewLifecycle = {
+  notifications?: Array<{ id?: string; notifiedAt?: string; officerIdentity?: string; recipient?: string; method?: string | null; sourceAnchor?: string; supersedesEventId?: string | null }>;
+  completions?: Array<{ id?: string; completedAt?: string; disposition?: string; sourceAnchor?: string; supersedesEventId?: string | null }>;
+  corrections?: Array<{ id?: string; target?: string; originalText?: string; proposedChange?: string; reason?: string; submittedAt?: string; sourceAnchor?: string; supersedesEventId?: string | null }>;
+};
 const EMPTY_WORKFLOW: CertificateWorkflow = {
   submissionDate: "",
   returnDeadline: "",
@@ -189,6 +194,21 @@ export default function InsertionPagesScreen({
   const [requestedBy, setRequestedBy] = useState("");
   const [reviewCorrectionReason, setReviewCorrectionReason] = useState("");
   const [administrationSelection, setAdministrationSelection] = useState<string | null>(null);
+  const [reviewLifecycle, setReviewLifecycle] = useState<ReviewLifecycle>({});
+  const [notificationAt,setNotificationAt]=useState("");
+  const [notificationOfficer,setNotificationOfficer]=useState("");
+  const [notificationRecipient,setNotificationRecipient]=useState("");
+  const [notificationMethod,setNotificationMethod]=useState("");
+  const [notificationAnchor,setNotificationAnchor]=useState("");
+  const [reviewCompleted,setReviewCompleted]=useState(false);
+  const [reviewCompletedAt,setReviewCompletedAt]=useState("");
+  const [reviewCompletionAnchor,setReviewCompletionAnchor]=useState("");
+  const [changeTarget,setChangeTarget]=useState("");
+  const [changeOriginal,setChangeOriginal]=useState("");
+  const [changeProposed,setChangeProposed]=useState("");
+  const [changeReason,setChangeReason]=useState("");
+  const [changeSubmittedAt,setChangeSubmittedAt]=useState("");
+  const [changeAnchor,setChangeAnchor]=useState("");
   // What is already on the record, before the reporter can overwrite it.
   //
   // This screen used to start at EMPTY_CERTIFICATE and never read. runPreview posts the whole
@@ -280,7 +300,7 @@ export default function InsertionPagesScreen({
         if (openingResponse.ok) {
           const body = (await openingResponse.json()) as {
             canonicalOpening?: { oathAdministrations?: Array<{ selection?: string; supersedesEventId?: string | null; id?: string }> };
-            canonical?: { reviewElection?: { events?: ReviewElection[] } };
+            canonical?: { reviewElection?: { events?: ReviewElection[] } & ReviewLifecycle };
           };
           const administrations = body.canonicalOpening?.oathAdministrations ?? [];
           const superseded = new Set(administrations.map((item) => item.supersedesEventId).filter(Boolean));
@@ -289,6 +309,7 @@ export default function InsertionPagesScreen({
           const election = body.canonical?.reviewElection?.events?.at(-1) ?? null;
           setReviewElection(election);
           setRequestedBy(election?.requestedBy ?? "");
+          setReviewLifecycle(body.canonical?.reviewElection ?? {});
           if (election) setSignatureDisposition(election.status === "REQUESTED" ? "requested" : "waived");
         }
       } catch {
@@ -361,6 +382,21 @@ export default function InsertionPagesScreen({
             },
           })) as { election: ReviewElection };
           setReviewElection(election.election);
+        }
+        if (status === "REQUESTED") {
+          const currentNotification=reviewLifecycle.notifications?.at(-1);
+          if (!currentNotification && notificationAt && notificationOfficer.trim() && notificationRecipient.trim() && notificationAnchor.trim()) {
+            const result=await post("/api/opening/rule-30e-notification",{depositionId:deposition.id,notification:{notifiedAt:new Date(notificationAt).toISOString(),officerIdentity:notificationOfficer.trim(),recipient:notificationRecipient.trim(),method:notificationMethod.trim()||null,sourceAnchor:notificationAnchor.trim()}}) as {notification: NonNullable<ReviewLifecycle["notifications"]>[number]};
+            setReviewLifecycle(current=>({...current,notifications:[...(current.notifications??[]),result.notification]}));
+          }
+          if (changeTarget.trim() && changeOriginal.trim() && changeProposed.trim() && changeReason.trim() && changeSubmittedAt && changeAnchor.trim()) {
+            const result=await post("/api/opening/rule-30e-correction",{depositionId:deposition.id,correction:{target:changeTarget.trim(),originalText:changeOriginal.trim(),proposedChange:changeProposed.trim(),reason:changeReason.trim(),submittedAt:new Date(changeSubmittedAt).toISOString(),sourceAnchor:changeAnchor.trim()}}) as {correction: NonNullable<ReviewLifecycle["corrections"]>[number]};
+            setReviewLifecycle(current=>({...current,corrections:[...(current.corrections??[]),result.correction]}));
+          }
+          if (reviewCompleted && !(reviewLifecycle.completions?.length) && reviewCompletedAt && reviewCompletionAnchor.trim()) {
+            const result=await post("/api/opening/rule-30e-completion",{depositionId:deposition.id,completion:{disposition:"COMPLETED",completedAt:new Date(reviewCompletedAt).toISOString(),sourceAnchor:reviewCompletionAnchor.trim()}}) as {completion: NonNullable<ReviewLifecycle["completions"]>[number]};
+            setReviewLifecycle(current=>({...current,completions:[...(current.completions??[]),result.completion]}));
+          }
         }
       }
       // Saved first, and to the record rather than into the render request: the certificate values
@@ -619,10 +655,31 @@ export default function InsertionPagesScreen({
               Administration: <strong>{administrationSelection ?? "Not recorded"}</strong>. This comes from the protected Opening attestation and cannot be changed here.
             </p>
             {signatureDisposition === "requested" && (
-              <label className="insertion-field">
+              <><label className="insertion-field">
                 <span>Who requested Rule 30(e) review</span>
                 <input type="text" value={requestedBy} onChange={(event) => setRequestedBy(event.target.value)} placeholder="Deponent or party" />
               </label>
+              <p className="insertion-help">Officer notification is a separate factual event. The 30-day deadline is derived from it; generating a transcript does not create notification.</p>
+              {!reviewLifecycle.notifications?.length && <>
+                <label className="insertion-field"><span>Officer notification date and time</span><input type="datetime-local" value={notificationAt} onChange={event=>setNotificationAt(event.target.value)} /></label>
+                <label className="insertion-field"><span>Notifying officer</span><input value={notificationOfficer} onChange={event=>setNotificationOfficer(event.target.value)} /></label>
+                <label className="insertion-field"><span>Recipient/deponent</span><input value={notificationRecipient} onChange={event=>setNotificationRecipient(event.target.value)} /></label>
+                <label className="insertion-field"><span>Notification method (if recorded)</span><input value={notificationMethod} onChange={event=>setNotificationMethod(event.target.value)} /></label>
+                <label className="insertion-field"><span>Notification evidence anchor</span><input value={notificationAnchor} onChange={event=>setNotificationAnchor(event.target.value)} placeholder="Example: email:message-id or transcript:page:line" /></label>
+              </>}
+              {!!reviewLifecycle.notifications?.length && <p className="insertion-help">Notification recorded. Deadline and lifecycle status are derived by the server from canonical evidence.</p>}
+              <fieldset className="insertion-field"><legend>Rule 30(e) correction evidence (optional)</legend>
+                <label className="insertion-field"><span>Page/line or stable target</span><input value={changeTarget} onChange={event=>setChangeTarget(event.target.value)} /></label>
+                <label className="insertion-field"><span>Original text/reference</span><input value={changeOriginal} onChange={event=>setChangeOriginal(event.target.value)} /></label>
+                <label className="insertion-field"><span>Proposed change</span><input value={changeProposed} onChange={event=>setChangeProposed(event.target.value)} /></label>
+                <label className="insertion-field"><span>Reason supplied by deponent</span><input value={changeReason} onChange={event=>setChangeReason(event.target.value)} /></label>
+                <label className="insertion-field"><span>Submitted date and time</span><input type="datetime-local" value={changeSubmittedAt} onChange={event=>setChangeSubmittedAt(event.target.value)} /></label>
+                <label className="insertion-field"><span>Correction evidence anchor</span><input value={changeAnchor} onChange={event=>setChangeAnchor(event.target.value)} /></label>
+                <small>Submission preserves evidence; it does not rewrite transcript testimony. Timeliness and qualification are derived by the server.</small>
+              </fieldset>
+              <label className="insertion-option"><input type="checkbox" checked={reviewCompleted} onChange={event=>setReviewCompleted(event.target.checked)} /><span>Review completed</span></label>
+              {reviewCompleted && <><label className="insertion-field"><span>Completion date and time</span><input type="datetime-local" value={reviewCompletedAt} onChange={event=>setReviewCompletedAt(event.target.value)} /></label><label className="insertion-field"><span>Completion evidence anchor</span><input value={reviewCompletionAnchor} onChange={event=>setReviewCompletionAnchor(event.target.value)} /></label></>}
+              </>
             )}
             {reviewElection && reviewElection.status !== (signatureDisposition === "requested" ? "REQUESTED" : "NOT_REQUESTED") && (
               <label className="insertion-field">

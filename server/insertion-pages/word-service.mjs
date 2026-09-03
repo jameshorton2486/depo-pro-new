@@ -11,8 +11,10 @@ import { buildInsertionPageSet } from "./build-pages.mjs";
 import { createRenderingSpec, workspaceDocumentFromRenderingSpec } from "./rendering-spec.mjs";
 import { loadTemplateVariant } from "./templates.mjs";
 import { validateInsertionInput } from "./validate.mjs";
+import { createFixedPageDocxSpec } from "../final-document-docx.mjs";
+import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../texas-freelance-deposition-profile.mjs";
 
-const rendererScript = fileURLToPath(new URL("./python-docx-renderer.py", import.meta.url));
+const rendererScript = fileURLToPath(new URL("../fixed-page-docx-renderer.py", import.meta.url));
 const defaultFormatterRoot = path.join(os.homedir(), "transcript_formatter");
 
 // Resolved here rather than at module load, because DEPO_PRO_FORMATTER_ROOT is what actually
@@ -83,8 +85,11 @@ export async function createInsertionWordArtifact(root, depositionId, request, o
   const prepared = await prepareInsertionRenderingArtifact(root, depositionId, request, options);
   const outputPath = safeTranscriptPath(prepared.directory, request.outputRelativePath ?? (request.mode === "standalone" ? "transcript/insertion-pages.docx" : "transcript/transcript-with-insertion-pages.docx"));
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const result = spawnSync(process.env.DEPO_PRO_PYTHON ?? "python", [rendererScript, "--spec", prepared.specPath, "--output", outputPath, "--formatter-root", formatterRoot()], { encoding: "utf8", windowsHide: true });
+  const printModel={recordType:"INSERTION_PAGE_DOCUMENT_MODEL",modelHash:prepared.renderingSpec.sha256,source:prepared.renderingSpec.source,layoutProfile:TEXAS_FREELANCE_DEPOSITION_V1,pages:prepared.renderingSpec.pages.map(page=>({id:page.id,pageNumber:page.pageNumber,role:page.role,sectionKind:"administrative",editable:false,lines:page.lines.map(line=>({position:line.line,content:line.text,occupied:Boolean(line.text),paragraphId:null,fragments:[],fields:line.fields}))}))};
+  const fixedSpec=createFixedPageDocxSpec(printModel), fixedSpecPath=safeTranscriptPath(prepared.directory,request.fixedRenderingSpecRelativePath??"transcript/insertion-pages-fixed-rendering-spec.json"),mappingPath=safeTranscriptPath(prepared.directory,request.lineMappingRelativePath??"transcript/insertion-pages-line-map.json");
+  writeJsonAtomic(fixedSpecPath,fixedSpec);
+  const result = spawnSync(process.env.DEPO_PRO_PYTHON ?? "python", [rendererScript, "--spec", fixedSpecPath, "--output", outputPath, "--mapping", mappingPath], { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) throw new Error(`PYTHON_DOCX_RENDER_FAILED: ${(result.stderr || result.stdout || "unknown formatter error").trim()}`);
   const renderer = JSON.parse(result.stdout.trim());
-  return { outputPath, bytes: fs.statSync(outputPath).size, mode: request.mode === "standalone" ? "standalone" : "full", variant: prepared.variant, findings: prepared.findings, pageSetSha256: prepared.pageSet.sha256, renderingSpecSha256: prepared.renderingSpec.sha256, renderingSpecPath: prepared.specPath, renderer };
+  return { outputPath, bytes: fs.statSync(outputPath).size, mode: request.mode === "standalone" ? "standalone" : "full", variant: prepared.variant, findings: prepared.findings, pageSetSha256: prepared.pageSet.sha256, renderingSpecSha256: prepared.renderingSpec.sha256, renderingSpecPath: prepared.specPath, fixedRenderingSpecSha256:fixedSpec.sha256, fixedRenderingSpecPath:fixedSpecPath, mappingPath, renderer };
 }

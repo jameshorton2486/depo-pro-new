@@ -3,7 +3,7 @@ import { UFM_FREELANCE_LAYOUT_PROFILE } from "./layout-profile.mjs";
 import { selectInsertionVariant } from "./variants.mjs";
 import { currentCanonicalOpeningFacts } from "../canonical-opening-events.mjs";
 import { filingIdentifier } from "../filing-identifier.mjs";
-import { currentReviewElection } from "../canonical-review-election.mjs";
+import { resolveReviewLifecycle } from "../canonical-review-election.mjs";
 import { certificationRoute } from "./certification-route.mjs";
 
 export function canonicalValue(value) {
@@ -171,7 +171,8 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const openingFacts = currentCanonicalOpeningFacts(record);
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
-  const reviewElection = currentReviewElection(record);
+  const reviewLifecycle = resolveReviewLifecycle(record);
+  const reviewElection = reviewLifecycle.election;
   const route = certificationRoute({ jurisdiction, signatureDisposition, oathAdministration:openingFacts.oathAdministration, reviewElection });
   const variant = jurisdiction === "federal" || openingFacts.oathAdministration?.selection === "AFFIRMATION"
     ? route.key
@@ -219,6 +220,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     variant,
     certificationRoute: route,
     reviewElection,
+    reviewLifecycle,
     caption: { court, causeNumber, filingNumber:causeNumber, filingNumberLabel:filing.displayLabel, filingNumberSemantic:filing.semantic, caseStyle, label: operator.captionLabel ?? null },
     // witnessSworn is the reporter's attestation that an oath was administered, carried on the
     // canonical record with who/why/at through the correction log. It is lifted from the record and

@@ -155,15 +155,15 @@ const value = (item?: Envelope) =>
 const status = (item: Envelope, verified: boolean) =>
   verified
     ? "Verified"
-    : item.state === "MISSING"
+    : !item.state || item.state === "MISSING"
       ? "Missing"
       : item.source === "NOD_EXTRACTED"
         ? "Extracted"
         : item.state.replaceAll("_", " ").toLowerCase();
 const displayValue = (item: Field) =>
   typeof item.value === "boolean" ? (item.value ? "Yes" : "No") : value(item);
-const sourceLabel = (source: string) =>
-  source.replaceAll("_", " ").toLowerCase();
+const sourceLabel = (source?: string) =>
+  source ? source.replaceAll("_", " ").toLowerCase() : "source not recorded";
 const STIPULATION_TOPICS = [
   ["remote_oath", "Remote oath"], ["signature_review", "Signature review"],
   ["custody", "Custody"], ["exhibits", "Exhibits"], ["objections", "Objections"], ["other", "Other"],

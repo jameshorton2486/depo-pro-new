@@ -184,7 +184,7 @@ import {
   assemblyReadiness,
   writeAssembly,
 } from "./complete-transcript-assembly.mjs";
-import { recordReviewElection } from "./canonical-review-election.mjs";
+import { recordReviewElection, recordReviewNotification, recordReviewCompletion, recordReviewCorrection, recordReviewOverride } from "./canonical-review-election.mjs";
 import {
   masterDataFromExtraction,
   projectDeepgramKeyterms,
@@ -1518,6 +1518,26 @@ const server = http.createServer(async (req, res) => {
       const input=await body(req,64*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
       const election=recordReviewElection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.election,actor:who});
       return json(res,200,{election},origin);
+    }
+    if (req.url === "/api/opening/rule-30e-notification" && req.method === "POST") {
+      const input=await body(req,64*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const notification=recordReviewNotification(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.notification,actor:who});
+      return json(res,200,{notification},origin);
+    }
+    if (req.url === "/api/opening/rule-30e-completion" && req.method === "POST") {
+      const input=await body(req,64*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const completion=recordReviewCompletion(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.completion,actor:who});
+      return json(res,200,{completion},origin);
+    }
+    if (req.url === "/api/opening/rule-30e-correction" && req.method === "POST") {
+      const input=await body(req,128*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const correction=recordReviewCorrection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.correction,actor:who});
+      return json(res,200,{correction},origin);
+    }
+    if (req.url === "/api/opening/rule-30e-override" && req.method === "POST") {
+      const input=await body(req,128*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const override=recordReviewOverride(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.override,actor:who});
+      return json(res,200,{override},origin);
     }
     if (
       req.url === "/api/opening/stipulation-response" &&

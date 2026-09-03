@@ -121,6 +121,7 @@ function validateFederalCertificate(input, findings) {
   if (input.jurisdiction !== "federal") return;
   const administration = input.deposition?.oathAdministration;
   const review = input.reviewElection;
+  const lifecycle = input.reviewLifecycle;
   if (!administration || !["OATH", "AFFIRMATION"].includes(administration.selection)) {
     findings.push(blocking("FEDERAL_ADMINISTRATION_UNRESOLVED", "deposition.oathAdministration", "A verified oath or affirmation administration is required for the Federal certificate."));
     return;
@@ -137,6 +138,13 @@ function validateFederalCertificate(input, findings) {
     findings.push(blocking("FEDERAL_RULE_30E_UNRESOLVED", "reviewElection.status", "Record whether Rule 30(e) review was requested before generating the Federal certificate."));
   } else if (!review.sourceAnchor || !review.recordedBy || !review.recordedAt) {
     findings.push(blocking("FEDERAL_RULE_30E_EVIDENCE_REQUIRED", "reviewElection.sourceAnchor", "The Rule 30(e) election must be attributable and anchored to evidence."));
+  }
+  if (review?.status === "REQUESTED") {
+    if (!lifecycle?.notification) {
+      findings.push(blocking("FEDERAL_RULE_30E_NOTIFICATION_REQUIRED", "reviewLifecycle.notification", "Requested Rule 30(e) review cannot be finalized until the officer's notification is recorded with attributable evidence."));
+    } else if (!lifecycle.terminal) {
+      findings.push(blocking("FEDERAL_RULE_30E_REVIEW_OPEN", "reviewLifecycle.status", `Requested Rule 30(e) review remains ${String(lifecycle.status ?? "unresolved").toLowerCase()}; final certification is unavailable until the lifecycle reaches an evidence-backed terminal state.`));
+    }
   }
   if (!input.fieldValues?.["cert.certificationDate"]) {
     findings.push(blocking("FEDERAL_CERTIFICATION_DATE_REQUIRED", "cert.certificationDate", "Record the date on which the officer executes the Federal certificate."));
