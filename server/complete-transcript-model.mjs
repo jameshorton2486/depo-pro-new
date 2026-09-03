@@ -9,6 +9,7 @@ import { horizontalOverflowFindings } from "./insertion-pages/page-model.mjs";
 import { loadTemplateVariant } from "./insertion-pages/templates.mjs";
 import { validateInsertionInput } from "./insertion-pages/validate.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { deriveExhibitIndexEntries } from "./administrative-index-readiness.mjs";
 
 export const COMPLETE_TRANSCRIPT_MODEL_VERSION="1.0.0";
 const FRONT_ROLES=new Set(["title","appearances","index"]);
@@ -171,6 +172,7 @@ export async function buildCompleteTranscriptModel({depositionId,printModel,reco
   const preCertificationPages=insertion.pages.filter(page=>["changes","signature"].includes(page.role)).length;
   const certificationPages=insertion.pages.filter(page=>page.role.startsWith("certification")).length;
   pagination=completePagination({testimonyPages:printModel.pages.length,signatureDisposition,examinations:operator.examinations??[],examiner:examinerName(record,operator),frontPages,preCertificationPages,certificationPages,resolvedExaminations:printModel.examinations??[],record});
+  pagination.index.exhibits=deriveExhibitIndexEntries(record,printModel,frontPages);
   input=assembleInsertionInput({record,intake,operator:normalizedOperator,pagination,template});
   insertion=buildInsertionPageSet(input,{setId:`complete-${depositionId}`,depositionId,generatedAt});
   const front=insertion.pages.filter(page=>FRONT_ROLES.has(page.role));

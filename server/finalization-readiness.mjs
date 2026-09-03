@@ -7,8 +7,9 @@ import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
 import { getExhibitReadiness } from "./canonical-exhibit-lifecycle.mjs";
+import { validateAdministrativeIndexReadiness } from "./administrative-index-readiness.mjs";
 
-export const FINALIZATION_READINESS_VERSION = "1.0.0";
+export const FINALIZATION_READINESS_VERSION = "1.1.0";
 export const READINESS_SEVERITY = Object.freeze({
   HARD_BLOCKER: "HARD_BLOCKER",
   WARNING: "WARNING",
@@ -20,6 +21,7 @@ const CATEGORY_NAMES = Object.freeze([
   "administration",
   "review",
   "certification",
+  "administrativePages",
   "exhibits",
   "output",
 ]);
@@ -106,6 +108,7 @@ export async function getFinalizationReadiness(root, { depositionId, storageRoot
   const record = fs.existsSync(canonicalFile) ? JSON.parse(fs.readFileSync(canonicalFile, "utf8")) : null;
   const assembly = assemblyReadiness(root, { depositionId, storageRoot });
   const categories = Object.fromEntries(CATEGORY_NAMES.map(name => [name, category([])]));
+  categories.administrativePages = category([finding({ code:"ADMINISTRATIVE_MODEL_NOT_EVALUATED", severity:READINESS_SEVERITY.INFORMATIONAL, sourceSubsystem:"ADMINISTRATIVE_INDEX_READINESS", remediation:"PRINT_PREVIEW", message:"Administrative pages and indexes have not yet been evaluated." })], false);
   const source = {
     depositionId,
     canonicalRecordSchemaVersion: record?.schemaVersion ?? null,
@@ -139,12 +142,16 @@ export async function getFinalizationReadiness(root, { depositionId, storageRoot
       const model = await getCompleteTranscriptModel(root, { depositionId, storageRoot });
       source.completeDocumentModelHash = model.modelHash;
       source.insertionPageSetHash = model.source?.insertionPageSetHash ?? null;
+      const exhibitReadiness = getExhibitReadiness(root, { depositionId, storageRoot });
+      const administrative = validateAdministrativeIndexReadiness(model, exhibitReadiness);
+      source.administrativeProjectionDigest = administrative.projectionDigest;
+      categories.administrativePages = category(administrative.findings.map(item => finding({ code:item.code, severity:READINESS_SEVERITY.HARD_BLOCKER, sourceSubsystem:"ADMINISTRATIVE_INDEX_READINESS", remediation:"PRINT_PREVIEW", message:item.message, target:item.target })));
       categories.administration = category([]);
       categories.review = category([]);
       categories.certification = category((model.findings?.assembly ?? []).map(item => existingFinding(item, "CERTIFICATION_VALIDATOR", "CERTIFICATION_PAGES")));
     } catch (error) {
       for (const code of modelFailureCodes(error)) {
-        const [name, remediation] = modelFailureCategory(code);
+        const [name, remediation] = code.includes("INDEX") || code.includes("ADMINISTRATIVE") ? ["administrativePages", "PRINT_PREVIEW"] : modelFailureCategory(code);
         const prior = categories[name]?.findings ?? [];
         categories[name] = category([...prior, finding({ code, severity: READINESS_SEVERITY.HARD_BLOCKER, sourceSubsystem: code === "COMPLETE_TRANSCRIPT_VALIDATION_BLOCKED" ? "CERTIFICATION_VALIDATOR" : "COMPLETE_TRANSCRIPT_MODEL", remediation, message: error instanceof Error ? error.message : String(error) })]);
       }

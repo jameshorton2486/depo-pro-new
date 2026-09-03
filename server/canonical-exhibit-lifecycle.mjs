@@ -106,6 +106,8 @@ export function recordExhibit(root, { depositionId, storageRoot, actor, input } 
   const file = materialKind === "DIGITAL_FILE" ? safeStoredFile(state.directory, input?.material?.relativePath) : null;
   const transcriptReferences = (Array.isArray(input?.transcriptReferences) ? input.transcriptReferences : []).map(reference => ({
     sourceAnchor: requireText(reference?.sourceAnchor, "Each transcript reference requires a stable source anchor.", 500),
+    paragraphId: clean(reference?.paragraphId, 500) || null,
+    sourceWordId: clean(reference?.sourceWordId, 500) || null,
     quotedText: clean(reference?.quotedText, 2000) || null,
   }));
   const exhibitId = prior?.exhibitId ?? crypto.randomUUID();

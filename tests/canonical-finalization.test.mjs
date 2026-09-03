@@ -11,6 +11,8 @@ import { getCanonicalFinalizationStatus, recordTranscriptCompletion, requestFina
 import { getFinalizationReadiness } from "../server/finalization-readiness.mjs";
 import { appendReporterOperations, getWorkingTranscript, readReporterOverlay } from "../server/transcription-jobs.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
+import { getTranscriptPrintModel } from "../server/transcript-print-model.mjs";
+import { getCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 function fixture(t) {
@@ -80,9 +82,12 @@ test("missing or stale exhibit authority blocks finalization", async t => {
 });
 
 test("exhibits-present finalization binds only current-effective exhibit identity and disposition", async t => {
-  const f = fixture(t);
-  const saved = recordExhibit(root, { ...f, actor: "Reporter", input: { label: "Exhibit 1", description: "Physical contract", markedAt: "2026-08-26T13:00:00Z", markedBy: "Dennis J. Bentley", transcriptReferences: [{ sourceAnchor: "transcript:8:2" }], material: { kind: "PHYSICAL" }, custody: { status: "RESOLVED", holder: "Dennis J. Bentley", sourceAnchor: "transcript:20:2" }, sealedHandling: { status: "NOT_APPLICABLE" }, packageDisposition: "EXCLUDED", packageDispositionReason: "Original retained by counsel.", sourceAnchor: "transcript:8:2" } });
-  recordExhibitAudit(root, { ...f, actor: "Reporter", input: { result: "EXHIBITS_PRESENT", sourceAnchor: "reporter-review:exhibits" } }); await recordTranscriptCompletion(root, { ...f, actor: "Reporter", input: {} });
+  const f = fixture(t), paragraphId = getTranscriptPrintModel(root, f).paragraphs[0].id;
+  const saved = recordExhibit(root, { ...f, actor: "Reporter", input: { label: "Exhibit 1", description: "Physical contract", markedAt: "2026-08-26T13:00:00Z", markedBy: "Dennis J. Bentley", transcriptReferences: [{ sourceAnchor: "transcript:8:2", paragraphId }], material: { kind: "PHYSICAL" }, custody: { status: "RESOLVED", holder: "Dennis J. Bentley", sourceAnchor: "transcript:20:2" }, sealedHandling: { status: "NOT_APPLICABLE" }, packageDisposition: "EXCLUDED", packageDispositionReason: "Original retained by counsel.", sourceAnchor: "transcript:8:2" } });
+  recordExhibitAudit(root, { ...f, actor: "Reporter", input: { result: "EXHIBITS_PRESENT", sourceAnchor: "reporter-review:exhibits" } });
+  const model = await getCompleteTranscriptModel(root, f), indexText = model.pages.find(page => page.role === "index").lines.map(line => line.content).join("\n");
+  assert.match(indexText, /EXHIBITS/); assert.match(indexText, /Exhibit 1/); assert.equal(model.pagination.index.exhibits[0].page, 4);
+  await recordTranscriptCompletion(root, { ...f, actor: "Reporter", input: {} });
   const final = (await requestFinalization(root, { ...f, actor: "Reporter" })).event;
   assert.equal(final.binding.exhibits.state, "EXHIBITS_PRESENT_COMPLETE"); assert.deepEqual(final.binding.exhibits.currentEffective.map(item => item.exhibitId), [saved.exhibitId]); assert.equal(final.binding.exhibits.currentEffective[0].packageDisposition, "EXCLUDED");
 });
