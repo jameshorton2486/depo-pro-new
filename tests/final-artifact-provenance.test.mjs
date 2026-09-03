@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 
 import { recordExhibit, recordExhibitAudit } from "../server/canonical-exhibit-lifecycle.mjs";
 import { recordTranscriptCompletion, requestFinalization } from "../server/canonical-finalization.mjs";
-import { _testing, getFinalArtifactStatus, qualifyFinalArtifacts, verifyFinalArtifacts } from "../server/final-artifact-provenance.mjs";
+import { _testing, getFinalArtifactProjection, getFinalArtifactStatus, qualifyFinalArtifacts, readVerifiedFinalArtifact, verifyFinalArtifacts } from "../server/final-artifact-provenance.mjs";
+import { getReporterFinalizationProjection } from "../server/reporter-finalization-projection.mjs";
 import { appendReporterOperations, getWorkingTranscript, readReporterOverlay } from "../server/transcription-jobs.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
 import { getTranscriptPrintModel } from "../server/transcript-print-model.mjs";
@@ -48,13 +49,50 @@ test("later edits cannot leak into v1 and v2 has independent immutable storage",
 });
 
 test("qualification fails closed without a final version and exposes server-owned APIs", async t => {
-  const f = fixture(t); assert.equal(getFinalArtifactStatus(root, { ...f, finalVersionId: "FINAL-v1" }).status, "FINALIZED_WITHOUT_QUALIFIED_ARTIFACTS"); await assert.rejects(() => qualifyFinalArtifacts(root, { ...f, finalVersionId: "FINAL-v1", actor: "Reporter" }), /FINAL_VERSION_NOT_FOUND/);
-  const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8"); assert.match(source, /\/api\/finalization\/artifacts\/generate/); assert.match(source, /\/api\/finalization\/artifacts\/status/); assert.match(source, /\/api\/finalization\/artifacts\/verify/); assert.doesNotMatch(source, /qualifyFinalArtifacts\([^)]*(sha256|verified|byteCount)/);
+  const f = fixture(t); assert.equal(getFinalArtifactStatus(root, { ...f, finalVersionId: "FINAL-v1" }).status, "UNKNOWN_FINALIZATION"); await assert.rejects(() => qualifyFinalArtifacts(root, { ...f, finalVersionId: "FINAL-v1", actor: "Reporter" }), /FINAL_VERSION_NOT_FOUND/);
+  const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8"); assert.match(source, /\/api\/finalization\/artifacts\/generate/); assert.match(source, /\/api\/finalization\/artifacts\/status/); assert.match(source, /\/api\/finalization\/artifacts\/verify/); assert.match(source, /\/api\/finalization\/artifacts\/download/); assert.match(source, /\/api\/finalization\/reporter-projection/); assert.doesNotMatch(source, /qualifyFinalArtifacts\([^)]*(sha256|verified|byteCount)/);
+});
+
+test("known current finalization reports permitted generation without generating", async t => {
+  const f = fixture(t), final = await finalize(f), projected = await getFinalArtifactProjection(root, { ...f, finalVersionId: final.finalVersionId });
+  assert.equal(projected.status, "ARTIFACTS_NOT_GENERATED"); assert.equal(projected.generationEligibility, "PERMITTED"); assert.equal(fs.existsSync(path.join(f.directory, "final")), false);
+});
+
+test("reporter projection carries working blockers and stale transcript completion from Phase C", async t => {
+  const f = fixture(t), working = await getReporterFinalizationProjection(root, f); assert.equal(working.state, "WORKING"); assert.equal(working.readiness.ready, false); assert.equal(working.transcriptCompletion.state, "NOT_RECORDED"); assert.equal(working.versions.length, 0);
+  await finalize(f); edit(f, "Changed"); const stale = await getReporterFinalizationProjection(root, f); assert.equal(stale.transcriptCompletion.state, "STALE"); assert.equal(stale.currentFinalVersionId, null); assert.equal(stale.latestFinalVersionId, "FINAL-v1"); assert.equal(stale.versions[0].relationship, "HISTORICAL");
+});
+
+test("unknown deposition and unknown finalization are distinct server states", async t => {
+  const f = fixture(t), absent = path.join(f.storageRoot, "absent-root");
+  assert.equal(getFinalArtifactStatus(root, { depositionId: "DEP-20990101-ZZZZZ", storageRoot: absent, finalVersionId: "FINAL-v1" }).status, "UNKNOWN_DEPOSITION");
+  assert.equal((await getFinalArtifactProjection(root, { ...f, finalVersionId: "FINAL-v999" })).status, "UNKNOWN_FINALIZATION");
+});
+
+test("verified download reads only manifest-bound DOCX and PDF bytes", async t => {
+  const f = fixture(t), final = await finalize(f), generated = await qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" });
+  for (const kind of ["docx", "pdf"]) {
+    const download = readVerifiedFinalArtifact(root, { ...f, finalVersionId: final.finalVersionId, kind });
+    assert.equal(download.filename, `Deposition-${final.finalVersionId}.${kind}`); assert.equal(download.bytes.length, generated.manifest.artifacts[kind].byteCount); assert.equal(hash(path.join(f.directory, "final", final.finalVersionId, `transcript.${kind}`)), generated.manifest.artifacts[kind].sha256);
+  }
+  assert.throws(() => readVerifiedFinalArtifact(root, { ...f, finalVersionId: final.finalVersionId, kind: "zip" }), /KIND_INVALID/);
+});
+
+test("download and projection fail closed on tamper, missing members, and provenance inconsistency", async t => {
+  const f = fixture(t), final = await finalize(f), generated = await qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }), directory = path.join(f.directory, "final", final.finalVersionId);
+  fs.appendFileSync(path.join(directory, "transcript.pdf"), "tamper"); assert.throws(() => readVerifiedFinalArtifact(root, { ...f, finalVersionId: final.finalVersionId, kind: "docx" }), /PDF_INTEGRITY_FAILURE/); assert.equal((await getFinalArtifactProjection(root, { ...f, finalVersionId: final.finalVersionId })).status, "ARTIFACT_INTEGRITY_FAILURE");
+  fs.writeFileSync(path.join(directory, "transcript.pdf"), Buffer.alloc(generated.manifest.artifacts.pdf.byteCount)); fs.rmSync(path.join(directory, "transcript.docx")); assert.throws(() => readVerifiedFinalArtifact(root, { ...f, finalVersionId: final.finalVersionId, kind: "pdf" }), /DOCX_MISSING/);
+  fs.writeFileSync(path.join(directory, "transcript.docx"), Buffer.alloc(generated.manifest.artifacts.docx.byteCount)); const manifestFile = path.join(directory, "manifest.json"), manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8")); manifest.finalizationBindingDigest = "0".repeat(64); fs.writeFileSync(manifestFile, JSON.stringify(manifest)); assert.throws(() => readVerifiedFinalArtifact(root, { ...f, finalVersionId: final.finalVersionId, kind: "pdf" }), /FINALIZATION_MISMATCH/);
+});
+
+test("reporter projection describes current and historical versions without reconstructing authority", async t => {
+  const f = fixture(t), v1 = await finalize(f); edit(f, "Corrected"); recordExhibitAudit(root, { ...f, actor: "Reporter", input: { result: "NO_EXHIBITS", sourceAnchor: "reporter-review:renewed", correctionReason: "Transcript changed." } }); await recordTranscriptCompletion(root, { ...f, actor: "Reporter", input: { reason: "Correction complete." } }); const v2 = (await requestFinalization(root, { ...f, actor: "Reporter" })).event;
+  const projection = await getReporterFinalizationProjection(root, f); assert.equal(projection.currentFinalVersionId, v2.finalVersionId); assert.equal(projection.latestFinalVersionId, v2.finalVersionId); assert.equal(projection.transcriptCompletion.state, "CURRENT"); assert.deepEqual(projection.versions.map(item => item.relationship), ["HISTORICAL", "CURRENT"]); assert.equal(projection.versions[0].artifacts.generationEligibility, "PROHIBITED_HISTORICAL_REGENERATION"); assert.equal(projection.versions[1].artifacts.generationEligibility, "PERMITTED"); assert.equal(JSON.stringify(projection).includes(f.directory), false); assert.equal(v1.finalVersionId, "FINAL-v1");
 });
 
 test("an incomplete final directory is never blessed or overwritten", async t => {
   const f = fixture(t), final = await finalize(f), directory = path.join(f.directory, "final", final.finalVersionId); fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, "transcript.docx"), "partial");
-  await assert.rejects(() => qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }), /INCOMPLETE_SET/); assert.equal(fs.readFileSync(path.join(directory, "transcript.docx"), "utf8"), "partial"); assert.equal(fs.existsSync(path.join(directory, "manifest.json")), false);
+  assert.equal(getFinalArtifactStatus(root, { ...f, finalVersionId: final.finalVersionId }).status, "ARTIFACT_INTEGRITY_FAILURE"); await assert.rejects(() => qualifyFinalArtifacts(root, { ...f, finalVersionId: final.finalVersionId, actor: "Reporter" }), /INCOMPLETE_SET/); assert.equal(fs.readFileSync(path.join(directory, "transcript.docx"), "utf8"), "partial"); assert.equal(fs.existsSync(path.join(directory, "manifest.json")), false);
 });
 
 for (const selection of ["OATH", "AFFIRMATION"]) test(`Federal ${selection} with completed requested review qualifies immutable artifacts`, async t => {

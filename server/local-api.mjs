@@ -47,7 +47,8 @@ import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { getFinalizationReadiness } from "./finalization-readiness.mjs";
 import { getExhibitReadiness, recordExhibit, recordExhibitAudit } from "./canonical-exhibit-lifecycle.mjs";
 import { getCanonicalFinalizationStatus, recordTranscriptCompletion, requestFinalization } from "./canonical-finalization.mjs";
-import { getFinalArtifactStatus, qualifyFinalArtifacts, verifyFinalArtifacts } from "./final-artifact-provenance.mjs";
+import { getFinalArtifactStatus, qualifyFinalArtifacts, readVerifiedFinalArtifact, verifyFinalArtifacts } from "./final-artifact-provenance.mjs";
+import { getReporterFinalizationProjection } from "./reporter-finalization-projection.mjs";
 import {
   assignCaptureSession,
   captureRecordingParts,
@@ -1847,6 +1848,10 @@ const server = http.createServer(async (req, res) => {
       const depositionId = new URL(req.url, "http://localhost").searchParams.get("depositionId");
       return json(res, 200, await getCanonicalFinalizationStatus(root, { depositionId, storageRoot: depositionStorageRoot }), origin);
     }
+    if (req.url?.startsWith("/api/finalization/reporter-projection?") && req.method === "GET") {
+      const depositionId = new URL(req.url, "http://localhost").searchParams.get("depositionId");
+      return json(res, 200, await getReporterFinalizationProjection(root, { depositionId, storageRoot: depositionStorageRoot }), origin);
+    }
     if (req.url === "/api/finalization/transcript-completion" && req.method === "POST") {
       const input = await body(req, 64 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
       const completion = await recordTranscriptCompletion(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.completion });
@@ -1867,6 +1872,19 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/api/finalization/artifacts/verify" && req.method === "POST") {
       const input = await body(req, 16 * 1024);
       return json(res, 200, verifyFinalArtifacts(root, { depositionId: input.depositionId, finalVersionId: input.finalVersionId, storageRoot: depositionStorageRoot }), origin);
+    }
+    if (req.url?.startsWith("/api/finalization/artifacts/download?") && req.method === "GET") {
+      const parameters = new URL(req.url, "http://localhost").searchParams;
+      const artifact = readVerifiedFinalArtifact(root, { depositionId: parameters.get("depositionId"), finalVersionId: parameters.get("finalVersionId"), kind: parameters.get("kind"), storageRoot: depositionStorageRoot });
+      res.statusCode = 200;
+      res.setHeader("content-type", artifact.contentType);
+      res.setHeader("content-length", artifact.bytes.length);
+      res.setHeader("content-disposition", `attachment; filename="${artifact.filename}"`);
+      res.setHeader("access-control-allow-origin", origin);
+      res.setHeader("access-control-expose-headers", "content-length,content-disposition");
+      res.setHeader("cache-control", "private, no-store");
+      res.setHeader("vary", "Origin");
+      return res.end(artifact.bytes);
     }
     // documentKind is reported by whichever endpoint actually ran, read off the model that was
     // actually rendered. The Workspace used to name its output from its own cached record type,

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { depositionDirectory } from "./deposition-store.mjs";
-import { getFinalizationVersion } from "./canonical-finalization.mjs";
+import { getCanonicalFinalizationStatus, getFinalizationVersion } from "./canonical-finalization.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { createFixedPageDocxSpec, createTranscriptDocxArtifact } from "./final-document-docx.mjs";
 import { createTranscriptPdfArtifact } from "./final-document-pdf.mjs";
@@ -21,6 +21,7 @@ function locations(root, { depositionId, storageRoot, finalVersionId }) {
 }
 function readManifest(file) { return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null; }
 function artifact(file) { const bytes = fs.readFileSync(file); return { bytes: bytes.length, sha256: sha256(bytes) }; }
+const errorCode = error => String(error instanceof Error ? error.message : error ?? "").match(/^([A-Z][A-Z0-9_]+)/)?.[1] ?? "FINAL_ARTIFACT_EVALUATION_FAILED";
 function assertStored(item, file, kind) {
   if (!fs.existsSync(file)) throw new Error(`FINAL_ARTIFACT_${kind}_MISSING: The qualified ${kind} artifact is missing.`);
   const actual = artifact(file);
@@ -89,9 +90,55 @@ export async function qualifyFinalArtifacts(root, { depositionId, storageRoot, f
 }
 
 export function getFinalArtifactStatus(root, options = {}) {
-  const location = locations(root, options);
-  if (!fs.existsSync(location.manifestFile)) return { status: "FINALIZED_WITHOUT_QUALIFIED_ARTIFACTS", verified: false, finalVersionId: options.finalVersionId };
-  return verifyFinalArtifacts(root, options);
+  let location;
+  try { location = locations(root, options); }
+  catch (error) {
+    if (/Deposition was not found/.test(String(error instanceof Error ? error.message : error))) return { status: "UNKNOWN_DEPOSITION", verified: false, finalVersionId: options.finalVersionId };
+    throw error;
+  }
+  try { getFinalizationVersion(root, options); }
+  catch (error) {
+    if (errorCode(error) === "FINAL_VERSION_NOT_FOUND") return { status: "UNKNOWN_FINALIZATION", verified: false, finalVersionId: options.finalVersionId };
+    throw error;
+  }
+  if (!fs.existsSync(location.finalDirectory)) return { status: "ARTIFACTS_NOT_GENERATED", verified: false, finalVersionId: options.finalVersionId };
+  if (!fs.existsSync(location.manifestFile)) return { status: "ARTIFACT_INTEGRITY_FAILURE", verified: false, finalVersionId: options.finalVersionId, finding: { code: "FINAL_ARTIFACT_MANIFEST_MISSING", message: "Final-version storage exists without its immutable manifest." } };
+  try { return { ...verifyFinalArtifacts(root, options), finalVersionId: options.finalVersionId }; }
+  catch (error) { return { status: "ARTIFACT_INTEGRITY_FAILURE", verified: false, finalVersionId: options.finalVersionId, finding: { code: errorCode(error), message: error instanceof Error ? error.message : String(error) } }; }
 }
 
-export const _testing = { generateOwned, generationLocks, locations, sha256, withGenerationOwnership };
+/** Read-only Phase E authority used by the reporter projection. It does not acquire a generation lock. */
+export async function getFinalArtifactProjection(root, options = {}) {
+  const status = getFinalArtifactStatus(root, options);
+  if (["UNKNOWN_DEPOSITION", "UNKNOWN_FINALIZATION", "ARTIFACT_INTEGRITY_FAILURE"].includes(status.status)) return { ...status, generationEligibility: "NOT_APPLICABLE" };
+  if (status.verified) {
+    return {
+      status: "ARTIFACTS_VERIFIED", verified: true, finalVersionId: options.finalVersionId, generationEligibility: "ALREADY_GENERATED",
+      artifacts: Object.fromEntries(Object.entries(status.manifest.artifacts).map(([kind, item]) => [kind, { kind, filename: item.filename, byteCount: item.byteCount, sha256: item.sha256 }])),
+      provenance: { provenanceEventId: status.manifest.provenanceEventId, finalizationEventId: status.manifest.finalizationEventId, finalizationBindingDigest: status.manifest.finalizationBindingDigest, generatedAt: status.manifest.generatedAt },
+    };
+  }
+  const finalization = getFinalizationVersion(root, options);
+  const canonical = await getCanonicalFinalizationStatus(root, options);
+  if (canonical.currentFinalVersion?.id !== finalization.id) return { ...status, status: "HISTORICAL_ARTIFACTS_MISSING", generationEligibility: "PROHIBITED_HISTORICAL_REGENERATION" };
+  try {
+    await assertRenderableState(root, options, finalization);
+    return { ...status, generationEligibility: "PERMITTED" };
+  } catch (error) {
+    return { ...status, status: "ARTIFACT_GENERATION_PROHIBITED", generationEligibility: "PROHIBITED_STATE_MISMATCH", finding: { code: errorCode(error), message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+/** Reads bytes only after the whole immutable set and the requested member verify against Phase E authority. */
+export function readVerifiedFinalArtifact(root, { kind, ...options } = {}) {
+  const normalizedKind = clean(kind).toLowerCase();
+  if (!["docx", "pdf"].includes(normalizedKind)) throw new Error("FINAL_ARTIFACT_KIND_INVALID: Artifact kind must be docx or pdf.");
+  getFinalizationVersion(root, options);
+  const verified = verifyFinalArtifacts(root, options), location = locations(root, options), item = verified.manifest.artifacts[normalizedKind];
+  if (!item) throw new Error(`FINAL_ARTIFACT_${normalizedKind.toUpperCase()}_MISSING: The immutable manifest does not identify the requested artifact.`);
+  const file = normalizedKind === "docx" ? location.docxFile : location.pdfFile, bytes = fs.readFileSync(file), actual = { bytes: bytes.length, sha256: sha256(bytes) };
+  if (actual.bytes !== item.byteCount || actual.sha256 !== item.sha256) throw new Error(`FINAL_ARTIFACT_${normalizedKind.toUpperCase()}_INTEGRITY_FAILURE: Stored ${normalizedKind.toUpperCase()} bytes changed before download.`);
+  return { bytes, filename: `Deposition-${options.finalVersionId}.${normalizedKind}`, contentType: normalizedKind === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf", manifest: verified.manifest };
+}
+
+export const _testing = { errorCode, generateOwned, generationLocks, locations, sha256, withGenerationOwnership };
