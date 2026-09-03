@@ -6,6 +6,7 @@ import { assemblyReadiness } from "./complete-transcript-assembly.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { getTranscriptPrintModel } from "./transcript-print-model.mjs";
+import { getExhibitReadiness } from "./canonical-exhibit-lifecycle.mjs";
 
 export const FINALIZATION_READINESS_VERSION = "1.0.0";
 export const READINESS_SEVERITY = Object.freeze({
@@ -154,9 +155,17 @@ export async function getFinalizationReadiness(root, { depositionId, storageRoot
         categories[name] = category([finding({ code: "COMPLETE_DOCUMENT_PREREQUISITES_UNAVAILABLE", severity: READINESS_SEVERITY.INFORMATIONAL, sourceSubsystem: "COMPLETE_TRANSCRIPT_MODEL", remediation: "CERTIFICATION_PAGES", message: "This category cannot be evaluated until transcript and assembly prerequisites are available." })], false);
   }
 
-  // An empty array proves only that no exhibit records exist. Until Phase C supplies an explicit
-  // no-exhibits event and a qualified lifecycle, it cannot prove that no exhibits were used.
-  categories.exhibits = category([finding({ code: "EXHIBIT_LIFECYCLE_NOT_QUALIFIED", severity: READINESS_SEVERITY.HARD_BLOCKER, sourceSubsystem: "CANONICAL_EXHIBIT_LIFECYCLE", remediation: "EXHIBITS", message: "Exhibit completeness cannot yet be proven. An empty exhibit list is not evidence that no exhibits existed." })]);
+  const exhibitReadiness = getExhibitReadiness(root, { depositionId, storageRoot });
+  categories.exhibits = category(exhibitReadiness.findings.map(item => finding({
+    code: item.code, severity: READINESS_SEVERITY.HARD_BLOCKER,
+    sourceSubsystem: "CANONICAL_EXHIBIT_LIFECYCLE", remediation: "EXHIBITS",
+    message: item.message, target: item.target ?? null,
+    details: item.exhibitId ? { exhibitId: item.exhibitId } : item.exhibitIds ? { exhibitIds: item.exhibitIds } : null,
+  })));
+  source.exhibitLifecycleVersion = exhibitReadiness.schemaVersion;
+  source.exhibitLifecycleDigest = exhibitReadiness.lifecycleDigest ?? null;
+  source.exhibitAuditId = exhibitReadiness.audit?.id ?? null;
+  source.exhibitState = exhibitReadiness.status;
   categories.output = category([finding({ code: "FINAL_ARTIFACTS_NOT_EVALUATED", severity: READINESS_SEVERITY.INFORMATIONAL, sourceSubsystem: "FINAL_ARTIFACT_RENDERERS", remediation: "FINALIZATION", message: "Phase A is read-only and does not generate or qualify final artifacts." })], false);
 
   return projectFinalizationReadiness({ profile: profileOf(record, assembly), evaluatedAt, source, categories });

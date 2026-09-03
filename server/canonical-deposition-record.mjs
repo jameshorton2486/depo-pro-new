@@ -412,6 +412,13 @@ export function createCanonicalDepositionRecord(
       certifiedQuestions: [],
     },
     exhibits: [],
+    // The legacy exhibits array is not evidence that no exhibits existed. Only an attributable,
+    // transcript-state-bound audit in this append-only ledger can establish that fact.
+    exhibitLifecycle: {
+      schemaVersion: "1.0.0",
+      auditEvents: [],
+      exhibitEvents: [],
+    },
     signature: {
       status: missing("REPORTER_ENTERED"),
       requestedDate: missing("REPORTER_ENTERED"),

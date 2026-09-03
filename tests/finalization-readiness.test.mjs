@@ -73,9 +73,10 @@ test("an empty exhibit array is not proof that no exhibits existed", async () =>
   assert.equal(report.profile, "FEDERAL_DEPOSITION");
   assert.equal(report.ready, false);
   assert.equal(report.categories.exhibits.status, "BLOCKED");
-  assert.equal(report.categories.exhibits.findings[0].code, "EXHIBIT_LIFECYCLE_NOT_QUALIFIED");
-  assert.equal(report.categories.exhibits.findings[0].sourceSubsystem, "CANONICAL_EXHIBIT_LIFECYCLE");
-  assert.equal(report.categories.exhibits.findings[0].remediation, "EXHIBITS");
+  const exhibitFinding = report.categories.exhibits.findings.find(item => item.code === "EXHIBIT_AUDIT_REQUIRED");
+  assert.ok(exhibitFinding);
+  assert.equal(exhibitFinding.sourceSubsystem, "CANONICAL_EXHIBIT_LIFECYCLE");
+  assert.equal(exhibitFinding.remediation, "EXHIBITS");
 });
 
 test("readiness evaluation does not change the deposition", async () => {

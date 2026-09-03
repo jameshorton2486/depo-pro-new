@@ -45,6 +45,7 @@ import { createTranscriptDocxArtifact } from "./final-document-docx.mjs";
 import { createTranscriptPdfArtifact } from "./final-document-pdf.mjs";
 import { getCompleteTranscriptModel } from "./complete-transcript-model.mjs";
 import { getFinalizationReadiness } from "./finalization-readiness.mjs";
+import { getExhibitReadiness, recordExhibit, recordExhibitAudit } from "./canonical-exhibit-lifecycle.mjs";
 import {
   assignCaptureSession,
   captureRecordingParts,
@@ -1825,6 +1826,20 @@ const server = http.createServer(async (req, res) => {
         }),
         origin,
       );
+    }
+    if (req.url?.startsWith("/api/exhibits/readiness?") && req.method === "GET") {
+      const depositionId = new URL(req.url, "http://localhost").searchParams.get("depositionId");
+      return json(res, 200, getExhibitReadiness(root, { depositionId, storageRoot: depositionStorageRoot }), origin);
+    }
+    if (req.url === "/api/exhibits/audit" && req.method === "POST") {
+      const input = await body(req, 64 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      const audit = recordExhibitAudit(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.audit });
+      return json(res, 200, { audit, readiness: getExhibitReadiness(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }) }, origin);
+    }
+    if (req.url === "/api/exhibits/record" && req.method === "POST") {
+      const input = await body(req, 256 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      const exhibit = recordExhibit(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.exhibit });
+      return json(res, 200, { exhibit, readiness: getExhibitReadiness(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }) }, origin);
     }
     // documentKind is reported by whichever endpoint actually ran, read off the model that was
     // actually rendered. The Workspace used to name its output from its own cached record type,
