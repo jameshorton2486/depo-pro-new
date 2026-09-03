@@ -40,6 +40,15 @@ test("the Word toolchain is declared where a human can find it", () => {
   assert.match(text, /^lxml==\d+\.\d+\.\d+$/m, "lxml must be pinned");
 });
 
+test("clean CI installs the declared Word toolchain before verification", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/verify.yml"), "utf8");
+  assert.match(workflow, /python -m pip install -r requirements-docx\.txt/);
+  assert.ok(
+    workflow.indexOf("python -m pip install -r requirements-docx.txt") < workflow.indexOf("npm run verify"),
+    "the Word toolchain must be installed before the full verification suite runs",
+  );
+});
+
 test("every package the renderers import is declared", () => {
   // Read from the renderers rather than a list kept beside them, so a new import cannot be added
   // without this failing.
