@@ -43,13 +43,25 @@ export function appendCanonicalOpeningEvent(root, { depositionId, storageRoot, k
   const record = JSON.parse(fs.readFileSync(file, "utf8"));
   const opening = ledger(record);
   const at = new Date().toISOString();
-  const event = { id: crypto.randomUUID(), kind, recordedAt: at, recordedBy: who, ...structuredClone(payload ?? {}) };
   const collection = {
     OATH_ADMINISTRATION: "oathAdministrations",
     INTERPRETER_ADMINISTRATION: "interpreterAdministrations",
     STIPULATION_RESPONSE: "stipulationEvents",
     CLOSING_ATTESTATION: "closingAttestations",
   }[kind];
+  const previous = kind === "STIPULATION_RESPONSE"
+    ? [...opening[collection]].reverse().find(item => item.participantId === payload?.participantId && item.topic === payload?.topic) ?? null
+    : opening[collection].at(-1) ?? null;
+  const event = {
+    id: crypto.randomUUID(),
+    kind,
+    recordedAt: at,
+    recordedBy: who,
+    ...structuredClone(payload ?? {}),
+    // Corrections are append-only. The new event points to the exact canonical event it
+    // supersedes; older bytes remain available for audit and are never rewritten in place.
+    supersedesEventId: payload?.supersedesEventId ?? previous?.id ?? null,
+  };
   opening[collection].push(event);
   opening.auditEvents.push({ id: crypto.randomUUID(), type: `${kind}_RECORDED`, at, actor: who, eventId: event.id });
   atomicJson(file, record);
@@ -58,11 +70,21 @@ export function appendCanonicalOpeningEvent(root, { depositionId, storageRoot, k
 
 export function currentCanonicalOpeningFacts(record) {
   const opening = record?.openingRecord ?? {};
-  const latest = (value) => Array.isArray(value) && value.length ? value[value.length - 1] : null;
+  const effective = (value) => {
+    if (!Array.isArray(value) || !value.length) return null;
+    const superseded=new Set(value.map(item=>item.supersedesEventId).filter(Boolean));
+    return [...value].reverse().find(item=>!superseded.has(item.id)) ?? value[value.length-1];
+  };
   return {
-    oathAdministration: latest(opening.oathAdministrations),
-    interpreterAdministration: latest(opening.interpreterAdministrations),
+    oathAdministration: effective(opening.oathAdministrations),
+    interpreterAdministration: effective(opening.interpreterAdministrations),
     stipulationEvents: opening.stipulationEvents ?? [],
-    closingAttestation: latest(opening.closingAttestations),
+    closingAttestation: effective(opening.closingAttestations),
+    history: {
+      oathAdministrations: structuredClone(opening.oathAdministrations ?? []),
+      interpreterAdministrations: structuredClone(opening.interpreterAdministrations ?? []),
+      stipulationEvents: structuredClone(opening.stipulationEvents ?? []),
+      closingAttestations: structuredClone(opening.closingAttestations ?? []),
+    },
   };
 }

@@ -184,6 +184,7 @@ import {
   assemblyReadiness,
   writeAssembly,
 } from "./complete-transcript-assembly.mjs";
+import { recordReviewElection } from "./canonical-review-election.mjs";
 import {
   masterDataFromExtraction,
   projectDeepgramKeyterms,
@@ -1512,6 +1513,11 @@ const server = http.createServer(async (req, res) => {
       const input = await body(req, 64 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
       recordClosingAttestation(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, input: input.attestation, actor: who });
       return json(res, 200, getOpeningProjection(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }), origin);
+    }
+    if (req.url === "/api/opening/rule-30e-election" && req.method === "POST") {
+      const input=await body(req,64*1024), who=readCorrectionAuthority(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot});
+      const election=recordReviewElection(root,{depositionId:input.depositionId,storageRoot:depositionStorageRoot,input:input.election,actor:who});
+      return json(res,200,{election},origin);
     }
     if (
       req.url === "/api/opening/stipulation-response" &&

@@ -7,6 +7,7 @@ import {
 } from "./deposition-store.mjs";
 import { captionJurisdiction } from "./insertion-pages/variants.mjs";
 import { appendCanonicalOpeningEvent, readCanonicalOpeningRecord } from "./canonical-opening-events.mjs";
+import { filingIdentifier } from "./filing-identifier.mjs";
 
 export const OPENING_STATE_VERSION = "2.0.0";
 export const OPENING_AUTHORITY_VERSION =
@@ -740,6 +741,7 @@ export function recordOathAttestation(
     resolvedMediaAnchor,
     justification,
     correctionReason: correctionReason || null,
+    priorAttestationId: current.oathAttestation?.id ?? null,
     authorityVersion: OPENING_AUTHORITY_VERSION,
     recordedAt: new Date().toISOString(),
     recordedBy: actorRecord(actor),
@@ -774,15 +776,31 @@ export function recordOathAttestation(
   return record;
 }
 
+function resolveUploadedMediaAnchor(depositionRecord, { mode, verificationSource, sourceAnchor }) {
+  if (mode !== "RETROSPECTIVE") return null;
+  if (!verificationSource) throw new Error("Choose the source used to verify the prerecorded event time.");
+  if (!sourceAnchor) throw new Error("Enter the evidence location used to verify the prerecorded event.");
+  if (verificationSource !== "AUDIO_VIDEO_TIMESTAMP") return null;
+  const match = /^([^@]+)@(\d+(?:\.\d+)?)$/.exec(sourceAnchor);
+  if (!match) throw new Error("Use an uploaded-media anchor in the form upload-id@seconds.");
+  const media = (depositionRecord.audio ?? []).find(item => item.uploadId === match[1]);
+  if (!media) throw new Error("The evidence anchor does not identify media uploaded to this deposition.");
+  return { uploadId:media.uploadId, seconds:Number(match[2]), sha256:media.sha256, path:media.path, name:media.name };
+}
+
 export function recordInterpreterAttestation(root, { depositionId, storageRoot, input, actor } = {}) {
+  const depositionRecord = JSON.parse(fs.readFileSync(path.join(depositionDirectory(root, depositionId, { storageRoot }), "deposition.json"), "utf8"));
   const spokenText = cleanText(input?.spokenText, 4000), response = cleanText(input?.response, 1000),
     occurredAt = cleanText(input?.occurredAt, 80) || new Date().toISOString(), basis = cleanText(input?.basis, 2000),
-    sourceAnchor = cleanText(input?.sourceAnchor, 500), correctionReason = cleanText(input?.correctionReason, 1000);
+    sourceAnchor = cleanText(input?.sourceAnchor, 500), correctionReason = cleanText(input?.correctionReason, 1000),
+    mode = input?.mode === "RETROSPECTIVE" ? "RETROSPECTIVE" : "LIVE",
+    verificationSource = cleanText(input?.verificationSource, 80) || (mode === "LIVE" ? "SYSTEM_CLOCK" : "");
   if (!spokenText || !response || !basis || !sourceAnchor) throw new Error("Record the interpreter oath text, response, evidentiary basis, and source anchor.");
   const current = readOpeningState(root, { depositionId, storageRoot });
   if (current.interpreterDisposition !== "REQUIRED") throw new Error("An interpreter attestation may be recorded only when an interpreter is required.");
   if (current.interpreterAttestation && !correctionReason) throw new Error("Explain why the interpreter attestation is being corrected.");
-  const record = { id: crypto.randomUUID(), spokenText, response, occurredAt, basis, sourceAnchor, correctionReason: correctionReason || null, priorAttestationId: current.interpreterAttestation?.id ?? null, authorityVersion: OPENING_AUTHORITY_VERSION, recordedAt: new Date().toISOString(), recordedBy: actorRecord(actor) };
+  const resolvedMediaAnchor = resolveUploadedMediaAnchor(depositionRecord, { mode, verificationSource, sourceAnchor });
+  const record = { id: crypto.randomUUID(), schemaVersion:"2.0.0", mode, verificationSource, spokenText, response, occurredAt, basis, sourceAnchor, resolvedMediaAnchor, correctionReason: correctionReason || null, priorAttestationId: current.interpreterAttestation?.id ?? null, authorityVersion: OPENING_AUTHORITY_VERSION, recordedAt: new Date().toISOString(), recordedBy: actorRecord(actor) };
   const canonicalEvent = appendCanonicalOpeningEvent(root, { depositionId, storageRoot, kind: "INTERPRETER_ADMINISTRATION", actor: actorRecord(actor).name, payload: record });
   record.canonicalEventId = canonicalEvent.id;
   const next = { ...current, interpreterAttestation: record, auditEvents: [...current.auditEvents, event(current.interpreterAttestation ? "INTERPRETER_ATTESTATION_CORRECTED" : "INTERPRETER_ATTESTATION_RECORDED", actor, { attestationId: record.id, priorAttestationId: record.priorAttestationId, canonicalEventId: canonicalEvent.id, correctionReason: record.correctionReason })], updatedAt: record.recordedAt };
@@ -791,11 +809,17 @@ export function recordInterpreterAttestation(root, { depositionId, storageRoot, 
 }
 
 export function recordClosingAttestation(root, { depositionId, storageRoot, input, actor } = {}) {
+  const depositionRecord = JSON.parse(fs.readFileSync(path.join(depositionDirectory(root, depositionId, { storageRoot }), "deposition.json"), "utf8"));
   const spokenText = cleanText(input?.spokenText, 4000), occurredAt = cleanText(input?.occurredAt, 80) || new Date().toISOString(),
-    sourceAnchor = cleanText(input?.sourceAnchor, 500), basis = cleanText(input?.basis, 2000);
+    sourceAnchor = cleanText(input?.sourceAnchor, 500), basis = cleanText(input?.basis, 2000),
+    correctionReason = cleanText(input?.correctionReason, 1000),
+    mode = input?.mode === "RETROSPECTIVE" ? "RETROSPECTIVE" : "LIVE",
+    verificationSource = cleanText(input?.verificationSource, 80) || (mode === "LIVE" ? "SYSTEM_CLOCK" : "");
   if (!spokenText || !basis || !sourceAnchor) throw new Error("Record the exact closing statement, its evidentiary basis, and a source anchor.");
   const current = readOpeningState(root, { depositionId, storageRoot });
-  const record = { id: crypto.randomUUID(), spokenText, occurredAt, sourceAnchor, basis, authorityVersion: OPENING_AUTHORITY_VERSION, recordedAt: new Date().toISOString(), recordedBy: actorRecord(actor) };
+  if (current.closingAttestation && !correctionReason) throw new Error("Explain why the closing attestation is being corrected.");
+  const resolvedMediaAnchor = resolveUploadedMediaAnchor(depositionRecord, { mode, verificationSource, sourceAnchor });
+  const record = { id: crypto.randomUUID(), schemaVersion:"2.0.0", mode, verificationSource, spokenText, occurredAt, sourceAnchor, resolvedMediaAnchor, basis, correctionReason:correctionReason || null, priorAttestationId:current.closingAttestation?.id ?? null, authorityVersion: OPENING_AUTHORITY_VERSION, recordedAt: new Date().toISOString(), recordedBy: actorRecord(actor) };
   const canonicalEvent = appendCanonicalOpeningEvent(root, { depositionId, storageRoot, kind: "CLOSING_ATTESTATION", actor: actorRecord(actor).name, payload: record });
   record.canonicalEventId = canonicalEvent.id;
   const next = { ...current, closingAttestation: record, auditEvents: [...current.auditEvents, event("CLOSING_ATTESTATION_RECORDED", actor, { attestationId: record.id, canonicalEventId: canonicalEvent.id })], updatedAt: record.recordedAt };
@@ -994,6 +1018,7 @@ export function getOpeningProjection(
       (entry) => entry.path,
     ),
   );
+  const filing = filingIdentifier(canonical);
   const fields = FIELD_ROWS.map(([pathText, label]) => {
     const item = envelope(valueAt(canonical, pathText));
     const tick = state.verifiedFields[pathText];
@@ -1003,7 +1028,7 @@ export function getOpeningProjection(
         : tick === confirmationToken(item.value);
     return {
       path: pathText,
-      label,
+      label:pathText === "case.causeNumber" ? filing.displayLabel : label,
       ...item,
       verified,
       editable: EDITABLE_PATHS.has(pathText),

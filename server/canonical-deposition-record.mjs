@@ -423,6 +423,13 @@ export function createCanonicalDepositionRecord(
       errataReceived: missing("REPORTER_ENTERED"),
       errata: [],
     },
+    // Federal Rule 30(e) review is not Texas signature disposition and is never presumed from it.
+    // Events are append-only so requests, stipulations, corrections, and completion remain
+    // independently attributable.
+    reviewElection: {
+      schemaVersion: "1.0.0",
+      events: [],
+    },
     // certificationDate and furtherCertificationDate are two dates, not one printed twice. The
     // certificate says so itself: certification-2 closes "Further certification requirements
     // pursuant to Rule 203 of TRCP will be certified to after they have occurred", then opens a

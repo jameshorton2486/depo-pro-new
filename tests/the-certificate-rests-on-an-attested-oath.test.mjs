@@ -19,6 +19,7 @@ import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-page
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 import { readOpeningState, saveOpeningState } from "../server/opening-procedures.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 
 let counter = 0;
 const nextId = () => `DEP-20260829-OB${String(++counter).padStart(3, "0")}`;
@@ -74,7 +75,7 @@ const withSworn = (value) => {
 // Keyed on the field, not on a list of codes. Phase 2 added a second oath-basis code, and a helper
 // that named codes silently reported zero findings for the new one rather than failing -- which is
 // the shape of bug that makes a test look like it passed.
-const oathFindings = (input) => validateInsertionInput(input).filter((f) => f.target === "deposition.witnessSworn");
+const oathFindings = (input) => validateInsertionInput(input).filter((f) => f.target === "deposition.witnessSworn" || f.target === "deposition.oathAdministration" || f.target === "deposition.oathAdministration.selection");
 
 test("an attestation that the witness was not sworn blocks the certification page", async () => {
   const input = await assembled(withSworn(false));
@@ -93,7 +94,7 @@ test("an attestation that the witness was not sworn blocks the certification pag
 // is a literal in both templates, so an unattested certificate does not omit the claim, it makes
 // it. The case is rewritten rather than deleted, because the change it records is the point.
 test("an attested oath generates; an unattested record no longer does", async () => {
-  const attested = await assembled(withSworn(true));
+  const attested = await assembled(addCanonicalOath(withSworn(true)));
   assert.equal(oathFindings(attested).length, 0, "an attested oath raises no oath-basis finding");
   const set = buildTexasInsertionPageSet(attested, { setId: "s", depositionId: "DEP", generatedAt: "2026-08-29T12:00:00.000Z" });
   const text = set.pages.filter((p) => p.role.startsWith("certification")).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
@@ -115,9 +116,12 @@ test("an attested oath generates; an unattested record no longer does", async ()
 // correctly attested; telling that reporter to go and attest would be telling them to redo work
 // they did right, and there is no wording that would let the page generate afterwards.
 test("a witness who affirmed and a witness nobody asked about are refused differently", async () => {
-  const affirmed = oathFindings(await assembled(withSworn(false)));
+  const affirmation=withSworn(false);
+  addCanonicalOath(affirmation);
+  affirmation.openingRecord.oathAdministrations[0].selection="AFFIRMATION";
+  const affirmed = oathFindings(await assembled(affirmation));
   const unknown = oathFindings(await assembled(withSworn(null)));
-  assert.equal(affirmed[0].code, "CERT_WITNESS_NOT_SWORN");
+  assert.equal(affirmed[0].code, "CERT_AFFIRMATION_TEMPLATE_UNAVAILABLE");
   assert.equal(unknown[0].code, "CERT_OATH_BASIS_UNRESOLVED");
   assert.notEqual(affirmed[0].code, unknown[0].code, "collapsing these gives the reporter the wrong remedy");
   assert.doesNotMatch(affirmed[0].message, /Scripts & Oaths/, "there is nothing for an affirmation to attest");
@@ -172,8 +176,8 @@ test("an attestation without attribution is refused", (t) => {
 // Positive control. Without it, a run in which every case returns the same result -- including a
 // validator that silently stopped running -- would read as a passing suite. F-21.
 test("the harness detects a difference when one exists", async () => {
-  const a = await assembled(withSworn(true));
-  const b = await assembled(withSworn(true), { proceedingHeading: "ORAL AND VIDEOTAPED DEPOSITION OF" });
+  const a = await assembled(addCanonicalOath(withSworn(true)));
+  const b = await assembled(addCanonicalOath(withSworn(true)), { proceedingHeading: "ORAL AND VIDEOTAPED DEPOSITION OF" });
   const sha = (input) => buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP", generatedAt: "2026-08-29T12:00:00.000Z" }).sha256;
   assert.notEqual(sha(a), sha(b), "changing a field the renderer reads must change the page set");
 });
