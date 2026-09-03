@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { pageRenderEqual } from "./workspace-page-render.mjs";
 import { guardAction } from "./unsaved-edit-guard.mjs";
 
@@ -72,7 +72,7 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
   </article>;
 },pageRenderEqual);
 
-export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
+export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,quickTools,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;quickTools:ReactNode;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
   const scroller=useRef<HTMLDivElement|null>(null),saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),activeEditRef=useRef<ActiveEdit|null>(null),savePromise=useRef<Promise<boolean>|null>(null),[currentPage,setCurrentPage]=useState(1),[storedEdit,setActiveEdit]=useState<ActiveEdit|null>(null);
   const total=pages.length,paragraphById=useMemo(()=>new Map(paragraphs.map(paragraph=>[paragraph.id,paragraph])),[paragraphs]);
   const savedCanonical=storedEdit?.status==="saved"?paragraphById.get(storedEdit.paragraphId)?.text:undefined;
@@ -157,6 +157,7 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
         does nothing, and they would reasonably conclude the application was broken. Caught by
         looking at the screen, not by a test -- so the test below pins the absence. */}
     <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
+    {quickTools}
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
       {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedParagraphIds={selectedParagraphIds} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
     </div>

@@ -727,6 +727,26 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     document.getElementById(`w-${target.id}`)?.scrollIntoView({ block:"center", behavior:"smooth" });
   }
 
+  const quickTools = <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
+    <div className="workspace-quick-tools-copy">
+      <strong>Quick tools</strong>
+      <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word or range"}</span>
+    </div>
+    <div className="workspace-quick-tools-grid">
+      <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
+      <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
+      <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
+      <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
+      <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
+      <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
+      <button type="button" title="Mark selection for review" aria-label="Mark selection for review" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>⚑<small>Review</small></button>
+      <button type="button" title={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} aria-label={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} disabled={!paragraphDeleteOperations.length||busy||awaitingRecord} onClick={deleteSelectedParagraphs}>⌫<small>Delete</small></button>
+      <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
+      <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
+      <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>
+    </div>
+  </aside>;
+
   return (
     <main className="workspace">
       <header className="workspace-top">
@@ -916,30 +936,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
         <div className="workspace-stage">
-          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedParagraphIds={selectedParagraphIds} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} paragraphRangeMode={paragraphRangeMode} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
+          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedParagraphIds={selectedParagraphIds} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} paragraphRangeMode={paragraphRangeMode} quickTools={quickTools} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
             :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
-          <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
-            <div className="workspace-quick-tools-copy">
-              <strong>Quick tools</strong>
-              <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word or range"}</span>
-            </div>
-            <div className="workspace-quick-tools-grid">
-            <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
-            <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
-            <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
-            <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
-            <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
-            <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
-            <button type="button" title="Mark selection for review" aria-label="Mark selection for review" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>⚑<small>Review</small></button>
-            <button type="button" title={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} aria-label={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} disabled={!paragraphDeleteOperations.length||busy||awaitingRecord} onClick={deleteSelectedParagraphs}>⌫<small>Delete</small></button>
-            <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
-            <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
-            <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>
-            </div>
-          </aside>
+          {!printModel&&quickTools}
         </div>
 
         <button type="button" className="workspace-tools-toggle" onClick={()=>setToolsCollapsed(value=>!value)} aria-expanded={!toolsCollapsed}>{toolsCollapsed?"Open transcript tools":"Collapse transcript tools"}</button>
