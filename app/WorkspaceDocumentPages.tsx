@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { pageRenderEqual } from "./workspace-page-render.mjs";
 import { guardAction } from "./unsaved-edit-guard.mjs";
+import { insertAtCaret as insertTextAtCaret } from "./caret-insertion.mjs";
 
 export type DocumentFragment={id:string;kind:"evidence"|"authored"|"generated";role:string;text:string;sourceWordId:string|null;sourceStart?:number;sourceEnd?:number;audioStart?:number|null;audioEnd?:number|null};
 export type DocumentLine={position:number;occupied:boolean;content:string;paragraphId:string|null;fragments:DocumentFragment[]};
@@ -72,7 +73,9 @@ export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,pro
   </article>;
 },pageRenderEqual);
 
-export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,quickTools,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;quickTools:ReactNode;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
+type QuickToolEditorActions={canInsertAtCaret:boolean;insertAtCaret:(text:string)=>void};
+
+export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,quickTools,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;quickTools:(actions:QuickToolEditorActions)=>ReactNode;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
   const scroller=useRef<HTMLDivElement|null>(null),saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),activeEditRef=useRef<ActiveEdit|null>(null),savePromise=useRef<Promise<boolean>|null>(null),[currentPage,setCurrentPage]=useState(1),[storedEdit,setActiveEdit]=useState<ActiveEdit|null>(null);
   const total=pages.length,paragraphById=useMemo(()=>new Map(paragraphs.map(paragraph=>[paragraph.id,paragraph])),[paragraphs]);
   const savedCanonical=storedEdit?.status==="saved"?paragraphById.get(storedEdit.paragraphId)?.text:undefined;
@@ -164,6 +167,10 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
   const onPageJoinPrevious=useCallback(()=>{void structuralRef.current("previous")},[]);
   const onPageJoinNext=useCallback(()=>{void structuralRef.current("next")},[]);
   const onPagePlayAt=useCallback((seconds:number)=>{void playAtRef.current(seconds)},[]);
+  const insertAtCaret=useCallback((text:string)=>setActiveEdit(current=>{
+    if(!current||current.status==="saving"||!text)return current;
+    return {...current,...insertTextAtCaret(current.draft,current.caret,text),status:"editing"};
+  }),[]);
   return <section className="workspace-document" aria-label="Direct-edit final-document transcript">
     <nav className="workspace-page-nav" aria-label="Transcript page navigation">
       <button type="button" disabled={bounded<=1} onClick={()=>go(bounded-1)}>Previous page</button>
@@ -178,7 +185,7 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
         does nothing, and they would reasonably conclude the application was broken. Caught by
         looking at the screen, not by a test -- so the test below pins the absence. */}
     <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Drag across multiple paragraphs to select them for the Quick Tools Delete action. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
-    {quickTools}
+    {quickTools({canInsertAtCaret:Boolean(activeEdit&&activeEdit.status!=="saving"),insertAtCaret})}
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
       {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedParagraphIds={selectedParagraphIds} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
     </div>

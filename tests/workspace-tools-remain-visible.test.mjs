@@ -19,8 +19,8 @@ test("quick transcript actions remain outside the scrolling 25-line document", (
   assert.match(source, /workspace-quick-tools-grid/);
   assert.match(css, /\.workspace-stage\s*\{[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden/);
   assert.match(css, /\.workspace-quick-tools\s*\{[^}]*order:0[^}]*position:sticky[^}]*top:0/);
-  assert.ok(documentSource.indexOf("workspace-direct-edit-help") < documentSource.indexOf("{quickTools}"), "instructions precede Quick Tools");
-  assert.ok(documentSource.indexOf("{quickTools}") < documentSource.indexOf("workspace-page-flow"), "Quick Tools remain above the scrolling pages");
+  assert.ok(documentSource.indexOf("workspace-direct-edit-help") < documentSource.indexOf("{quickTools("), "instructions precede Quick Tools");
+  assert.ok(documentSource.indexOf("{quickTools(") < documentSource.indexOf("workspace-page-flow"), "Quick Tools remain above the scrolling pages");
   assert.match(css, /\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(6,[^}]*grid-template-rows:repeat\(2,56px\)/);
   assert.match(css, /@media\(max-width:700px\)[\s\S]*?\.workspace-quick-tools-grid\s*\{[^}]*grid-template-columns:repeat\(3/);
 });

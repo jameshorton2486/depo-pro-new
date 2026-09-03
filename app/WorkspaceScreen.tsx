@@ -727,7 +727,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     document.getElementById(`w-${target.id}`)?.scrollIntoView({ block:"center", behavior:"smooth" });
   }
 
-  const quickTools = <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
+  const quickTools = ({canInsertAtCaret,insertAtCaret}:{canInsertAtCaret:boolean;insertAtCaret:(text:string)=>void}) => <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
     <div className="workspace-quick-tools-copy">
       <strong>Quick tools</strong>
       <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word or range"}</span>
@@ -736,6 +736,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
       <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
       <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
+      <button type="button" title="Insert an ellipsis at the paragraph editor cursor" aria-label="Insert ellipsis at cursor" disabled={!canInsertAtCaret||busy||awaitingRecord} onMouseDown={event=>event.preventDefault()} onClick={()=>insertAtCaret("...")}>…<small>Ellipsis</small></button>
       <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
       <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
       <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
@@ -941,7 +942,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
-          {!printModel&&quickTools}
+          {!printModel&&quickTools({canInsertAtCaret:false,insertAtCaret:()=>{}})}
         </div>
 
         <button type="button" className="workspace-tools-toggle" onClick={()=>setToolsCollapsed(value=>!value)} aria-expanded={!toolsCollapsed}>{toolsCollapsed?"Open transcript tools":"Collapse transcript tools"}</button>
