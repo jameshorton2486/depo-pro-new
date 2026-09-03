@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { allowedApiOrigins, localApiPort } from "./api-origins.mjs";
+import { runtimeStatus } from "./runtime-status.mjs";
 import { extractionTool } from "./extraction-schema.mjs";
 import {
   saveAndAnalyzeAudio,
@@ -478,6 +479,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, publicAudioTools(), origin);
     if (req.url === "/api/system/preflight" && req.method === "GET")
       return json(res, 200, systemPreflight({ config: loadSecrets() }), origin);
+    if (req.url === "/api/system/runtime" && req.method === "GET")
+      return json(res, 200, runtimeStatus(root, { storageRoot: depositionStorageRoot, apiPort: port, allowedOrigins }), origin);
     if (req.url === "/api/live-capture/devices" && req.method === "GET")
       return json(res, 200, enumerateWindowsAudioSources(), origin);
     if (req.url === "/api/live-capture/preflight" && req.method === "POST") {

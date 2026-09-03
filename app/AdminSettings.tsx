@@ -6,6 +6,7 @@ type Status = {
   anthropicConfigured: boolean;
   deepgramConfigured: boolean;
 };
+type RuntimeStatus = { product:string;version:string;runtime:string;mode:string;ready:boolean;storage:{available:boolean;root:string|null};localApi:{port:number;binding:string} };
 type ComponentStatus = {
   ready?: boolean;
   version?: string | null;
@@ -48,19 +49,22 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
     [rx, setRx] = useState<RxStatus | null>(null),
     [keyTest, setKeyTest] = useState<KeyTest | null>(null),
     [testing, setTesting] = useState(false),
-    [inventory,setInventory]=useState<StorageInventory|null>(null);
+    [inventory,setInventory]=useState<StorageInventory|null>(null),
+    [runtime,setRuntime]=useState<RuntimeStatus|null>(null);
   useEffect(() => {
     Promise.all([
       apiJson<Status>("/api/admin/status",{cache:"no-store"}),
       apiJson<Preflight>("/api/system/preflight",{cache:"no-store"}),
       apiJson<RxStatus>("/api/rx/status",{cache:"no-store"}),
       apiJson<StorageInventory>("/api/storage/inventory",{cache:"no-store"}),
+      apiJson<RuntimeStatus>("/api/system/runtime",{cache:"no-store"}),
     ])
-      .then(([admin, system, rxStatus, storageInventory]) => {
+      .then(([admin, system, rxStatus, storageInventory, runtimeStatus]) => {
         setStatus(admin);
         setPreflight(system);
         setRx(rxStatus);
         setInventory(storageInventory);
+        setRuntime(runtimeStatus);
       })
       .catch(() =>
         setMessage(
@@ -191,6 +195,7 @@ export default function AdminSettings({ onClose }: { onClose: () => void }) {
           </section>
         )}
         {inventory&&<section className="preflight"><h2>Local evidence storage</h2><p className={inventory.corruptAuditCount||inventory.depositionIssues?"attention":"ready"}>{inventory.corruptAuditCount||inventory.depositionIssues?"Stored records need attention.":"Stored records passed structural checks."}</p><ul><li><span className="ready">✓</span><strong>Deposition library</strong><small>{inventory.depositions} depositions · {inventory.depositionIssues} structural issues</small></li><li><span className={inventory.unlinkedAudioAudits?"missing":"ready"}>{inventory.unlinkedAudioAudits?"!":"✓"}</span><strong>Unlinked audio work</strong><small>{inventory.unlinkedAudioAudits} of {inventory.audioAudits} audits · {bytes(inventory.unlinkedBytes)}</small></li><li><span className={inventory.duplicateGroups?"missing":"ready"}>{inventory.duplicateGroups?"!":"✓"}</span><strong>Duplicate source recordings</strong><small>{inventory.duplicateGroups} groups · {bytes(inventory.duplicateOriginalBytes)} physically duplicated</small></li></ul><p className="admin-intro">Nothing is deleted automatically. Unlinked Audio Tools work may still be evidence and must be reviewed before cleanup.</p></section>}
+        {runtime&&<section className="preflight"><h2>Application identity</h2><ul><li><span className={runtime.ready?"ready":"missing"}>{runtime.ready?"✓":"!"}</span><strong>{runtime.product} {runtime.version}</strong><small>{runtime.mode} · {runtime.runtime} · API {runtime.localApi.binding}:{runtime.localApi.port}</small></li><li><span className={runtime.storage.available?"ready":"missing"}>{runtime.storage.available?"✓":"!"}</span><strong>Configured deposition storage</strong><small>{runtime.storage.root??"Not configured"}</small></li></ul></section>}
         <form onSubmit={save}>
           <label>
             {status?.initialized
