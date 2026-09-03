@@ -77,6 +77,8 @@ export function recordExhibitAudit(root, { depositionId, storageRoot, actor, inp
   const result = clean(input?.result, 80);
   if (!EXHIBIT_AUDIT_RESULTS.includes(result)) throw new Error("Choose whether no exhibits were marked or exhibits were present.");
   const state = loadForWrite(root, depositionId, storageRoot), prior = currentEffective(state.exhibits.auditEvents);
+  const expectedEventId = clean(input?.expectedEventId, 100) || null;
+  if (Object.hasOwn(input ?? {}, "expectedEventId") && (prior?.id ?? null) !== expectedEventId) throw new Error("The exhibit audit changed after this screen loaded. Refresh and review the current record before trying again.");
   if (prior && !clean(input?.correctionReason, 1000)) throw new Error("Explain why the exhibit audit is being corrected or renewed.");
   const event = {
     id: crypto.randomUUID(), kind: "EXHIBIT_AUDIT_COMPLETED", result,
@@ -92,6 +94,7 @@ export function recordExhibit(root, { depositionId, storageRoot, actor, input } 
   const requestedId = clean(input?.exhibitId, 100), prior = requestedId ? currentEffective(state.exhibits.exhibitEvents, item => item.exhibitId === requestedId) : null;
   if (requestedId && !prior) throw new Error("The exhibit being corrected was not found.");
   if (prior && !clean(input?.correctionReason, 1000)) throw new Error("Explain why the exhibit record is being corrected.");
+  if (prior && Object.hasOwn(input ?? {}, "expectedEventId") && prior.id !== clean(input?.expectedEventId, 100)) throw new Error("This exhibit changed after this screen loaded. Refresh and review the current record before trying again.");
   const status = clean(input?.status, 80) || "ACTIVE";
   if (!EXHIBIT_STATES.includes(status)) throw new Error("Choose a recognized exhibit state.");
   const materialKind = clean(input?.material?.kind, 80) || "NONE";

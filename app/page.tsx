@@ -9,6 +9,7 @@ import WorkspaceScreen from "./WorkspaceScreen";
 import TranscriptPreviewScreen from "./TranscriptPreviewScreen";
 import LiveCaptureScreen from "./LiveCaptureScreen";
 import OpeningProceduresScreen from "./OpeningProceduresScreen";
+import ExhibitReconciliationScreen from "./ExhibitReconciliationScreen";
 import WorkspaceNav, { type NavView } from "./WorkspaceNav";
 import AudioToolsScreen from "./AudioToolsScreen";
 import CanonicalDataSheet from "./CanonicalDataSheet";
@@ -69,13 +70,13 @@ const INITIAL_WORKFLOW_SESSION:WorkflowSession={view:"library",activeDepositionI
 // The views that mean nothing without an open deposition. Restoring the flag without restoring
 // the deposition is why widening the guard above is not on its own enough: the view flag would be
 // restored, active would be null, and `if (active)` would drop to the library anyway.
-const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","opening","preview","compare","review","insertion-pages"];
+const DEPOSITION_VIEWS:readonly WorkflowView[]=["transcript","workspace","opening","exhibits","preview","compare","review","insertion-pages"];
 // The one list. The type is derived from it rather than declared beside it, so a view added to
 // the union without being added here is a type error at the assignment below -- which is the
 // drift that let the writer persist ten views while the reader accepted six. "transcript" stays
 // on the list although its screen is gone: a session stored before the deletion must still be
 // readable, and it falls through to the Workspace.
-const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","opening","preview","live-capture","audio-tools","admin","insertion-pages","compare","review"] as const;
+const WORKFLOW_VIEWS=["library","intake","setup","transcript","workspace","opening","exhibits","preview","live-capture","audio-tools","admin","insertion-pages","compare","review"] as const;
 type WorkflowView=typeof WORKFLOW_VIEWS[number];
 function readWorkflowSession():WorkflowSession{try{const value=JSON.parse(localStorage.getItem(WORKFLOW_SESSION_KEY)||"null");return value&&(WORKFLOW_VIEWS as readonly string[]).includes(value.view)?{view:value.view,activeDepositionId:typeof value.activeDepositionId==="string"?value.activeDepositionId:null}:INITIAL_WORKFLOW_SESSION}catch{return INITIAL_WORKFLOW_SESSION}}
 
@@ -129,6 +130,7 @@ export default function Home() {
   const [showPreview,setShowPreview]=useState(false);
   const [showLiveCapture,setShowLiveCapture]=useState(false);
   const [showOpening,setShowOpening]=useState(false);
+  const [showExhibits,setShowExhibits]=useState(false);
   const [liveRecording,setLiveRecording]=useState(false);
   const [audioToolFiles, setAudioToolFiles] = useState<File[]>([]);
   const [intakeDraft, setIntakeDraft] = useState<IntakeDraft | null>(null);
@@ -153,7 +155,7 @@ export default function Home() {
       if(cancelled)return;
       const resumeSession=readWorkflowSession();
       try{setReporters(await loadReporters())}catch(error){setReporters([]);setNotice(error instanceof Error?error.message:"Could not load the Court Reporter directory.")}
-      setShowModal(resumeSession.view==="setup");
+      setShowModal(resumeSession.view==="setup");setShowExhibits(resumeSession.view==="exhibits");
       setShowIntake(resumeSession.view==="intake");
       setShowAdmin(resumeSession.view==="admin");
       setShowAudioTools(resumeSession.view==="audio-tools");setShowInsertionPages(resumeSession.view==="insertion-pages");setShowCompare(resumeSession.view==="compare");setShowPreview(resumeSession.view==="preview");setShowLiveCapture(resumeSession.view==="live-capture");setShowOpening(resumeSession.view==="opening");
@@ -163,7 +165,7 @@ export default function Home() {
     return()=>{cancelled=true};
   }, []);
 
-  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showOpening&&active?"opening":showLiveCapture?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showInsertionPages,showIntake,showLiveCapture,showModal,showOpening,showPreview]);
+  useEffect(()=>{if(!libraryLoaded)return;const view:WorkflowView=showAdmin?"admin":showInsertionPages&&active?"insertion-pages":showCompare&&active?"compare":showPreview&&active?"preview":showExhibits&&active?"exhibits":showOpening&&active?"opening":showLiveCapture?"live-capture":showAudioTools?"audio-tools":showIntake?"intake":active?"workspace":showModal?"setup":"library";localStorage.setItem(WORKFLOW_SESSION_KEY,JSON.stringify({view,activeDepositionId:active?.id??null}))},[active,libraryLoaded,showAdmin,showAudioTools,showCompare,showExhibits,showInsertionPages,showIntake,showLiveCapture,showModal,showOpening,showPreview]);
 
   const restoreRecoveredDeposition = useCallback(async (depositionId:string) => {
     const response=await fetch(`${API}/api/depositions`),result=await response.json();
@@ -283,13 +285,13 @@ export default function Home() {
   }
 
 
-  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":showLiveCapture?"live-capture":active?(showOpening?"opening":showInsertionPages?"insertion-pages":showCompare?"compare":showPreview?"preview":"workspace"):"library";
+  const currentView:NavView = showAdmin?"admin":showIntake?"intake":showAudioTools?"audio-tools":showLiveCapture?"live-capture":active?(showOpening?"opening":showExhibits?"exhibits":showInsertionPages?"insertion-pages":showCompare?"compare":showPreview?"preview":"workspace"):"library";
   function navigate(next:NavView){
     if(next==="intake"){startNewDeposition();return}
     // One place decides which screen is showing. Every entry clears the others, so two
     // screens cannot both be open -- the thirteen independent booleans allow that otherwise.
     setShowAdmin(next==="admin"); setShowIntake(false); setShowAudioTools(next==="audio-tools");
-    setShowOpening(next==="opening"); setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowPreview(next==="preview"); setShowLiveCapture(next==="live-capture");
+    setShowOpening(next==="opening"); setShowExhibits(next==="exhibits"); setShowInsertionPages(next==="insertion-pages"); setShowCompare(next==="compare"); setShowPreview(next==="preview"); setShowLiveCapture(next==="live-capture");
     if(next==="library") setActive(null);
   }
   const frame=(node:React.ReactNode)=>(
@@ -301,7 +303,7 @@ export default function Home() {
   if (showAdmin) {
     return frame(<AdminSettings onClose={() => setShowAdmin(false)} />);
   }
-  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowLiveCapture(false);setShowOpening(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowIntake(true)}
+  function startNewDeposition(){localStorage.removeItem(WORKFLOW_SESSION_KEY);setActive(null);setIntakeDraft(null);setAudioToolFiles([]);setShowModal(false);setShowAdmin(false);setShowAudioTools(false);setShowLiveCapture(false);setShowOpening(false);setShowExhibits(false);setShowReporterModal(false);setSelectedReporterId("");setQuery("");setCaseId("");setNotice("");setShowIntake(true)}
   async function openAudioTools() {
     if (intakeDraft?.audioFiles.length) setAudioToolFiles(intakeDraft.audioFiles);
     else if (depositions[0]) {
@@ -331,9 +333,10 @@ export default function Home() {
   }
   if (active) {
     if (showOpening) return frame(<OpeningProceduresScreen deposition={active} onBack={()=>setShowOpening(false)} onContinue={()=>{setShowOpening(false);setShowLiveCapture(active.creationMode==="live")}} />);
+    if (showExhibits) return frame(<ExhibitReconciliationScreen deposition={active} onBack={()=>navigate("workspace")} onPreview={()=>navigate("preview")} />);
     if (showInsertionPages) return frame(<InsertionPagesScreen deposition={active} onBack={() => setShowInsertionPages(false)} />);
     if (showCompare) return frame(<TranscriptComparisonScreen deposition={active} onBack={() => setShowCompare(false)} />);
-    if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} onNavigate={(destination)=>{if(destination==="WORKSPACE")navigate("workspace");else if(destination==="OPENING")navigate("opening");else if(destination==="CERTIFICATION_PAGES")navigate("insertion-pages");else if(destination==="PRINT_PREVIEW")navigate("preview")}} />);
+    if (showPreview) return frame(<TranscriptPreviewScreen deposition={active} onBack={() => setShowPreview(false)} onNavigate={(destination)=>{if(destination==="WORKSPACE")navigate("workspace");else if(destination==="OPENING")navigate("opening");else if(destination==="EXHIBITS")navigate("exhibits");else if(destination==="CERTIFICATION_PAGES")navigate("insertion-pages");else if(destination==="PRINT_PREVIEW")navigate("preview")}} />);
     // The Workspace is the default for an open deposition. It was the Transcript screen, whose
     // only irreplaceable control -- the transcribe step -- now lives here, and whose speaker map
     // is keyed by job here too. A stored session naming the retired "transcript" view lands here

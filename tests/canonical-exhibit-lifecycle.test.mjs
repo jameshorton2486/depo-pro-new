@@ -108,8 +108,26 @@ test("reporter exhibit audits are append-only and server-bound to transcript sta
   assert.equal(finalization.categories.exhibits.status, "READY"); assert.equal(finalization.ready, true);
 });
 
+test("stale reporter tabs cannot supersede newer exhibit authority", t => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "depo-exhibit-stale-"));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  const built = spawnSync(process.execPath, [path.join(repositoryRoot, "scripts", "create-milestone2-browser-fixture.mjs"), storageRoot], { encoding: "utf8" });
+  assert.equal(built.status, 0, built.stderr); const { id } = JSON.parse(built.stdout);
+  const base = { label: "Exhibit 1", description: "Physical contract", markedAt: "2026-09-03T10:00:00Z", markedBy: "Counsel", transcriptReferences: [{ sourceAnchor: "transcript:4:2" }], material: { kind: "PHYSICAL" }, custody: { status: "RESOLVED", holder: "Reporter", sourceAnchor: "transcript:90:1" }, sealedHandling: { status: "NOT_APPLICABLE" }, packageDisposition: "INCLUDED", sourceAnchor: "transcript:4:2" };
+  const first = recordExhibit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: base });
+  const second = recordExhibit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: { ...base, exhibitId: first.exhibitId, expectedEventId: first.id, label: "Exhibit 1-A", correctionReason: "Correct the label." } });
+  assert.throws(() => recordExhibit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: { ...base, exhibitId: first.exhibitId, expectedEventId: first.id, label: "Stale overwrite", correctionReason: "Stale tab." } }), /changed after this screen loaded/);
+  const readiness = getExhibitReadiness(repositoryRoot, { depositionId: id, storageRoot });
+  assert.equal(readiness.exhibits[0].id, second.id); assert.equal(readiness.exhibits[0].label, "Exhibit 1-A");
+
+  const auditOne = recordExhibitAudit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: { result: "EXHIBITS_PRESENT", expectedEventId: null, sourceAnchor: "review:one" } });
+  recordExhibitAudit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: { result: "EXHIBITS_PRESENT", expectedEventId: auditOne.id, sourceAnchor: "review:two", correctionReason: "Renewed review." } });
+  assert.throws(() => recordExhibitAudit(repositoryRoot, { depositionId: id, storageRoot, actor: "Reporter", input: { result: "NO_EXHIBITS", expectedEventId: auditOne.id, sourceAnchor: "review:stale", correctionReason: "Stale tab." } }), /changed after this screen loaded/);
+});
+
 test("the API exposes exhibit writes and read-only readiness without accepting a client-derived state", () => {
   const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
   assert.match(source, /\/api\/exhibits\/audit/); assert.match(source, /\/api\/exhibits\/record/); assert.match(source, /\/api\/exhibits\/readiness/);
+  assert.match(source, /expectedEventId/);
   assert.doesNotMatch(source, /input\.(ready|transcriptModelHash|reviewStateHash)/);
 });

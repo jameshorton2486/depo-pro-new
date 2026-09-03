@@ -1836,11 +1836,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.url === "/api/exhibits/audit" && req.method === "POST") {
       const input = await body(req, 64 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      if (!Object.hasOwn(input.audit ?? {}, "expectedEventId")) throw new Error("Refresh exhibit readiness before recording the exhibit review.");
       const audit = recordExhibitAudit(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.audit });
       return json(res, 200, { audit, readiness: getExhibitReadiness(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }) }, origin);
     }
     if (req.url === "/api/exhibits/record" && req.method === "POST") {
       const input = await body(req, 256 * 1024), who = readCorrectionAuthority(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot });
+      if (input.exhibit?.exhibitId && !Object.hasOwn(input.exhibit, "expectedEventId")) throw new Error("Refresh exhibit readiness before correcting the exhibit.");
       const exhibit = recordExhibit(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot, actor: who, input: input.exhibit });
       return json(res, 200, { exhibit, readiness: getExhibitReadiness(root, { depositionId: input.depositionId, storageRoot: depositionStorageRoot }) }, origin);
     }

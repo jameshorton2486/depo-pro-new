@@ -10,7 +10,7 @@ type ArtifactState={status:string;verified:boolean;generationEligibility:string;
 type FinalVersion={finalVersionId:string;finalizationEventId:string;finalizedAt:string;relationship:"CURRENT"|"HISTORICAL";artifacts:ArtifactState};
 type Projection={state:string;readiness:null|{ready:boolean;profile:string;blockers:Blocker[]};transcriptCompletion:{state:"NOT_RECORDED"|"CURRENT"|"STALE"};currentFinalVersionId:string|null;latestFinalVersionId:string|null;versions:FinalVersion[]};
 
-const REMEDIATION_LABELS:Record<string,string>={WORKSPACE:"Open Workspace",OPENING:"Review Opening",CERTIFICATION_PAGES:"Review Certification Pages",PRINT_PREVIEW:"Review Preview"};
+const REMEDIATION_LABELS:Record<string,string>={WORKSPACE:"Open Workspace",OPENING:"Review Opening",EXHIBITS:"Reconcile Exhibits",CERTIFICATION_PAGES:"Review Certification Pages",PRINT_PREVIEW:"Review Preview"};
 
 export default function FinalizationPanel({depositionId,onNavigate}:{depositionId:string;onNavigate:(destination:string)=>void}){
   const [projection,setProjection]=useState<Projection|null>(null),[loading,setLoading]=useState(true),[operation,setOperation]=useState<"completion"|"finalize"|"artifacts"|null>(null),[error,setError]=useState(""),[notice,setNotice]=useState(""),[confirming,setConfirming]=useState(false),[renewalReason,setRenewalReason]=useState("");
