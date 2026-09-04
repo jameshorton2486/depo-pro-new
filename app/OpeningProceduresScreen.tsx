@@ -144,6 +144,14 @@ type Projection = {
   canStartExamination: boolean;
   completeCount: number;
   totalCount: number;
+  protection?: {
+    protected: boolean;
+    reason: string | null;
+    unlocked: boolean;
+    unlockedUntil: string | null;
+    msRemaining: number;
+    unlockCount: number;
+  } | null;
 };
 
 const value = (item?: Envelope) =>
@@ -207,6 +215,7 @@ export default function OpeningProceduresScreen({
       correctionReason: "",
     }),
     [closingProof, setClosingProof] = useState({ spokenText: "", occurredAt: "", sourceAnchor: "", basis: "" }),
+    [unlockWhy, setUnlockWhy] = useState(""),
     [attestation, setAttestation] = useState({
       officerRole: "COURT_REPORTER",
       officerName: "",
@@ -265,6 +274,34 @@ export default function OpeningProceduresScreen({
         reason instanceof Error
           ? reason.message
           : "Opening procedures could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function unlockProtectedRecord() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/deposition/unlock-protected`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ depositionId: deposition.id, reason: unlockWhy }),
+        }),
+        body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      const refreshed = await fetch(
+        `${API}/api/opening?depositionId=${encodeURIComponent(deposition.id)}`,
+      );
+      const next = await refreshed.json();
+      if (!refreshed.ok) throw new Error(next.error);
+      setProjection(next);
+      setUnlockWhy("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "This record could not be opened for editing.",
       );
     } finally {
       setBusy(false);
@@ -502,6 +539,44 @@ export default function OpeningProceduresScreen({
     });
   return (
     <main className="opening-shell">
+      {projection.protection?.protected && (
+        <section
+          className={`opening-protection ${projection.protection.unlocked ? "open" : "closed"}`}
+        >
+          <div>
+            <strong>
+              {projection.protection.unlocked
+                ? "Temporarily open for canonical editing"
+                : "This canonical record is protected"}
+            </strong>
+            <p>
+              {projection.protection.reason ||
+                "Its canonical facts and correction history are closed to unattended writes."}
+            </p>
+          </div>
+          {!projection.protection.unlocked && (
+            <div className="opening-protection-unlock">
+              <label>
+                Why are you opening it?
+                <input
+                  value={unlockWhy}
+                  disabled={busy}
+                  onChange={(event) => setUnlockWhy(event.target.value)}
+                  placeholder="Entering a verified on-record fact"
+                />
+              </label>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={busy || !unlockWhy.trim()}
+                onClick={() => void unlockProtectedRecord()}
+              >
+                Open for 15 minutes
+              </button>
+            </div>
+          )}
+        </section>
+      )}
       <header className="opening-header">
         <div>
           <span className="eyebrow">OPEN DEPOSITION</span>

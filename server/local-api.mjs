@@ -94,6 +94,10 @@ import {
 import { STALE_CORRECTION_PROPOSAL } from "./review-state-hash.mjs";
 import { appendFieldCorrection } from "./deposition-store.mjs";
 import {
+  DEPOSITION_PROTECTED,
+  unlockDeposition,
+} from "./protected-records.mjs";
+import {
   KEYTERM_PRODUCT_CAP,
   KEYTERM_TOKEN_BUDGET,
   estimateKeytermTokens,
@@ -2272,6 +2276,21 @@ const server = http.createServer(async (req, res) => {
       );
     }
     if (
+      req.url === "/api/deposition/unlock-protected" &&
+      req.method === "POST"
+    ) {
+      const input = await body(req, 16 * 1024);
+      const directory = depositionDirectory(root, input.depositionId, {
+        storageRoot: depositionStorageRoot,
+      });
+      return json(
+        res,
+        200,
+        unlockDeposition(directory, { reason: input.reason }),
+        origin,
+      );
+    }
+    if (
       req.url?.startsWith("/api/transcript/speaker-candidates?") &&
       req.method === "GET"
     ) {
@@ -2711,6 +2730,13 @@ const server = http.createServer(async (req, res) => {
           expected: error.expected ?? null,
           carried: error.carried ?? null,
         },
+        origin,
+      );
+    if (error?.code === DEPOSITION_PROTECTED)
+      return json(
+        res,
+        423,
+        { error: error.message, code: error.code },
         origin,
       );
     // A proposal the server will not apply is a refusal with a cause, not a fault. Reported as 422

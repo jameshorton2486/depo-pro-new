@@ -23,6 +23,7 @@ import {
   projectDeepgramKeyterms,
 } from "./master-deposition-data.mjs";
 import { normalizeCauseNumber } from "./cause-number.mjs";
+import { assertWritable } from "./protected-records.mjs";
 
 const ID_PATTERN = /^DEP-\d{8}-[A-Z0-9]{5}$/;
 function base(_root, { storageRoot } = {}) {
@@ -98,6 +99,7 @@ function depositionFolder(metadata) {
   return `${last}_${first}_${date}`;
 }
 function atomicText(file, text) {
+  assertWritable(file);
   const temporary = `${file}.${crypto.randomUUID()}.tmp`,
     descriptor = fs.openSync(temporary, "wx");
   try {
@@ -109,6 +111,7 @@ function atomicText(file, text) {
   fs.renameSync(temporary, file);
 }
 function atomicJson(file, value) {
+  assertWritable(file);
   const temporary = `${file}.${crypto.randomUUID()}.tmp`,
     descriptor = fs.openSync(temporary, "wx");
   try {
