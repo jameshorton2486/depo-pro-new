@@ -87,12 +87,12 @@ import {
 } from "./entity-pass.mjs";
 import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
-import { preparePrecorrection } from "./precorrection-trigger.mjs";
+import { existingReview, runAiReview } from "./ai-review.mjs";
 import {
   RANGE_ACCEPTANCE_REFUSED,
   acceptRangeProposal,
 } from "./range-proposal-acceptance.mjs";
-import { STALE_CORRECTION_PROPOSAL } from "./review-state-hash.mjs";
+import { STALE_CORRECTION_PROPOSAL, computeReviewStateHash } from "./review-state-hash.mjs";
 import { appendFieldCorrection } from "./deposition-store.mjs";
 import {
   DEPOSITION_PROTECTED,
@@ -698,6 +698,46 @@ const server = http.createServer(async (req, res) => {
         }),
         origin,
       );
+    }
+    // What state is this transcript actually in? Read from disk each time, because the answer is a
+    // fact about stored files and not something a caller may supply.
+    const currentReviewStateHash = (depositionId) => {
+      if (!depositionId) return null;
+      try {
+        const store = { depositionId, storageRoot: depositionStorageRoot };
+        return computeReviewStateHash({
+          transcript: getWorkingTranscript(root, store),
+          overlay: readReporterOverlay(root, store),
+        });
+      } catch { return null; }
+    };
+    // ONE reporter-initiated control, for prerecorded and live alike. The individual passes remain
+    // reachable below; this is what the Run AI Review button calls, and what makes clicking twice
+    // cost one analysis instead of two.
+    if (req.url === "/api/correction/ai-review" && req.method === "POST") {
+      const input = await body(req, 16 * 1024), config = loadSecrets();
+      // The transcript state is DERIVED here, never accepted from the request. A client that could
+      // name the state could name one no review exists for and buy a duplicate analysis, or name a
+      // stale one and be handed suggestions about a transcript that has since moved.
+      return json(res, 200, await runAiReview(root, {
+        depositionId: input.depositionId,
+        storageRoot: depositionStorageRoot,
+        apiKey: config?.anthropicApiKey,
+        model: config?.claudeModel,
+        reviewStateHash: currentReviewStateHash(input.depositionId),
+        force: input.force === true,
+      }), origin);
+    }
+    // Reading a worklist that was already bought. GET, and free: this is what Workspace calls when
+    // it opens, so a reopened deposition shows its existing suggestions without charging for them.
+    if (req.url?.startsWith("/api/correction/ai-review?") && req.method === "GET") {
+      const params = new URL(req.url, "http://localhost").searchParams;
+      const depositionId = params.get("depositionId");
+      return json(res, 200, existingReview(root, {
+        depositionId,
+        storageRoot: depositionStorageRoot,
+        reviewStateHash: currentReviewStateHash(depositionId),
+      }), origin);
     }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") {
       const input = await body(req, 16 * 1024),
@@ -1362,22 +1402,14 @@ const server = http.createServer(async (req, res) => {
             operationId,
           }),
       });
-      // The AI review worklist is prepared here rather than waiting for the reporter to discover
-      // "Correct Transcript". A newly transcribed deposition otherwise arrives as raw ASR and the
-      // correction subsystem -- which exists, and is tested -- never runs. E2E-034.
+      // TRANSCRIPTION DOES NOT START AN AI REVIEW. It was wired to, briefly, and that was the wrong
+      // product decision: a paid analysis must begin because a reporter asked for one, not because
+      // Deepgram finished. Completing transcription, opening Workspace, refreshing the browser or
+      // restarting Depo-Pro must never spend a Claude call on their own.
       //
-      // It PROPOSES only. Nothing is applied; the reporter still reviews and decides.
-      //
-      // Awaited rather than fired and forgotten, so the response tells the truth about whether the
-      // worklist is ready. It cannot fail the transcription: preparePrecorrection never throws, and
-      // a transcript that succeeded stays succeeded whatever the passes did.
-      const precorrection = await preparePrecorrection(root, {
-        depositionId: input.depositionId,
-        storageRoot: depositionStorageRoot,
-        apiKey: config?.anthropicApiKey,
-        model: config?.claudeModel,
-        reviewStateHash: result.workingTranscript?.reviewStateHash ?? null,
-      });
+      // The reporter starts it from Workspace -- Run AI Review -- which is also what makes the same
+      // control work for a live deposition, where continuously re-analysing arriving speech would
+      // be both expensive and wrong.
       return json(
         res,
         200,
@@ -1387,7 +1419,6 @@ const server = http.createServer(async (req, res) => {
           evidence: result.evidence,
           workingTranscript: result.workingTranscript,
           transcript: result.normalized || null,
-          precorrection,
         },
         origin,
       );

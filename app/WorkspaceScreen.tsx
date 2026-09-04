@@ -168,6 +168,20 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   const [correctionInstructions,setCorrectionInstructions]=useState("");
   const [correcting,setCorrecting]=useState(false);
   const [correctionResult,setCorrectionResult]=useState<CorrectionResult|null>(null);
+  // Whether a review has already been bought for the transcript as it stands. Loaded with a GET,
+  // which costs nothing, so reopening a deposition shows its existing suggestions instead of
+  // silently charging for the same analysis again.
+  const [reviewAlreadyRun,setReviewAlreadyRun]=useState(false);
+  const suggestionCount=(correctionResult?.names?.accepted.length??0)+(correctionResult?.ranges?.accepted.length??0);
+  useEffect(()=>{
+    if(!depositionId||!printModel?.source?.reviewStateHash)return;
+    let current=true;
+    fetch(`${API}/api/correction/ai-review?depositionId=${encodeURIComponent(depositionId)}`)
+      .then(response=>response.ok?response.json():{current:[]})
+      .then(body=>{if(current)setReviewAlreadyRun((body?.current?.length??0)>0)})
+      .catch(()=>{if(current)setReviewAlreadyRun(false)});
+    return()=>{current=false};
+  },[depositionId,printModel?.source?.reviewStateHash]);
   const [selectedCorrections,setSelectedCorrections]=useState<Set<string>>(new Set());
 
   // A token rather than a callback, so the effect owns the fetch and every setState happens
@@ -790,17 +804,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
+        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"AI Review Running…":suggestionCount>0?`Review AI Suggestions (${suggestionCount})`:"Run AI Review"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
         <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate Working PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
-        <div><h2>Correct Transcript</h2><p>AI checks proper-name spellings and proposes speaker identities and Q./A./colloquy roles. Nothing changes until you review and apply it.</p></div>
+        <div><h2>AI Review</h2><p>Analyze this transcript for names, likely ASR errors, speaker identities, and Q./A./colloquy structure. <strong>AI proposes; nothing changes until you review and approve it.</strong></p></div>
         <label htmlFor="workspace-correction-instructions">Additional things AI should check</label>
         <textarea id="workspace-correction-instructions" value={correctionInstructions} onChange={event=>setCorrectionInstructions(event.target.value)} placeholder="Example: Check whether Lucia Zahn self-identifies as Speaker 3. Check a recurring phrase that may have been misheard." />
         <p className="workspace-hint">These instructions guide the enabled checks. Future correction types can be added as separate validated passes without changing this review workflow.</p>
-        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void correctTranscript()}>{correcting?"Sending transcript evidence to AI…":"Run AI correction check"}</button>
+        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void correctTranscript()}>{correcting?"AI Review Running…":reviewAlreadyRun?"Run AI Review Again":"Run AI Review"}</button>
+        {reviewAlreadyRun&&!correcting&&<p className="workspace-hint">This transcript has already been reviewed in its current state. Running again performs another analysis.</p>}
         {correctionResult?.errors.map(message=><p className="analysis-error" role="alert" key={message}>{message}</p>)}
         {correctionResult&&<div className="workspace-correction-results">
           <section><h3>Word corrections ({correctionResult.names?.accepted.length??0})</h3>
