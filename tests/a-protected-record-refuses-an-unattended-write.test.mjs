@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { appendDepositionCorrections, createDeposition, readDepositionCorrections, writeDepositionCounsel, writeParticipantHonorific } from "../server/deposition-store.mjs";
-import { DEPOSITION_PROTECTED, GUARDED_FILES, PROTECTION_FILE, UNLOCK_WINDOW_MS, depositionFolderFor, protectDeposition, protectionProjection, readProtection, unlockDeposition } from "../server/protected-records.mjs";
+import { DEPOSITION_PROTECTED, GUARDED_FILES, PROTECTION_FILE, UNLOCK_WINDOW_MS, depositionFolderFor, protectDeposition, protectionProjection, readProtection, unlockDeposition, unprotectDeposition } from "../server/protected-records.mjs";
 
 const AT = "2026-09-03T10:00:00.000Z";
 // assert.throws checks that something threw; the code on the refusal is what the API maps to 423,
@@ -145,6 +145,62 @@ test("protecting and opening both require a reason", t => {
   assert.throws(() => unlockDeposition(space.directory, { reason: "x" }), /not protected/, "there is nothing to open yet");
   protectDeposition(space.directory, { reason: REASON });
   assert.throws(() => unlockDeposition(space.directory, { reason: "" }), /requires a reason/);
+});
+
+test("protection can be lifted, and lifting it really opens the record", t => {
+  const space = workspace(t);
+  protectDeposition(space.directory, { reason: REASON });
+  assert.throws(() => space.correct(), /deposition is protected/);
+
+  unprotectDeposition(space.directory, { reason: "Trial #1 is delivered; the record is no longer live." });
+  assert.equal(protectionProjection(space.directory), null, "the banner goes away");
+  space.correct();
+  assert.equal(space.read().deposition.depositionDate.value, "2026-04-30", "and writes go through");
+});
+
+test("lifting protection keeps the trail rather than erasing it", t => {
+  // The marker is rewritten, not deleted. A record of "this was protected, and here is every time
+  // somebody opened it" that vanishes the moment protection ends is not a record of anything.
+  const space = workspace(t);
+  protectDeposition(space.directory, { reason: REASON });
+  unlockDeposition(space.directory, { reason: "Entering the on-record start time." });
+  unprotectDeposition(space.directory, { reason: "Trial #1 is delivered." });
+
+  const raw = readProtection(space.directory);
+  assert.equal(raw.protected, false);
+  assert.equal(raw.reason, REASON, "what it was protected for survives");
+  assert.ok(raw.protectedAt, "and when");
+  assert.equal(raw.unlocks.length, 1, "and every opening taken while it was");
+  assert.match(raw.unlocks[0].reason, /on-record start time/);
+  assert.match(raw.unprotectedReason, /delivered/, "alongside why it ended");
+  assert.ok(raw.unprotectedAt);
+
+  // And it can be protected again without losing any of that.
+  protectDeposition(space.directory, { reason: "Reopened for a correction." });
+  const again = readProtection(space.directory);
+  assert.equal(again.protected, true);
+  assert.equal(again.unlocks.length, 1, "the earlier openings are still there");
+  assert.throws(() => space.correct(), /deposition is protected/);
+});
+
+test("lifting requires a reason, and cannot be done to a record that is not protected", t => {
+  const space = workspace(t);
+  assert.throws(() => unprotectDeposition(space.directory, { reason: "x" }), /nothing to lift/);
+  protectDeposition(space.directory, { reason: REASON });
+  assert.throws(() => unprotectDeposition(space.directory, { reason: "   " }), /requires a reason/);
+  assert.equal(readProtection(space.directory).protected, true, "a refused lift changes nothing");
+});
+
+test("lifting is not reachable by clicking, only by typing", async () => {
+  // The weaker action must not be the more convenient one. An "unprotect" button beside the
+  // fifteen-minute unlock is the button that gets pressed, and it ends the protection for good.
+  const api = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
+  assert.equal(/unprotectDeposition/.test(api), false, "no route reaches it");
+  const screen = fs.readFileSync(new URL("../app/OpeningProceduresScreen.tsx", import.meta.url), "utf8");
+  assert.equal(/unprotect/i.test(screen), false, "and no control on the screen offers it");
+  // It does have a way in, though -- otherwise the only route out is hand-editing JSON, and a
+  // corrupted marker refuses every write.
+  assert.ok(fs.existsSync(new URL("../scripts/protect-deposition.mjs", import.meta.url)));
 });
 
 test("the guard covers the evidentiary files and deliberately stops there", () => {

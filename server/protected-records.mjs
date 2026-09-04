@@ -132,6 +132,30 @@ export function unlockDeposition(directory, { reason, now = Date.now() } = {}) {
   return readProtection(directory);
 }
 
+/**
+ * Lifts protection for good.
+ *
+ * DELIBERATELY NOT A ROUTE, AND NOT A BUTTON. It sits beside the unlock in neither the API nor the
+ * screen, because a control that ends protection permanently, one click from the one that opens it
+ * for fifteen minutes, becomes the control people press. The weaker action must not be the more
+ * convenient one. scripts/protect-deposition.mjs is the way in, which is a thing a person types on
+ * purpose and cannot reach by clicking around.
+ *
+ * The marker is rewritten rather than deleted, so the fact that this deposition WAS protected -- and
+ * every unlock taken while it was -- survives lifting it. A trail that disappears when the thing it
+ * describes ends is not a trail.
+ */
+export function unprotectDeposition(directory, { reason, at = new Date().toISOString() } = {}) {
+  const text = String(reason ?? "").trim();
+  if (!text) throw new Error("Lifting protection requires a reason, which is the whole record of why it was lifted.");
+  const protection = readProtection(directory);
+  if (!protection?.protected) throw new Error("That deposition is not protected, so there is nothing to lift.");
+  atomic(path.join(directory, PROTECTION_FILE), {
+    ...protection, protected: false, unlockedUntil: null, unprotectedAt: at, unprotectedReason: text,
+  });
+  return readProtection(directory);
+}
+
 /** What the screen shows. Null for an unprotected deposition, so the banner is absent rather than off. */
 export function protectionProjection(directory, { now = Date.now() } = {}) {
   const protection = readProtection(directory);
