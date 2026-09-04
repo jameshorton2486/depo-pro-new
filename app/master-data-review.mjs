@@ -16,7 +16,7 @@
 //
 // This lives in its own module, and not inside the page component, because it decides what a
 // certified record says a document said. That belongs somewhere a test can reach it.
-import { deponentTypeOption, parseNoticeDate } from "./intake-logistics.mjs";
+import { deponentTypeOption, parseClockTime, parseNoticeDate } from "./intake-logistics.mjs";
 
 const cellOf = (section, key) => (section[key] && typeof section[key] === "object" ? section[key] : {});
 
@@ -57,7 +57,10 @@ export function reviewedMasterData(seed, data) {
   write(caseData, "division", "canonicalDivision");
   write(caseData, "county", "canonicalCounty");
 
-  write(deposition, "scheduledStart", "canonicalScheduledStart");
+  // Same reason as scheduledDate directly above: the time input shows HH:MM, so the seed has to be
+  // read the way the input read it or an untouched extracted time looks like the reporter cleared
+  // it -- and a cleared value is recorded as MISSING, destroying a fact the Notice actually stated.
+  write(deposition, "scheduledStart", "canonicalScheduledStart", { normalizeSeed:value => (typeof value === "string" ? parseClockTime(value) ?? value : value) });
   write(deposition, "timeZone", "canonicalTimeZone");
   write(deposition, "location", "canonicalLocation");
   write(deposition, "remotePlatform", "canonicalRemotePlatform");

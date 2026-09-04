@@ -1,5 +1,7 @@
 "use client";
 
+import { parseClockTime } from "./intake-logistics.mjs";
+
 type Cell={value?:unknown;status?:string;sourceType?:string|null;sourceDocument?:string|null;citation?:string|null;confidence?:string|null};
 type RecordValue=Record<string,unknown>;
 const object=(value:unknown):RecordValue=>value&&typeof value==="object"&&!Array.isArray(value)?value as RecordValue:{};
@@ -27,7 +29,15 @@ export default function CanonicalDataSheet({seed}:{seed?:RecordValue}){
     </tbody></table></details>
     <details open><summary>Proceeding</summary><table className="master-data-table"><thead><tr><th>Field</th><th>Value</th><th>Evidence</th></tr></thead><tbody>
       <Row label="Witness" value={cell(deposition.witness)}/><Row label="Type of proceeding" value={cell(deposition.proceedingType)}/><Row label="Scheduled date" value={cell(deposition.scheduledDate)}/>
-      <Row label="Scheduled time" value={cell(deposition.scheduledStart)}><input name="canonicalScheduledStart" type="time" defaultValue={text(cell(deposition.scheduledStart).value)}/></Row>
+      {/* Normalized for the control, not for the record. An <input type="time"> can only display
+          HH:MM, so an extracted "1:30 p.m. (Central Time)" rendered blank -- and because the sheet
+          seeds every input with the extraction's own value, an untouched save then submitted "" and
+          reviewedMasterData recorded the question as unanswered. A correctly extracted fact became
+          MISSING with nobody having touched it.
+
+          The stored value keeps its original wording. Normalizing it here would discard the
+          "(Central Time)" that is currently the only place the zone survives at all. */}
+      <Row label="Scheduled time" value={cell(deposition.scheduledStart)}><input name="canonicalScheduledStart" type="time" defaultValue={parseClockTime(cell(deposition.scheduledStart).value)??""}/></Row>
       <Row label="Time zone" value={cell(deposition.timeZone)}><input name="canonicalTimeZone" defaultValue={text(cell(deposition.timeZone).value)}/></Row>
       <Row label="Location" value={cell(deposition.location)}><input name="canonicalLocation" defaultValue={typeof cell(deposition.location).value==="string"?text(cell(deposition.location).value):""}/></Row>
       <Row label="Remote platform" value={cell(deposition.remotePlatform)}><input name="canonicalRemotePlatform" defaultValue={text(cell(deposition.remotePlatform).value)}/></Row>
