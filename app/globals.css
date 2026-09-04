@@ -30,7 +30,12 @@ h1,h2,h3,p { margin-top:0; }
 .id-search input { padding:0 10px; }
 .id-search button { border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:9px; padding:10px 17px; font-weight:700; }
 .notice { grid-column:1/-1; margin:-16px 0 0; color:#b33a3a; font-size:13px; }
-.library-section { max-width:1210px; margin:36px auto 80px; }
+/* Padded to the same inset as .hero-card, which is 44px. Both are 1210px wide and centred, but the
+   card carried horizontal padding and this section carried none -- so "Recent depositions" started
+   44px to the left of "Open a saved deposition" directly above it, and the empty-state panel ran out
+   past the card's content edge. box-sizing is border-box, so the padding comes out of the same 1210
+   and the two content columns land on 1122px together rather than this one growing wider. */
+.library-section { max-width:1210px; margin:36px auto 80px; padding:0 44px; }
 .section-heading { display:flex; align-items:end; justify-content:space-between; gap:22px; margin-bottom:18px; }
 .section-heading .eyebrow { margin-bottom:8px; }
 .section-heading h2 { margin:0; font-size:24px; }
@@ -104,7 +109,7 @@ dd { margin:0; font-size:13px; font-weight:650; }
 .coming-soon h2 { color:var(--ink); margin:15px 0 8px; }
 .document-icon { margin:auto; width:48px; height:48px; display:grid; place-items:center; border-radius:12px; background:#e9effa; color:var(--blue); font-size:24px; }
 @media (max-width:900px) { .hero-card { margin:25px 20px 0; } .library-section { margin:30px 20px 60px; } .search-row { grid-template-columns:1fr; } .card-grid { grid-template-columns:repeat(2,1fr); } }
-@media (max-width:620px) { .topbar { padding:0 18px; } .local-status { font-size:0; } .hero-card { padding:28px 22px 22px; grid-template-columns:1fr; } .hero-copy h1 { font-size:30px; } .hero-card .primary-button { width:100%; } .search-row { grid-column:1; } .card-grid { grid-template-columns:1fr; } .form-row { grid-template-columns:1fr; } .section-heading { align-items:stretch;flex-direction:column; } .library-tools{align-items:stretch;flex-wrap:wrap}.sort-control{flex:1}.sort-control select{width:100%}.library-filter-panel{align-items:flex-start;flex-direction:column}.modal { padding:28px 22px; } }
+@media (max-width:620px) { .topbar { padding:0 18px; } .local-status { font-size:0; } .hero-card { padding:28px 22px 22px; grid-template-columns:1fr; } .library-section { padding:0 22px; } .hero-copy h1 { font-size:30px; } .hero-card .primary-button { width:100%; } .search-row { grid-column:1; } .card-grid { grid-template-columns:1fr; } .form-row { grid-template-columns:1fr; } .section-heading { align-items:stretch;flex-direction:column; } .library-tools{align-items:stretch;flex-wrap:wrap}.sort-control{flex:1}.sort-control select{width:100%}.library-filter-panel{align-items:flex-start;flex-direction:column}.modal { padding:28px 22px; } }
 
 /* Case intake */
 .intake-shell { min-height:100vh; background:#f3f6fa; }
