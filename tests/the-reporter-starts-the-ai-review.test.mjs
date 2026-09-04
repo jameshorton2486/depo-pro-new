@@ -32,13 +32,16 @@ test("finishing a transcription does not start an AI review", () => {
     "transcription must not initiate a paid AI review");
 });
 
-test("the reporter's control starts it", () => {
+// The propose-only path is now the SECONDARY control. The reporter's primary action applies the
+// corrections in one attributable pass -- because the scopist and the reporter read the whole
+// transcript against the audio afterwards regardless, so an approval queue is that reading done
+// twice. That decision is tested in the-ai-pass-corrects-and-stays-accountable.test.mjs; what these
+// two keep true is that the propose-only path still exists and still cannot apply anything.
+test("the propose-only path is still reachable, and still reporter-initiated", () => {
   assert.match(API, /req\.url === "\/api\/correction\/ai-review" && req\.method === "POST"/);
   assert.match(API, /await runAiReview\(root, \{/);
-  assert.match(SCREEN, /Run AI Review/, "the control names the act");
-  assert.match(SCREEN, /AI Review Running…/, "and says so while it runs");
-  assert.match(SCREEN, /Review AI Suggestions \(\$\{suggestionCount\}\)/, "and becomes a review queue afterwards");
-  assert.match(SCREEN, /Run AI Review Again/, "a second analysis is deliberate and labelled");
+  assert.match(SCREEN, /Propose corrections without applying them/, "offered, and named for what it does");
+  assert.match(SCREEN, /Proposals awaiting review \(\$\{suggestionCount\}\)/, "and says when a worklist is waiting");
 });
 
 test("it proposes and never applies", () => {
@@ -46,8 +49,8 @@ test("it proposes and never applies", () => {
   for (const forbidden of ["appendReporterOperations", "acceptRangeProposal", "applyOverlay", "reporter-overlay", "writeWorking"]) {
     assert.equal(source.includes(forbidden), false, `the review must not reach ${forbidden}`);
   }
-  assert.match(SCREEN, /AI proposes; nothing changes until you review and approve it/,
-    "and the reporter is told so where they read it");
+  assert.match(SCREEN, /This transcript has already been analysed in its current state/,
+    "and a second analysis is deliberate rather than accidental");
 });
 
 test("a review runs when asked", async () => {

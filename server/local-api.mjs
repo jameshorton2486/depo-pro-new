@@ -87,6 +87,7 @@ import {
 } from "./entity-pass.mjs";
 import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
+import { aiPassUndoState, applyAiCorrectionPass, listAiCorrectionPasses } from "./ai-correction.mjs";
 import { existingReview, runAiReview } from "./ai-review.mjs";
 import {
   RANGE_ACCEPTANCE_REFUSED,
@@ -738,6 +739,42 @@ const server = http.createServer(async (req, res) => {
         storageRoot: depositionStorageRoot,
         reviewStateHash: currentReviewStateHash(depositionId),
       }), origin);
+    }
+    // THE AUTO-APPLY PASS. The reporter asks once; the AI analyses, plans, and applies its
+    // corrections as ONE overlay transaction attributed to the pass. No approval queue, because the
+    // scopist and the reporter read the whole transcript against the audio afterwards regardless --
+    // approving several hundred suggestions first is that same reading done twice.
+    //
+    // As with the review route, the transcript state is derived here and never accepted from the
+    // request: a client that could name the state could name a stale one and have corrections
+    // applied to a transcript nobody analysed.
+    if (req.url === "/api/correction/ai-apply" && req.method === "POST") {
+      const input = await body(req, 16 * 1024), config = loadSecrets();
+      return json(res, 200, await applyAiCorrectionPass(root, {
+        depositionId: input.depositionId,
+        storageRoot: depositionStorageRoot,
+        apiKey: config?.anthropicApiKey,
+        model: config?.claudeModel,
+        force: input.force === true,
+        getWorkingTranscript,
+        readReporterOverlay,
+        getSpeakerCandidates,
+        appendReporterOperations,
+      }), origin);
+    }
+    // What the AI has already done to this transcript, and whether its last pass can still be
+    // undone as a unit. GET, free, and read on open -- it must never be able to run a pass.
+    if (req.url?.startsWith("/api/correction/ai-apply?") && req.method === "GET") {
+      const depositionId = new URL(req.url, "http://localhost").searchParams.get("depositionId");
+      const store = { depositionId, storageRoot: depositionStorageRoot };
+      let passes = [];
+      try { passes = listAiCorrectionPasses(root, store); } catch { passes = []; }
+      const undo = aiPassUndoState(root, { ...store, readOverlay: readReporterOverlay });
+      return json(res, 200, {
+        passes: passes.map(({ operations, ...summary }) => summary),
+        undo: { undoable: undo.undoable, reason: undo.reason, passId: undo.pass?.passId ?? null,
+          operationCount: undo.pass?.operationCount ?? 0 },
+      }, origin);
     }
     if (req.url === "/api/correction/entity-pass" && req.method === "POST") {
       const input = await body(req, 16 * 1024),

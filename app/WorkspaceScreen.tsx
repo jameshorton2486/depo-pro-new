@@ -100,7 +100,14 @@ type SpeakerSuggestion = { sourceJobIdentity:string; deepgramSpeaker:number; spe
 // reporter is owed the difference, and a shared type would have hidden it.
 type RangeProposal = { wordId:string; endWordId:string; speakerIdentity:string; correctionType:string; confidenceScore:number; evidenceSource:string; reviewStateHash:string; text:string; wordCount:number; startTime:number|null; endTime:number|null; deepgramSpeakers:number[]; currentSpeakerIdentity:string|null };
 type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; ranges:{ accepted:RangeProposal[] }|null; errors:string[] };
-export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
+// What one applied AI pass changed, as the server reports it. `applied` and `omitted` are the audit
+// trail that replaced the approval queue: every correction with its before, after, evidence basis
+// and confidence, and every proposal that was refused with the reason it was refused.
+type AiPassApplied = { kind:string; wordId:string; before:string|null; after:string|null; correctionType:string|null; confidence:number|null; evidenceSource:string|null };
+type AiPassOmitted = { kind:string; reason:string; wordId?:string|null; conflictingWordId?:string|null };
+type AiPassResult = { status:string; message:string; applied:AiPassApplied[]; omitted:AiPassOmitted[]; operationCount:number; passId?:string; failures?:string[]; retryable?:boolean };
+type AiPassSummary = { passId:string; appliedAt:string; model:string|null; operationCount:number };
+export type WorkspaceDeposition ={ id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
 // Tool-language only. This never reaches the transcript renderer or its stored labels: it gives
 // the reporter the familiar deposition designation while they decide who spoke.
@@ -180,6 +187,23 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       .then(response=>response.ok?response.json():{current:[]})
       .then(body=>{if(current)setReviewAlreadyRun((body?.current?.length??0)>0)})
       .catch(()=>{if(current)setReviewAlreadyRun(false)});
+    return()=>{current=false};
+  },[depositionId,printModel?.source?.reviewStateHash]);
+  // THE AUTO-APPLY PASS. One reporter-initiated act: the AI analyses the transcript and applies
+  // what it can justify, as one attributable transaction. There is no approval queue because the
+  // scopist and the reporter read the whole transcript against the audio afterwards regardless.
+  const [aiPass,setAiPass]=useState<AiPassResult|null>(null);
+  const [aiUndo,setAiUndo]=useState<{undoable:boolean;reason:string|null;passId:string|null;operationCount:number}|null>(null);
+  const [aiPassHistory,setAiPassHistory]=useState<AiPassSummary[]>([]);
+  // Reloaded whenever the transcript state moves, because whether the AI pass is still the last
+  // transaction -- and therefore still undoable as a unit -- is exactly what an edit changes.
+  useEffect(()=>{
+    if(!depositionId)return;
+    let current=true;
+    fetch(`${API}/api/correction/ai-apply?depositionId=${encodeURIComponent(depositionId)}`)
+      .then(response=>response.ok?response.json():{passes:[],undo:null})
+      .then(body=>{if(current){setAiPassHistory(body?.passes??[]);setAiUndo(body?.undo??null)}})
+      .catch(()=>{if(current){setAiPassHistory([]);setAiUndo(null)}});
     return()=>{current=false};
   },[depositionId,printModel?.source?.reviewStateHash]);
   const [selectedCorrections,setSelectedCorrections]=useState<Set<string>>(new Set());
@@ -576,6 +600,25 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     });
   },[buckets,savedAssignment]);
 
+  // One request. The client sends which deposition, and nothing else -- not the transcript state,
+  // not the operations. Both are decided on the server, against the transcript it can actually
+  // read, because a client that named either could have corrections applied to a transcript nobody
+  // analysed.
+  async function aiCorrectTranscript(force=false){
+    setCorrecting(true);setAiPass(null);setError("");
+    try{
+      const response=await fetch(`${API}/api/correction/ai-apply`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,force})});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||"The AI correction pass failed.");
+      setAiPass(payload);
+      // Only a pass that changed something needs the transcript redrawn; the other outcomes left it
+      // exactly as it was, and say so.
+      if(payload.operationCount>0)reloadTranscript();
+    }catch(problem){
+      setError(problem instanceof Error?problem.message:"The AI correction pass failed.");
+    }finally{setCorrecting(false)}
+  }
+
   async function correctTranscript(){
     setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setRangeApplied(false);setError("");
     const request=(path:string)=>fetch(`${API}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,additionalInstructions:correctionInstructions})}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"The AI correction check failed.");return payload});
@@ -804,18 +847,44 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"AI Review Running…":suggestionCount>0?`Review AI Suggestions (${suggestionCount})`:"Run AI Review"}</button>
+        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"AI Correcting Transcript…":"AI Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
         <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate Working PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
-        <div><h2>AI Review</h2><p>Analyze this transcript for names, likely ASR errors, speaker identities, and Q./A./colloquy structure. <strong>AI proposes; nothing changes until you review and approve it.</strong></p></div>
+        <div><h2>AI Correct Transcript</h2><p>Correct proper-name spellings and assign speaker identities and Q./A./colloquy roles, using only the checks below. <strong>Corrections are applied directly, as one pass you can undo.</strong> Every change is recorded with what it was, what it became, and the evidence for it — review the corrected transcript against the audio as you normally would.</p></div>
         <label htmlFor="workspace-correction-instructions">Additional things AI should check</label>
         <textarea id="workspace-correction-instructions" value={correctionInstructions} onChange={event=>setCorrectionInstructions(event.target.value)} placeholder="Example: Check whether Lucia Zahn self-identifies as Speaker 3. Check a recurring phrase that may have been misheard." />
         <p className="workspace-hint">These instructions guide the enabled checks. Future correction types can be added as separate validated passes without changing this review workflow.</p>
-        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void correctTranscript()}>{correcting?"AI Review Running…":reviewAlreadyRun?"Run AI Review Again":"Run AI Review"}</button>
-        {reviewAlreadyRun&&!correcting&&<p className="workspace-hint">This transcript has already been reviewed in its current state. Running again performs another analysis.</p>}
+        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void aiCorrectTranscript(aiPass?.status==="already-corrected")}>{correcting?"AI Correcting Transcript…":aiPass?.status==="already-corrected"?"AI Correct Transcript Again":"AI Correct Transcript"}</button>
+        {aiPass&&<div className="workspace-correction-results">
+          <p role="status">{aiPass.message}</p>
+          {(aiPass.failures??[]).map(message=><p className="analysis-error" role="alert" key={message}>{message}</p>)}
+          {/* The audit trail that replaced the approval queue. It is not a summary: it names every
+              change, what it replaced, and on what evidence, so the reporter can check the pass
+              against the audio rather than take it on trust. */}
+          {aiPass.applied.length>0&&<section><h3>Corrections applied ({aiPass.applied.length})</h3>
+            {aiPass.applied.map(item=><div className="workspace-correction-proposal" key={`${item.kind}-${item.wordId}`}>
+              <span><strong>{item.before??"(speaker)"} → {item.after}</strong><small>{item.kind} · {item.correctionType} · {item.confidence!=null?`${Math.round(item.confidence*100)}% confidence · `:""}{item.evidenceSource}</small></span>
+            </div>)}
+          </section>}
+          {/* Refusals are shown, not swallowed. A correction that vanished without a reason is
+              worse than one that was refused. */}
+          {aiPass.omitted.length>0&&<section><h3>Not applied ({aiPass.omitted.length})</h3>
+            {aiPass.omitted.map((item,index)=><p className="workspace-hint" key={`${item.reason}-${item.wordId??index}`}>{item.kind}: {item.reason}{item.wordId?` (${item.wordId})`:""}</p>)}
+          </section>}
+        </div>}
+        {/* Offered only while the AI pass is still the last transaction. Undo pops the LAST
+            transaction, so once the reporter has edited afterwards this control would remove their
+            work instead of the pass -- and it stops offering itself rather than doing that. */}
+        {aiUndo?.undoable&&<button type="button" disabled={busy||awaitingRecord||!printModel} onClick={()=>{if(window.confirm(`Undo the AI correction pass? All ${aiUndo.operationCount} corrections it applied are removed in one step. Your own later edits are not affected.`))void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}}>Undo AI Correction Pass ({aiUndo.operationCount})</button>}
+        {aiPassHistory.length>0&&!aiUndo?.undoable&&<p className="workspace-hint">{aiPassHistory.length} AI correction pass{aiPassHistory.length===1?"":"es"} on this transcript. The most recent one can no longer be undone as a unit because the transcript has been edited since.</p>}
+        {/* The propose-only path, unchanged and secondary. It is what the correction subsystem did
+            before, kept while the applying pass is qualified on real depositions. */}
+        <details><summary>{suggestionCount>0?`Proposals awaiting review (${suggestionCount})`:"Propose corrections without applying them"}</summary>
+        <button type="button" disabled={correcting||!rendered} onClick={()=>void correctTranscript()}>Run AI correction check</button>
+        {reviewAlreadyRun&&!correcting&&<p className="workspace-hint">This transcript has already been analysed in its current state.</p>}
         {correctionResult?.errors.map(message=><p className="analysis-error" role="alert" key={message}>{message}</p>)}
         {correctionResult&&<div className="workspace-correction-results">
           <section><h3>Word corrections ({correctionResult.names?.accepted.length??0})</h3>
@@ -859,6 +928,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             <p className="workspace-hint">Speaker proposals update the unsaved speaker-map controls. Review them there, then select Save speaker map.</p>
           </section>
         </div>}
+        </details>
       </section>}
 
       {/* A deposition that has not been transcribed yet is not a deposition that failed. The
