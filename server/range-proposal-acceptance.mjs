@@ -28,7 +28,7 @@
 // nothing at all.
 import { planRangeAcceptance } from "./range-acceptance-planner.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
-import { STALE_CORRECTION_PROPOSAL, assertProposalIsCurrent, computeReviewStateHash } from "./review-state-hash.mjs";
+import { STALE_CORRECTION_PROPOSAL, assertProposalIsCurrent, computeAnchorStateHash, computeReviewStateHash, proposalWordIds } from "./review-state-hash.mjs";
 
 export const RANGE_ACCEPTANCE_REFUSED = "RANGE_ACCEPTANCE_REFUSED";
 
@@ -75,8 +75,21 @@ export function acceptRangeProposal(root, {
   // carries the state it was ANALYZED against; the client carries the state the reporter was
   // LOOKING AT when they pressed Accept. A proposal generated against a stale transcript and a
   // reporter acting on a stale screen are different failures, and both end the same way.
-  const currency = assertProposalIsCurrent(proposal, current);
+  // Built before the currency check rather than after it, because the narrower question is asked
+  // of this projection: have the words THIS proposal targets changed. The whole-state hash is
+  // still tried first and still passes unchanged transcripts on its own.
+  const projection = applyOverlay(transcript?.segments ?? [], overlay ?? emptyOverlay(depositionId));
+  const segments = projection.segments;
+  const anchorStateHash = computeAnchorStateHash({
+    segments, wordIds: proposalWordIds({ segments, proposal }),
+  });
+
+  const currency = assertProposalIsCurrent(proposal, current, { anchorStateHash });
   if (!currency.ok) throw refuse(STALE_CORRECTION_PROPOSAL, { expected: current, carried: currency.carried });
+
+  // The reporter's own screen state is a separate question and keeps the strict rule. A proposal
+  // may survive an unrelated edit; a reporter pressing Accept against a screen that has moved is
+  // acting on something they are no longer looking at, and that is not narrowable.
   if (expectedReviewStateHash !== null && expectedReviewStateHash !== current) {
     throw refuse(STALE_CORRECTION_PROPOSAL, { expected: current, carried: expectedReviewStateHash });
   }
@@ -88,10 +101,7 @@ export function acceptRangeProposal(root, {
   const person = candidates.find(item => item.id === proposal.speakerIdentity);
   if (!person) throw refuse("IDENTITY_NOT_IN_ROSTER", { attemptedIdentity: proposal.speakerIdentity ?? null });
 
-  // The projection the proposal was analyzed against, which the hash agreement above proves this is.
-  const projection = applyOverlay(transcript?.segments ?? [], overlay ?? emptyOverlay(depositionId));
-
-  const plan = planRangeAcceptance(projection.segments, {
+  const plan = planRangeAcceptance(segments, {
     startWordId: proposal.wordId,
     endWordId: proposal.endWordId ?? proposal.wordId,
     speakerIdentity: person.id,

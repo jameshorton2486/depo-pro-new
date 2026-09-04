@@ -20,6 +20,7 @@
 // act, and it happens on the server -- see range-proposal-acceptance.mjs.
 import fs from "node:fs";
 import path from "node:path";
+import { computeAnchorStateHash } from "./review-state-hash.mjs";
 import { buildCorrectionChunks } from "./correction-chunker.mjs";
 import { validateProposals } from "./correction-validator.mjs";
 import { depositionDirectory } from "./deposition-store.mjs";
@@ -128,7 +129,7 @@ export async function runSpeakerRangePass(root, { depositionId, storageRoot, api
  * the chunk the proposal was made against rather than looked up later, so the text shown is the
  * text the model was actually given.
  */
-export function describe(proposal, { chunk, chunkId, reviewStateHash, clusters = new Map() } = {}) {
+export function describe(proposal, { chunk, chunkId, reviewStateHash, clusters = new Map(), segments = null } = {}) {
   const flat = (chunk?.utterances ?? []).flatMap(utterance => (utterance.words ?? []).map(word => ({ word, utterance })));
   const from = flat.findIndex(item => item.word.id === proposal.wordId);
   const to = flat.findIndex(item => item.word.id === (proposal.endWordId ?? proposal.wordId));
@@ -136,9 +137,29 @@ export function describe(proposal, { chunk, chunkId, reviewStateHash, clusters =
   const times = span.map(item => item.word.start).filter(value => Number.isFinite(value));
   const ends = span.map(item => item.word.end).filter(value => Number.isFinite(value));
   const utterances = [...new Set(span.map(item => item.utterance.id))];
+  // The state of the words this proposal targets, committed to now so acceptance can prove later
+  // that they have not changed. Without it a proposal can only be judged by whether the WHOLE
+  // transcript moved, which is what made accepting one proposal kill every other proposal in the
+  // same pass. Computed from the chunk's own words when no projection is supplied, so the pass
+  // does not need to re-derive one.
+  const anchorWords = span.map(item => ({
+    id: item.word.id,
+    text: item.word.text ?? null,
+    struck: Boolean(item.word.struck),
+    readOnly: Boolean(item.word.readOnly ?? item.word.authored),
+    speakerIdentity: item.utterance?.speakerIdentity ?? null,
+    transcriptRole: item.utterance?.transcriptRole ?? null,
+  }));
+  const anchorStateHash = span.length
+    ? computeAnchorStateHash({
+        segments: segments ?? [{ words: anchorWords.map(word => ({ ...word })), speakerIdentity: anchorWords[0]?.speakerIdentity ?? null, transcriptRole: anchorWords[0]?.transcriptRole ?? null }],
+        wordIds: anchorWords.map(word => word.id),
+      })
+    : null;
+
   return {
     ...proposal,
-    chunkId, reviewStateHash,
+    chunkId, reviewStateHash, anchorStateHash,
     proposalLevel: "RANGE",
     text: span.map(item => item.word.text).join(" "),
     wordCount: span.length,

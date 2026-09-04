@@ -87,6 +87,7 @@ import {
 } from "./entity-pass.mjs";
 import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
+import { preparePrecorrection } from "./precorrection-trigger.mjs";
 import {
   RANGE_ACCEPTANCE_REFUSED,
   acceptRangeProposal,
@@ -1361,6 +1362,22 @@ const server = http.createServer(async (req, res) => {
             operationId,
           }),
       });
+      // The AI review worklist is prepared here rather than waiting for the reporter to discover
+      // "Correct Transcript". A newly transcribed deposition otherwise arrives as raw ASR and the
+      // correction subsystem -- which exists, and is tested -- never runs. E2E-034.
+      //
+      // It PROPOSES only. Nothing is applied; the reporter still reviews and decides.
+      //
+      // Awaited rather than fired and forgotten, so the response tells the truth about whether the
+      // worklist is ready. It cannot fail the transcription: preparePrecorrection never throws, and
+      // a transcript that succeeded stays succeeded whatever the passes did.
+      const precorrection = await preparePrecorrection(root, {
+        depositionId: input.depositionId,
+        storageRoot: depositionStorageRoot,
+        apiKey: config?.anthropicApiKey,
+        model: config?.claudeModel,
+        reviewStateHash: result.workingTranscript?.reviewStateHash ?? null,
+      });
       return json(
         res,
         200,
@@ -1370,6 +1387,7 @@ const server = http.createServer(async (req, res) => {
           evidence: result.evidence,
           workingTranscript: result.workingTranscript,
           transcript: result.normalized || null,
+          precorrection,
         },
         origin,
       );

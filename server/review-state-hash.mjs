@@ -87,6 +87,74 @@ export function computeReviewStateHash({ transcript, overlay } = {}) {
 export const STALE_CORRECTION_PROPOSAL = "STALE_CORRECTION_PROPOSAL";
 
 /**
+ * The state of exactly the words one proposal targets.
+ *
+ * WHY A SECOND, NARROWER QUESTION EXISTS. The whole-state hash above answers "is this the same
+ * transcript". Measured against Production Trial #1, a pass produced 173 speaker-range proposals
+ * and accepting the first invalidated the other 172 -- one acceptance per pass run, by
+ * construction, because accepting appends an overlay operation and every pending proposal carried
+ * the hash from before it. A worklist that dies on first use is not a worklist.
+ *
+ * The fix is NOT to decide a stale proposal is probably still fine. That judgement is exactly what
+ * the comment above rightly refuses to make. It is to ask a question that can be answered with
+ * proof instead: have the words THIS proposal targets changed?
+ *
+ * That question is decidable here because of R2. A proposal may anchor only to a wordId -- segment
+ * anchors are refused -- and word ids come from the immutable ASR evidence as `<job>:word:N`. They
+ * do not move when a segment is split, joined, or relabelled somewhere else. So the identity of
+ * what a proposal targets is stable, and what remains is whether the state of those particular
+ * words still matches.
+ *
+ * Covered: each targeted word's id, its current text, whether it is still editable, and the
+ * speaker identity and transcript role of the segment it currently sits in. Any operation that
+ * struck, replaced, re-attributed, or re-roled those words changes this digest and the proposal
+ * refuses exactly as before.
+ *
+ * Not covered: anything outside the target. That is the whole point -- a correction to paragraph
+ * 700 has no bearing on a proposal about paragraph 12, and treating it as though it did is what
+ * made the worklist unusable.
+ */
+export function proposalAnchorProjection({ segments = [], wordIds = [] } = {}) {
+  const wanted = new Set(wordIds.filter(Boolean));
+  const found = [];
+  for (const segment of segments) {
+    for (const word of segment?.words ?? []) {
+      if (!wanted.has(word?.id)) continue;
+      found.push({
+        id: word.id,
+        text: word.text ?? null,
+        struck: Boolean(word.struck),
+        readOnly: Boolean(word.readOnly ?? word.authored),
+        speakerIdentity: segment.speakerIdentity ?? null,
+        transcriptRole: segment.transcriptRole ?? null,
+      });
+    }
+  }
+  // Sorted by id: a proposal targets a set of words, and the order they happen to appear in a
+  // projection is not part of what it targets. Missing ids are recorded as missing rather than
+  // silently dropped -- a word that has been struck out of existence must change this digest.
+  found.sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const missing = [...wanted].filter(id => !found.some(word => word.id === id)).sort();
+  return canonicalize({ schemaVersion: REVIEW_STATE_SCHEMA_VERSION, words: found, missing });
+}
+
+export function computeAnchorStateHash({ segments, wordIds } = {}) {
+  const bytes = Buffer.from(JSON.stringify(proposalAnchorProjection({ segments, wordIds })));
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+/** The word ids a proposal targets: its anchor, its end, and everything between them. */
+export function proposalWordIds({ segments = [], proposal } = {}) {
+  const words = segments.flatMap(segment => segment?.words ?? []);
+  const start = words.findIndex(word => word?.id === proposal?.wordId);
+  if (start === -1) return [];
+  const endId = proposal?.endWordId ?? proposal?.wordId;
+  const end = words.findIndex(word => word?.id === endId);
+  if (end === -1 || end < start) return [words[start].id];
+  return words.slice(start, end + 1).map(word => word.id);
+}
+
+/**
  * Whether a proposal may still be applied.
  *
  * Refuses on any difference rather than asking whether this particular change touched this
@@ -97,16 +165,24 @@ export const STALE_CORRECTION_PROPOSAL = "STALE_CORRECTION_PROPOSAL";
  * Never rebases. A proposal carries the state it was made against, and if that state is gone the
  * proposal is gone with it.
  */
-export function assertProposalIsCurrent(proposal, currentReviewStateHash) {
+export function assertProposalIsCurrent(proposal, currentReviewStateHash, { anchorStateHash = null } = {}) {
   const carried = proposal?.reviewStateHash ?? null;
-  if (carried && carried === currentReviewStateHash) return { ok: true };
+  if (carried && carried === currentReviewStateHash) return { ok: true, basis: "whole-state" };
+
+  // The narrower question, and only when the proposal committed to an answer in advance. A
+  // proposal that carries no anchorStateHash gets the old verdict: there is nothing to check it
+  // against, and inventing one now would be deciding after the fact that it was probably fine.
+  const carriedAnchor = proposal?.anchorStateHash ?? null;
+  if (carried && carriedAnchor && anchorStateHash && carriedAnchor === anchorStateHash) {
+    return { ok: true, basis: "anchor-state" };
+  }
   return {
     ok: false,
     code: STALE_CORRECTION_PROPOSAL,
     expected: currentReviewStateHash,
     carried,
     message: carried
-      ? "This proposal was generated against a transcript that has since changed. Re-run the correction pass; it cannot be applied to the current state."
+      ? "This proposal was generated against a transcript that has since changed, and the words it targets have changed with it. Re-run the correction pass; it cannot be applied to the current state."
       : "This proposal carries no review-state hash, so the transcript it was generated against cannot be established.",
   };
 }
