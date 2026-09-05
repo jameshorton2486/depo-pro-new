@@ -807,10 +807,20 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!range)return paragraph.id===selected?.paragraphId;
     return paragraph.words.some(word=>{const index=wordOrder.get(word.id);return index!==undefined&&index>=range.first&&index<=range.last});
   }).map(paragraph=>paragraph.id)),[range,rendered,selected,wordOrder]);
+  // Deleting a paragraph asks nothing, because Undo is the answer to the question the dialog was
+  // asking. The reporter deletes a paragraph many times in a review pass -- crosstalk, a false
+  // start, an interruption that belongs to nobody -- and a confirmation on each one is a second
+  // click on a decision already made, thousands of times over a deposition.
+  //
+  // Nothing about the evidence changes. The delete is an overlay operation against the working
+  // transcript: the audio, the ASR words, their timestamps and their ids are untouched, and one
+  // Undo restores the whole paragraph exactly as the dialog used to promise.
+  //
+  // Deliberately NOT generalised. Striking words, replacing across the transcript and undoing an
+  // entire AI pass keep their confirmations -- those either act on text the reporter has not read
+  // one by one, or reach past the edit in front of them.
   function deleteSelectedParagraphs(){
     if(!paragraphDeleteOperations.length)return;
-    const label=paragraphDeleteCount===1?"this paragraph":`these ${paragraphDeleteCount} paragraphs`;
-    if(!window.confirm(`Delete ${label} from the transcript? The original audio, source words, and timestamps remain preserved. One Undo restores the entire action.`))return;
     setSelected(null);setParagraphRangeMode(false);void append(paragraphDeleteOperations);
   }
 
