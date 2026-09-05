@@ -29,11 +29,14 @@ export const DEFAULT_PLAYBACK_BINDINGS = Object.freeze({
   F8: PLAYBACK_COMMANDS.FAST_FORWARD,
 });
 
-/** Three seconds: long enough to re-hear a word, short enough to press repeatedly. */
-export const DEFAULT_SKIP_SECONDS = 3;
+/** Five seconds: the reporter's figure, after working the pedal against a real transcript. */
+export const DEFAULT_SKIP_SECONDS = 5;
 
-/** Where the reporter's chosen settings are kept between sessions. */
-export const SKIP_SECONDS_KEY = "depo-pro:playback-skip-seconds";
+// Where the reporter's chosen settings are kept between sessions. The skip key carries a version
+// because the default moved from three seconds to five: without it, a browser holding the old
+// stored 3 would keep using it forever and the new default would never reach the person it was
+// changed for. Bumping the key retires the old value once; whatever they choose next persists.
+export const SKIP_SECONDS_KEY = "depo-pro:playback-skip-seconds-v2";
 export const CONTINUOUS_RATE_KEY = "depo-pro:playback-continuous-rate";
 
 /**

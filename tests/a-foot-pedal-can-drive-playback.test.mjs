@@ -51,21 +51,21 @@ test("the keys Chrome claims are left alone", () => {
 });
 
 test("rewinding stops at the beginning of the recording", () => {
-  assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.REWIND), 7);
-  assert.equal(seekTarget(1.5, 100, PLAYBACK_COMMANDS.REWIND), 0, "never negative");
+  assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.REWIND), 5);
+  assert.equal(seekTarget(4, 100, PLAYBACK_COMMANDS.REWIND), 0, "never negative");
   assert.equal(seekTarget(0, 100, PLAYBACK_COMMANDS.REWIND), 0);
 });
 
 test("forwarding stops at the end of the recording", () => {
-  assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.FAST_FORWARD), 13);
-  assert.equal(seekTarget(99, 100, PLAYBACK_COMMANDS.FAST_FORWARD), 100, "never past the end");
+  assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.FAST_FORWARD), 15);
+  assert.equal(seekTarget(97, 100, PLAYBACK_COMMANDS.FAST_FORWARD), 100, "never past the end");
 });
 
 test("an unloaded duration still allows a skip", () => {
   // Metadata arrives asynchronously. Refusing to move because the far end is unknown would make the
   // pedal feel broken for the first seconds after opening a deposition.
-  assert.equal(seekTarget(10, NaN, PLAYBACK_COMMANDS.FAST_FORWARD), 13);
-  assert.equal(seekTarget(10, undefined, PLAYBACK_COMMANDS.FAST_FORWARD), 13);
+  assert.equal(seekTarget(10, NaN, PLAYBACK_COMMANDS.FAST_FORWARD), 15);
+  assert.equal(seekTarget(10, undefined, PLAYBACK_COMMANDS.FAST_FORWARD), 15);
   assert.equal(seekTarget(NaN, 100, PLAYBACK_COMMANDS.REWIND), 0, "an unknown position starts at zero");
 });
 
@@ -75,7 +75,7 @@ test("play/pause is not a seek", () => {
 });
 
 test("the interval is a parameter, not a constant baked into the arithmetic", () => {
-  assert.equal(DEFAULT_SKIP_SECONDS, 3);
+  assert.equal(DEFAULT_SKIP_SECONDS, 5, "the reporter set five after working a real transcript");
   assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.REWIND, 5), 5);
   assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.FAST_FORWARD, 0.5), 10.5);
   assert.equal(seekTarget(10, 100, PLAYBACK_COMMANDS.REWIND, -5), 5, "a negative interval still rewinds");
