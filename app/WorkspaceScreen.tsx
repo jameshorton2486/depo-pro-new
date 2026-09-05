@@ -19,6 +19,7 @@ import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPa
 import { EXAMINATION_TYPE_CHOICES, examinationControl, examinationOperation, examinationSummary } from "./examination-control.mjs";
 import { examinerColloquyControl, examinerColloquyLabel, examinerColloquyOperation } from "./examiner-colloquy-control.mjs";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
+import { DEFAULT_SKIP_SECONDS, PLAYBACK_COMMANDS, SKIP_SECONDS_KEY, normalizeSkipSeconds, playbackCommandFor, seekTarget } from "./playback-commands.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; examinerColloquy?:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
@@ -496,9 +497,48 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // moment the reporter had chosen the paragraph to use them on.
   //
   // Pausing playback stays: typing over audio that keeps running is its own problem.
-  const editingChange=useCallback((value:boolean)=>{if(value)player.current?.pause()},[]);
+  // Editing no longer pauses the audio. It used to -- "typing over audio that keeps running is its
+  // own problem" -- which is right for a keyboard and wrong for a foot pedal: the reporter types the
+  // correction while the recording runs and works the transport with their foot. Pausing on the
+  // reporter's behalf took the decision away from the pedal at the exact moment they were using it.
+  // The signal is kept because the editor reports it, and pausing on edit is a preference somebody
+  // may want back; it is no longer taken by default.
+  const editingChange=useCallback(()=>{},[]);
+  // The reporter's skip interval, remembered between sessions. Read once as the initial state
+  // rather than assigned from an effect: setting state synchronously in an effect makes React
+  // render twice, and the second render would move the control under a reporter's hand. Guarded on
+  // `window` because this file is server-rendered before it is hydrated, where storage does not
+  // exist, and wrapped because a browser configured to refuse storage must still open a deposition.
+  const [skipSeconds,setSkipSeconds]=useState(()=>{
+    if(typeof window==="undefined")return DEFAULT_SKIP_SECONDS;
+    try{return normalizeSkipSeconds(window.localStorage.getItem(SKIP_SECONDS_KEY))}catch{return DEFAULT_SKIP_SECONDS}
+  });
+  const chooseSkipSeconds=useCallback((value:string)=>{const seconds=normalizeSkipSeconds(value);setSkipSeconds(seconds);try{window.localStorage.setItem(SKIP_SECONDS_KEY,String(seconds))}catch{/* the setting is a convenience; failing to persist it must not fail the edit session */}},[]);
   const activePlaybackWordId=useMemo(()=>{if(playbackTime===null)return null;for(const paragraph of rendered?.paragraphs??[])for(const word of paragraph.words)if(word.start!==null&&word.end!==null&&playbackTime>=word.start&&playbackTime<word.end)return word.id;return null},[rendered,playbackTime]);
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
+  // The foot pedal's three commands. Deliberately NOT filtered on focus, which is the one thing
+  // that separates them from the Space handler above: a pedal is pressed while the reporter is
+  // typing a correction, and a command that stopped working inside the editor would stop working
+  // exactly when it is needed. Function keys carry no character, so handling them mid-word is safe.
+  //
+  // Skipping clears playbackEnd. Playing a paragraph sets a stop point at its last word; forwarding
+  // past that point without clearing it would seek and then immediately pause, which reads as the
+  // pedal having done nothing.
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{
+    const command=playbackCommandFor(event);
+    if(!command||!player.current||!playbackSource)return;
+    event.preventDefault();
+    const audio=player.current;
+    if(command===PLAYBACK_COMMANDS.PLAY_PAUSE){
+      if(audio.paused)void audio.play().catch(()=>{});else audio.pause();
+      return;
+    }
+    const target=seekTarget(audio.currentTime,audio.duration,command,skipSeconds);
+    if(target===null)return;
+    playbackEnd.current=null;
+    audio.currentTime=target;
+    setPlaybackTime(target);
+  };window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource,skipSeconds]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
   // Stable identities so the transcript pages below can be held back. Both read through a ref rather
@@ -821,6 +861,14 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
           <track kind="captions" label="No captions" src="data:text/vtt,WEBVTT" default />
         </audio>
         <button type="button" disabled={!playbackSource} onClick={()=>{if(!player.current)return;player.current.pause();player.current.currentTime=0;setPlaybackTime(null)}}>Stop</button>
+        {/* Named for what the reporter is setting, beside the transport it governs. The keys are
+            printed because a foot pedal is configured once, in other software, from these three. */}
+        <label className="workspace-skip-interval" htmlFor="workspace-skip-seconds">Skip
+          <input id="workspace-skip-seconds" type="number" min="0.5" max="30" step="0.5" value={skipSeconds}
+            onChange={event=>chooseSkipSeconds(event.target.value)} aria-label="Rewind and fast-forward interval in seconds" />
+          seconds
+        </label>
+        <span className="workspace-hint">F2 rewind · F4 play/pause · F8 forward — these work while you are typing, so a foot pedal can send them.</span>
         {!playbackSource && media?.needsProxy && (
           <button type="button" onClick={()=>{ void buildProxy(); }} disabled={building}>
             {building ? "Preparing audio… (about a minute)" : "Prepare audio for playback"}
