@@ -32,8 +32,46 @@ export const DEFAULT_PLAYBACK_BINDINGS = Object.freeze({
 /** Three seconds: long enough to re-hear a word, short enough to press repeatedly. */
 export const DEFAULT_SKIP_SECONDS = 3;
 
-/** Where the reporter's chosen interval is kept between sessions. */
+/** Where the reporter's chosen settings are kept between sessions. */
 export const SKIP_SECONDS_KEY = "depo-pro:playback-skip-seconds";
+export const CONTINUOUS_RATE_KEY = "depo-pro:playback-continuous-rate";
+
+/**
+ * How long a pedal must stay down before a tap becomes a hold.
+ *
+ * MEASURED, not chosen. On the reporter's Infinity Foot Pedal 3 through Pedable, two deliberate
+ * quick taps both registered 313ms -- a pedal has travel a key does not, so a "quick" press is far
+ * longer than the ~100ms a keyboard tap takes. A 300ms threshold would have read both taps as
+ * holds and started a continuous rewind the reporter did not ask for.
+ */
+export const HOLD_THRESHOLD_MS = 500;
+
+/** How often a held pedal moves the position. Fine enough to read as motion rather than jumps. */
+export const CONTINUOUS_TICK_MS = 50;
+
+/** Four times real speed: fast enough to cross a page, slow enough to see where you are. */
+export const DEFAULT_CONTINUOUS_RATE = 4;
+
+const RATE_MINIMUM = 1, RATE_MAXIMUM = 20;
+
+/** The multiple of real time a held pedal travels at, bounded the way the interval is. */
+export function normalizeContinuousRate(value, fallback = DEFAULT_CONTINUOUS_RATE) {
+  const rate = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isFinite(rate) || rate <= 0) return fallback;
+  return Math.min(RATE_MAXIMUM, Math.max(RATE_MINIMUM, rate));
+}
+
+/**
+ * How far one tick of a held pedal moves.
+ *
+ * Browsers cannot play audio backwards -- playbackRate rejects a negative value -- so continuous
+ * transport is stepped seeking in both directions rather than reverse playback. At 50ms steps it
+ * reads as motion, and because Depo-Pro sets the interval the speed is the same on every machine
+ * regardless of the operator's Windows key-repeat settings.
+ */
+export function continuousStep(rate = DEFAULT_CONTINUOUS_RATE, tickMs = CONTINUOUS_TICK_MS) {
+  return (normalizeContinuousRate(rate) * tickMs) / 1000;
+}
 
 const SKIP_MINIMUM = 0.5, SKIP_MAXIMUM = 30;
 

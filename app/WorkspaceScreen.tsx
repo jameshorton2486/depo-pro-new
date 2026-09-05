@@ -19,7 +19,7 @@ import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPa
 import { EXAMINATION_TYPE_CHOICES, examinationControl, examinationOperation, examinationSummary } from "./examination-control.mjs";
 import { examinerColloquyControl, examinerColloquyLabel, examinerColloquyOperation } from "./examiner-colloquy-control.mjs";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
-import { DEFAULT_SKIP_SECONDS, PLAYBACK_COMMANDS, SKIP_SECONDS_KEY, normalizeSkipSeconds, playbackCommandFor, seekTarget } from "./playback-commands.mjs";
+import { CONTINUOUS_RATE_KEY, CONTINUOUS_TICK_MS, DEFAULT_CONTINUOUS_RATE, DEFAULT_SKIP_SECONDS, HOLD_THRESHOLD_MS, PLAYBACK_COMMANDS, SKIP_SECONDS_KEY, continuousStep, normalizeContinuousRate, normalizeSkipSeconds, playbackCommandFor, seekTarget } from "./playback-commands.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
 type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; examinerColloquy?:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
@@ -514,6 +514,16 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     try{return normalizeSkipSeconds(window.localStorage.getItem(SKIP_SECONDS_KEY))}catch{return DEFAULT_SKIP_SECONDS}
   });
   const chooseSkipSeconds=useCallback((value:string)=>{const seconds=normalizeSkipSeconds(value);setSkipSeconds(seconds);try{window.localStorage.setItem(SKIP_SECONDS_KEY,String(seconds))}catch{/* the setting is a convenience; failing to persist it must not fail the edit session */}},[]);
+  // How fast a held pedal travels, kept separate from the tap interval because they answer
+  // different questions: how far one press moves, and how quickly holding it crosses the record.
+  const [continuousRate,setContinuousRate]=useState(()=>{
+    if(typeof window==="undefined")return DEFAULT_CONTINUOUS_RATE;
+    try{return normalizeContinuousRate(window.localStorage.getItem(CONTINUOUS_RATE_KEY))}catch{return DEFAULT_CONTINUOUS_RATE}
+  });
+  const chooseContinuousRate=useCallback((value:string)=>{const rate=normalizeContinuousRate(value);setContinuousRate(rate);try{window.localStorage.setItem(CONTINUOUS_RATE_KEY,String(rate))}catch{/* as above */}},[]);
+  // What a pedal is currently doing, if anything. A ref because a held pedal is not something the
+  // transcript renders -- putting it in state would redraw 937 paragraphs twenty times a second.
+  const transport=useRef<{key:string;command:string;downAt:number;wasPlaying:boolean;threshold:number|null;ticker:number|null}|null>(null);
   const activePlaybackWordId=useMemo(()=>{if(playbackTime===null)return null;for(const paragraph of rendered?.paragraphs??[])for(const word of paragraph.words)if(word.start!==null&&word.end!==null&&playbackTime>=word.start&&playbackTime<word.end)return word.id;return null},[rendered,playbackTime]);
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
   // The foot pedal's three commands. Deliberately NOT filtered on focus, which is the one thing
@@ -524,21 +534,79 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // Skipping clears playbackEnd. Playing a paragraph sets a stop point at its last word; forwarding
   // past that point without clearing it would seek and then immediately pause, which reads as the
   // pedal having done nothing.
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{
-    const command=playbackCommandFor(event);
-    if(!command||!player.current||!playbackSource)return;
-    event.preventDefault();
-    const audio=player.current;
-    if(command===PLAYBACK_COMMANDS.PLAY_PAUSE){
-      if(audio.paused)void audio.play().catch(()=>{});else audio.pause();
-      return;
-    }
-    const target=seekTarget(audio.currentTime,audio.duration,command,skipSeconds);
-    if(target===null)return;
-    playbackEnd.current=null;
-    audio.currentTime=target;
-    setPlaybackTime(target);
-  };window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource,skipSeconds]);
+  //
+  // PRESS AND RELEASE ARE BOTH REAL. Measured on the reporter's Infinity Foot Pedal 3 through
+  // Pedable: a four-second hold produced ONE keydown and ONE keyup 4223ms apart, and no auto-repeat
+  // in between. So the pedal's physical state is observable, and the speed of a held transport is
+  // this application's to choose rather than a consequence of the operator's Windows key-repeat
+  // settings -- which would otherwise differ on every machine.
+  useEffect(()=>{
+    const seekBy=(command:string,seconds:number)=>{
+      const audio=player.current;if(!audio)return;
+      const target=seekTarget(audio.currentTime,audio.duration,command,seconds);
+      if(target===null)return;
+      playbackEnd.current=null;audio.currentTime=target;setPlaybackTime(target);
+    };
+    // Releasing must leave nothing running. Every exit from a held pedal comes through here, so a
+    // pedal released during a reload, a deposition change or a lost window cannot strand a timer
+    // that keeps seeking a transcript nobody is looking at.
+    const clear=()=>{
+      const held=transport.current;
+      if(!held)return null;
+      if(held.threshold!==null)window.clearTimeout(held.threshold);
+      if(held.ticker!==null)window.clearInterval(held.ticker);
+      transport.current=null;
+      return held;
+    };
+    const down=(event:KeyboardEvent)=>{
+      const command=playbackCommandFor(event);
+      if(!command||!player.current||!playbackSource)return;
+      event.preventDefault();
+      // A held key that somehow repeats must not restart the action underneath it.
+      if(event.repeat)return;
+      // A second transport pedal supersedes the first rather than running both at once.
+      if(transport.current&&transport.current.key!==event.key)clear();
+      if(transport.current)return;
+      const audio=player.current;
+      const wasPlaying=!audio.paused;
+      if(command===PLAYBACK_COMMANDS.PLAY_PAUSE){
+        transport.current={key:event.key,command,downAt:event.timeStamp,wasPlaying,threshold:null,ticker:null};
+        if(audio.paused)void audio.play().catch(()=>{});
+        return;
+      }
+      // The tap happens on the way down, so a quick press is one exact interval and nothing more.
+      // Continuous transport only begins if the pedal is still down after the threshold.
+      seekBy(command,skipSeconds);
+      const threshold=window.setTimeout(()=>{
+        const ticker=window.setInterval(()=>seekBy(command,continuousStep(continuousRate)),CONTINUOUS_TICK_MS);
+        if(transport.current)transport.current.ticker=ticker;else window.clearInterval(ticker);
+      },HOLD_THRESHOLD_MS);
+      transport.current={key:event.key,command,downAt:event.timeStamp,wasPlaying,threshold,ticker:null};
+    };
+    const up=(event:KeyboardEvent)=>{
+      const held=transport.current;
+      if(!held||held.key!==event.key)return;
+      const duration=event.timeStamp-held.downAt;
+      clear();
+      if(held.command!==PLAYBACK_COMMANDS.PLAY_PAUSE)return;
+      const audio=player.current;if(!audio)return;
+      // A deliberate hold plays for exactly as long as it is held. A tap keeps the toggle the
+      // keyboard shortcut has always had, so F4 is still usable by someone with no pedal.
+      if(duration>=HOLD_THRESHOLD_MS||held.wasPlaying)audio.pause();
+    };
+    // A pedal released while another window has focus never delivers its keyup here. Without this
+    // the transcript would keep rewinding behind the reporter's back.
+    const abandon=()=>{const held=clear();if(held?.command===PLAYBACK_COMMANDS.PLAY_PAUSE)player.current?.pause()};
+    window.addEventListener("keydown",down);
+    window.addEventListener("keyup",up);
+    window.addEventListener("blur",abandon);
+    return()=>{
+      window.removeEventListener("keydown",down);
+      window.removeEventListener("keyup",up);
+      window.removeEventListener("blur",abandon);
+      abandon();
+    };
+  },[playbackSource,skipSeconds,continuousRate]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
   // Stable identities so the transcript pages below can be held back. Both read through a ref rather
@@ -868,7 +936,12 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             onChange={event=>chooseSkipSeconds(event.target.value)} aria-label="Rewind and fast-forward interval in seconds" />
           seconds
         </label>
-        <span className="workspace-hint">F2 rewind · F4 play/pause · F8 forward — these work while you are typing, so a foot pedal can send them.</span>
+        <label className="workspace-skip-interval" htmlFor="workspace-continuous-rate">Hold speed
+          <input id="workspace-continuous-rate" type="number" min="1" max="20" step="1" value={continuousRate}
+            onChange={event=>chooseContinuousRate(event.target.value)} aria-label="Continuous rewind and fast-forward speed, as a multiple of real time" />
+          ×
+        </label>
+        <span className="workspace-hint">F2 rewind · F4 play · F8 forward — tap to move one interval, hold to keep moving. They work while you are typing, so a foot pedal can send them.</span>
         {!playbackSource && media?.needsProxy && (
           <button type="button" onClick={()=>{ void buildProxy(); }} disabled={building}>
             {building ? "Preparing audio… (about a minute)" : "Prepare audio for playback"}

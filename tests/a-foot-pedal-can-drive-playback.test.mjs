@@ -17,8 +17,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
-  DEFAULT_PLAYBACK_BINDINGS, DEFAULT_SKIP_SECONDS, PLAYBACK_COMMANDS, SKIP_SECONDS_KEY,
-  normalizeSkipSeconds, playbackCommandFor, seekTarget,
+  CONTINUOUS_RATE_KEY, CONTINUOUS_TICK_MS, DEFAULT_CONTINUOUS_RATE, DEFAULT_PLAYBACK_BINDINGS,
+  DEFAULT_SKIP_SECONDS, HOLD_THRESHOLD_MS, PLAYBACK_COMMANDS, SKIP_SECONDS_KEY,
+  continuousStep, normalizeContinuousRate, normalizeSkipSeconds, playbackCommandFor, seekTarget,
 } from "../app/playback-commands.mjs";
 
 const press = (key, modifiers = {}) => ({ key, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...modifiers });
@@ -105,10 +106,12 @@ test("the skip interval is bounded, and unreadable input falls back rather than 
 
 test("the chosen interval reaches the seek, and is remembered", () => {
   const screen = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
-  assert.match(screen, /seekTarget\(audio\.currentTime,audio\.duration,command,skipSeconds\)/,
-    "the reporter's interval must be what the skip uses, not the default");
-  assert.match(screen, /\[playbackSource,skipSeconds\]/,
-    "and the handler must be rebuilt when it changes, or it would keep skipping by the old one");
+  assert.match(screen, /seekBy\(command,skipSeconds\)/,
+    "the reporter's interval must be what a tap uses, not the default");
+  assert.match(screen, /seekTarget\(audio\.currentTime,audio\.duration,command,seconds\)/,
+    "and every seek goes through the same clamped arithmetic");
+  assert.match(screen, /\[playbackSource,skipSeconds,continuousRate\]/,
+    "the handler must be rebuilt when either setting changes, or it would keep using the old one");
   assert.match(screen, /localStorage\.setItem\(SKIP_SECONDS_KEY/, "chosen once, kept between sessions");
   assert.match(screen, /localStorage\.getItem\(SKIP_SECONDS_KEY\)/);
   assert.match(screen, /workspace-skip-seconds/, "and it is set from the Workspace, not a config file");
@@ -127,14 +130,87 @@ test("editing a paragraph no longer pauses the recording", () => {
   assert.match(screen, /onEditingChange=\{editingChange\}/, "the signal itself is kept");
 });
 
+// ---------------------------------------------------------------------------------------------
+// Hold transport. Measured on the reporter's Infinity Foot Pedal 3 through Pedable before any of
+// this was written: a four-second hold produced ONE keydown and ONE keyup 4223ms apart, with no
+// auto-repeat between them. Release is therefore observable, and the speed of a held transport is
+// this application's to set rather than a consequence of the operator's Windows repeat settings.
+// ---------------------------------------------------------------------------------------------
+
+test("the hold threshold clears a real pedal tap", () => {
+  // MEASURED, not chosen. Two deliberate quick taps on the physical pedal both registered 313ms --
+  // a pedal has travel a key does not. A 300ms threshold would have read both as holds and started
+  // a continuous rewind nobody asked for.
+  assert.equal(HOLD_THRESHOLD_MS, 500);
+  assert.ok(HOLD_THRESHOLD_MS > 313, "a measured 313ms tap must not be mistaken for a hold");
+});
+
+test("a held pedal moves at a rate this application sets", () => {
+  // 4x at 50ms ticks: four seconds of recording per second of holding, in twenty steps.
+  assert.equal(CONTINUOUS_TICK_MS, 50);
+  assert.equal(DEFAULT_CONTINUOUS_RATE, 4);
+  assert.equal(continuousStep(4, 50), 0.2);
+  assert.equal(continuousStep(1, 50), 0.05);
+  assert.equal(continuousStep(20, 50), 1);
+  const perSecond = continuousStep(4, 50) * (1000 / 50);
+  assert.equal(perSecond, 4, "one second of holding covers four seconds of recording");
+});
+
+test("the hold speed is bounded and independent of the tap interval", () => {
+  assert.equal(normalizeContinuousRate(6), 6);
+  assert.equal(normalizeContinuousRate("2.5"), 2.5);
+  assert.equal(normalizeContinuousRate(0.1), 1, "clamped up");
+  assert.equal(normalizeContinuousRate(999), 20, "clamped down");
+  for (const bad of [0, -4, NaN, null, undefined, "", "fast", {}]) {
+    assert.equal(normalizeContinuousRate(bad), DEFAULT_CONTINUOUS_RATE, `${JSON.stringify(bad)} falls back`);
+  }
+  assert.notEqual(CONTINUOUS_RATE_KEY, SKIP_SECONDS_KEY, "two settings, two keys");
+});
+
+test("a held pedal steps through the same clamps a tap does", () => {
+  // Continuous transport reuses seekTarget, so it cannot run past either end of the recording.
+  const step = continuousStep(4, 50);
+  assert.equal(seekTarget(0.1, 100, PLAYBACK_COMMANDS.REWIND, step), 0, "held rewind stops at the start");
+  assert.equal(seekTarget(99.9, 100, PLAYBACK_COMMANDS.FAST_FORWARD, step), 100, "held forward stops at the end");
+});
+
+test("the transport handles release, not just press", () => {
+  const screen = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
+  assert.match(screen, /addEventListener\("keyup",up\)/, "release is what stops a hold");
+  assert.match(screen, /addEventListener\("blur",abandon\)/,
+    "a pedal released while another window has focus never delivers its keyup here");
+  assert.match(screen, /if\(event\.repeat\)return/, "a repeat must not restart the action underneath it");
+  assert.match(screen, /transport\.current&&transport\.current\.key!==event\.key\)clear\(\)/,
+    "a second transport pedal supersedes the first rather than running both");
+  assert.match(screen, /duration>=HOLD_THRESHOLD_MS\|\|held\.wasPlaying\)audio\.pause\(\)/,
+    "a hold pauses on release; a tap keeps the keyboard's toggle");
+  assert.match(screen, /window\.clearTimeout\(held\.threshold\)/);
+  assert.match(screen, /window\.clearInterval\(held\.ticker\)/);
+  // The cleanup path must run on unmount and whenever the deposition changes, or a released pedal
+  // could strand a timer still seeking a transcript nobody is looking at.
+  const effect = screen.slice(screen.indexOf("const seekBy=(command:string"), screen.indexOf("[playbackSource,skipSeconds,continuousRate]"));
+  assert.match(effect, /return\(\)=>\{[\s\S]*abandon\(\);[\s\S]*\}/, "unmount releases the pedal");
+  assert.match(screen, /\[playbackSource,skipSeconds,continuousRate\]/, "and a deposition change rebuilds it");
+});
+
+test("the tap fires on the way down, so a quick press is exactly one interval", () => {
+  const screen = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
+  const down = screen.slice(screen.indexOf("const down=(event:KeyboardEvent)"), screen.indexOf("const up=(event:KeyboardEvent)"));
+  const tap = down.indexOf("seekBy(command,skipSeconds)");
+  const hold = down.indexOf("setTimeout");
+  assert.ok(tap > 0 && hold > tap, "the single seek happens before the hold timer is armed");
+  assert.match(down, /setInterval\(\(\)=>seekBy\(command,continuousStep\(continuousRate\)\),CONTINUOUS_TICK_MS\)/,
+    "and continuous transport runs at the configured rate on this application's clock");
+});
+
 test("the pedal commands survive a text field having focus", () => {
   // THE PEDAL-CRITICAL PROPERTY, and the one thing that separates this handler from the Space
   // handler beside it. Asserted against the shipped source because it is a property of the wiring,
   // not of the pure module: the effect must not filter on input/textarea/contenteditable focus.
   const screen = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
-  const start = screen.indexOf("const command=playbackCommandFor(event)");
+  const start = screen.indexOf("const seekBy=(command:string");
   assert.ok(start > 0, "the pedal handler must be wired into the Workspace");
-  const handler = screen.slice(start, screen.indexOf('window.addEventListener("keydown",key)', start));
+  const handler = screen.slice(start, screen.indexOf("[playbackSource,skipSeconds,continuousRate]", start));
   assert.equal(/matches\("input,textarea/.test(handler), false,
     "a pedal is pressed while typing; this handler must not return early on editor focus");
   assert.match(handler, /playbackEnd\.current=null/,
@@ -143,6 +219,6 @@ test("the pedal commands survive a text field having focus", () => {
   // The centre pedal's branch, asserted because a mutation that disabled it survived every other
   // test in this file: the pure module knows what PLAY_PAUSE means, and only the wiring acts on it.
   assert.match(handler, /command===PLAYBACK_COMMANDS\.PLAY_PAUSE/, "the centre pedal must toggle playback");
-  assert.match(handler, /audio\.paused\)void audio\.play\(\)[\s\S]*?else audio\.pause\(\)/,
-    "and toggle it in both directions");
+  assert.match(handler, /if\(audio\.paused\)void audio\.play\(\)/, "pressing it starts playback");
+  assert.match(handler, /audio\.pause\(\)/, "and releasing it stops playback");
 });
