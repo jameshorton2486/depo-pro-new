@@ -145,7 +145,14 @@ export function computeAnchorStateHash({ segments, wordIds } = {}) {
 
 /** The word ids a proposal targets: its anchor, its end, and everything between them. */
 export function proposalWordIds({ segments = [], proposal } = {}) {
-  const words = segments.flatMap(segment => segment?.words ?? []);
+  // Two shapes reach this, and reading only one of them made it return nothing on real data.
+  //
+  // A rendered projection carries words[{id,...}]. The segments applyOverlay returns -- which is
+  // what acceptRangeProposal and the AI batch planner actually pass -- carry asrWordIds[] and no
+  // words array at all. Measured on the synthetic qualification specimen: every speaker range was
+  // refused ANCHOR_NOT_IN_TRANSCRIPT for anchors that were plainly in the transcript.
+  const words = segments.flatMap(segment => segment?.words
+    ?? (segment?.asrWordIds ?? []).map(id => ({ id })));
   const start = words.findIndex(word => word?.id === proposal?.wordId);
   if (start === -1) return [];
   const endId = proposal?.endWordId ?? proposal?.wordId;

@@ -847,17 +847,17 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"AI Correcting Transcript…":"AI Correct Transcript"}</button>
+        <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting Transcript…":"Correct Transcript"}</button>
         <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
         <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate Working PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
-        <div><h2>AI Correct Transcript</h2><p>Correct proper-name spellings and assign speaker identities and Q./A./colloquy roles, using only the checks below. <strong>Corrections are applied directly, as one pass you can undo.</strong> Every change is recorded with what it was, what it became, and the evidence for it — review the corrected transcript against the audio as you normally would.</p></div>
+        <div><h2>Correct Transcript</h2><p>Correct proper-name spellings and assign speaker identities and Q./A./colloquy roles, using only the checks below. <strong>Corrections are applied directly, as one pass you can undo.</strong> Every change is recorded with what it was, what it became, and the evidence for it — review the corrected transcript against the audio as you normally would.</p></div>
         <label htmlFor="workspace-correction-instructions">Additional things AI should check</label>
         <textarea id="workspace-correction-instructions" value={correctionInstructions} onChange={event=>setCorrectionInstructions(event.target.value)} placeholder="Example: Check whether Lucia Zahn self-identifies as Speaker 3. Check a recurring phrase that may have been misheard." />
         <p className="workspace-hint">These instructions guide the enabled checks. Future correction types can be added as separate validated passes without changing this review workflow.</p>
-        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void aiCorrectTranscript(aiPass?.status==="already-corrected")}>{correcting?"AI Correcting Transcript…":aiPass?.status==="already-corrected"?"AI Correct Transcript Again":"AI Correct Transcript"}</button>
+        <button type="button" className="primary-button" disabled={correcting||!rendered} onClick={()=>void aiCorrectTranscript(aiPass?.status==="already-corrected")}>{correcting?"Correcting Transcript…":aiPass?.status==="already-corrected"?"Correct Transcript Again":"Correct Transcript"}</button>
         {aiPass&&<div className="workspace-correction-results">
           <p role="status">{aiPass.message}</p>
           {(aiPass.failures??[]).map(message=><p className="analysis-error" role="alert" key={message}>{message}</p>)}

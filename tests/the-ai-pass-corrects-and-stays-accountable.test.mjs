@@ -11,9 +11,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { AI_CORRECTION_STATUS, aiPassUndoState, applyAiCorrectionPass, correctionPassRecord, planAiCorrectionBatch } from "../server/ai-correction.mjs";
+import { AI_CORRECTION_STATUS, aiPassUndoState, applyAiCorrectionPass, correctionPassRecord, planAiCorrectionBatch, preservePunctuation } from "../server/ai-correction.mjs";
 import { appendTransaction, emptyOverlay } from "../server/reporter-overlay.mjs";
-import { computeReviewStateHash } from "../server/review-state-hash.mjs";
+import { computeReviewStateHash, proposalWordIds } from "../server/review-state-hash.mjs";
 
 const word = (n, text) => ({ id: `job:word:${n}`, text });
 const segments = () => ([
@@ -160,12 +160,38 @@ test("the pass writes no text of its own invention", () => {
   const source = fs.readFileSync(new URL("../server/ai-correction.mjs", import.meta.url), "utf8");
   assert.match(source, /import \{ planRangeAcceptance \}/, "speaker ranges go through the existing planner");
 
+  // Operation text has exactly two ingredients: the proposal's value, and punctuation copied off
+  // the word being replaced. Nothing else may reach it, so the check names both and refuses a third.
   const assignments = [...source.matchAll(/\btext:\s*([^,}\n]+)/g)].map(match => match[1].trim());
   assert.ok(assignments.length > 0, "the check must actually find the assignments it grades");
   for (const value of assignments) {
-    assert.match(value, /^proposal\./,
+    assert.match(value, /^(proposal\.|preservePunctuation\(was$)/,
       `operation text must come from a proposal, not from this module; found: ${value}`);
   }
+
+  // And the behavioural half, because the grep above can only see how it is written. Whatever the
+  // model returns, the ONLY characters that survive around it are the ones the ASR already had.
+  const kept = preservePunctuation('"Oconco,"', "Okonkwo");
+  assert.equal(kept, '"Okonkwo,"', "punctuation comes from the evidence, the name from the model");
+  assert.equal(preservePunctuation("Oconco.", "Mr. Okonkwo"), "Mr. Okonkwo",
+    "a proposal that carries its own punctuation is left exactly as proposed");
+  assert.equal(preservePunctuation(null, "Okonkwo"), "Okonkwo", "and with no original, nothing is added");
+});
+
+test("correcting a name does not delete the sentence's punctuation", () => {
+  // FOUND IN QUALIFICATION, and the most consequential of the four. The entity pass may only
+  // propose values from the deposition's authoritative name list, and that list holds bare names.
+  // So the real model answer "Okonkwo" replaced the token "Oconco." and the sentence lost its full
+  // stop; "Kilbride" replaced "Kilbright," and the clause lost its comma. Every corrected name that
+  // carried punctuation would have quietly dropped it into a certified record.
+  const batch = planAiCorrectionBatch({
+    segments: segments(), speakerFor,
+    names: [{ wordId: "job:word:2", proposedValue: "Bardot" }],
+    textFor: () => "Bardado.",
+  });
+  assert.deepEqual(batch.operations, [{ op: "replace", wordId: "job:word:2", text: "Bardot." }]);
+  assert.equal(batch.applied[0].before, "Bardado.");
+  assert.equal(batch.applied[0].after, "Bardot.", "and the audit trail records what actually landed");
 });
 
 test("every applied correction names its evidence and confidence", () => {
@@ -224,6 +250,15 @@ test("the reporter asks once, and the corrections are applied", async () => {
   assert.deepEqual(store.calls.appended[0].operations, [{ op: "replace", wordId: "job:word:2", text: "Bardot" }]);
   assert.deepEqual(store.overlay.transactionSizes, [1], "the whole pass is one undoable unit");
   assert.match(result.message, /1 correction applied in one pass/);
+
+  // FOUND IN QUALIFICATION. Not merely that the overlay holds one transaction, but that the undo
+  // control can RECOGNISE it as the pass. The record used to keep the planned operations; the
+  // overlay validates and normalises them on the way in, so the two never matched and "Undo AI
+  // Correction Pass" was never offered after a pass that had just applied four corrections.
+  const undo = aiPassUndoState(null, {
+    depositionId: "DEP-1", listPasses: () => store.calls.written, readOverlay: () => store.overlay,
+  });
+  assert.equal(undo.undoable, true, "the pass it just applied is undoable straight away");
 });
 
 test("the batch is guarded by the state it was planned against, not by the state it lands on", async () => {
@@ -272,6 +307,24 @@ test("running it twice on an unchanged transcript buys one pass", async () => {
   assert.equal(result.status, AI_CORRECTION_STATUS.ALREADY_CORRECTED);
   assert.equal(store.calls.entity, 0, "no Claude call is spent");
   assert.equal(store.calls.appended.length, 0, "and the corrections are not applied a second time");
+});
+
+test("clicking again on the transcript the AI just corrected buys nothing", async () => {
+  // The case that actually happens. After a pass applies, the transcript is in a state no pass ever
+  // ANALYSED, so a guard that only remembered the analysed state would let the reporter pay again
+  // for a look at the AI's own output. The pass records the state it produced as well.
+  const store = harness();
+  const first = await applyAiCorrectionPass(null, { ...store.deps, apiKey: "key" });
+  assert.equal(first.status, AI_CORRECTION_STATUS.APPLIED);
+
+  const applied = store.calls.written[0];
+  assert.ok(applied.resultingReviewStateHash, "the pass records the state it left behind");
+  assert.notEqual(applied.resultingReviewStateHash, applied.reviewStateHash);
+
+  const again = harness({ overlay: store.overlay, passes: [applied] });
+  const second = await applyAiCorrectionPass(null, { ...again.deps, apiKey: "key" });
+  assert.equal(second.status, AI_CORRECTION_STATUS.ALREADY_CORRECTED);
+  assert.equal(again.calls.entity, 0, "and no second Claude call is spent");
 });
 
 test("but a deliberate second pass is honoured", async () => {
@@ -375,12 +428,92 @@ test("the reporter's control applies, and nothing applies on its own", () => {
   assert.equal(/input\.(reviewStateHash|expectedReviewStateHash)/.test(applyRoute.slice(0, 900)), false,
     "the transcript state is derived on the server, never accepted from the request");
 
-  assert.match(screen, /AI Correct Transcript/, "the control names what it does");
-  assert.match(screen, /AI Correcting Transcript…/, "and says so while it runs");
+  assert.match(screen, />Correct Transcript</, "the control names what it does");
+  assert.match(screen, /Correcting Transcript…/, "and says so while it runs");
   assert.match(screen, /Corrections are applied directly, as one pass you can undo/,
     "and the reporter is told the model where they read it");
   assert.match(screen, /Undo AI Correction Pass/);
   assert.match(screen, /aiUndo\?\.undoable&&<button/, "offered only while the pass is still undoable");
+});
+
+// ---------------------------------------------------------------------------------------------
+// Three defects the real-Claude synthetic qualification found. Each of these passed every test
+// above and still failed against a real model response, which is the whole argument for the run.
+// ---------------------------------------------------------------------------------------------
+
+test("a range anchored in a projected transcript is found, not refused", () => {
+  // FOUND IN QUALIFICATION. Segments come in two shapes: a rendered projection carries words[], and
+  // the segments applyOverlay returns -- which is what the orchestrator and acceptRangeProposal
+  // actually pass -- carry asrWordIds[] and no words array. Reading only the first shape refused
+  // every real speaker range with ANCHOR_NOT_IN_TRANSCRIPT for anchors plainly in the transcript.
+  //
+  // The fixture above uses the shape the unit tests were written against. This one uses the shape
+  // the caller really sends.
+  const projected = [
+    { id: "s1", speakerIdentity: null, transcriptRole: null, asrWordIds: ["job:word:1", "job:word:2"] },
+    { id: "s2", speakerIdentity: null, transcriptRole: null, asrWordIds: ["job:word:3", "job:word:4"] },
+  ];
+  assert.deepEqual(
+    proposalWordIds({ segments: projected, proposal: { wordId: "job:word:3", endWordId: "job:word:4" } }),
+    ["job:word:3", "job:word:4"],
+  );
+  const batch = planAiCorrectionBatch({
+    segments: projected, speakerFor,
+    ranges: [{ wordId: "job:word:3", endWordId: "job:word:4", speakerIdentity: "witness-1" }],
+  });
+  assert.equal(batch.omitted.filter(item => item.reason === "ANCHOR_NOT_IN_TRANSCRIPT").length, 0,
+    "the anchor is in the transcript and must not be reported as missing");
+  assert.ok(batch.operations.length, "and the range is plannable");
+});
+
+test("a correction records what it replaced, not only what it became", () => {
+  // FOUND IN QUALIFICATION. The entity pass's schema has no originalValue field, so every applied
+  // correction recorded before:null -- an audit trail that cannot say what the transcript said.
+  const batch = planAiCorrectionBatch({
+    segments: segments(), speakerFor,
+    names: [{ wordId: "job:word:2", proposedValue: "Bardot", confidenceScore: 0.9, evidenceSource: "ROSTER" }],
+    textFor: id => (id === "job:word:2" ? "Bardado" : null),
+  });
+  assert.equal(batch.applied[0].before, "Bardado");
+  assert.equal(batch.applied[0].after, "Bardot");
+});
+
+test("an analysis that wholly failed is a failure, not an empty result", async () => {
+  // FOUND IN QUALIFICATION. Each pass catches its own chunk errors and still resolves, so a bad
+  // model name produced two HTTP 404s and the reporter was told "The AI found nothing it could
+  // correct" -- a false statement about their transcript, and one that invites them to stop
+  // looking. Every chunk failing with nothing accepted is that pass failing.
+  const store = harness();
+  const dead = async () => ({ accepted: [], chunksSubmitted: 2, failures: [
+    { chunkId: "c1", code: "CHUNK_FAILED", message: "Claude request failed." },
+    { chunkId: "c2", code: "CHUNK_FAILED", message: "Claude request failed." },
+  ] });
+  const result = await applyAiCorrectionPass(null, { ...store.deps, apiKey: "key", entityPass: dead, speakerRangePass: dead });
+  assert.equal(result.status, AI_CORRECTION_STATUS.FAILED);
+  assert.equal(result.retryable, true);
+  assert.equal(store.calls.appended.length, 0, "and the transcript is untouched");
+  assert.ok(result.failures.length >= 2, "with the chunk failures reported rather than hidden");
+});
+
+test("one pass wholly failing still applies the other's corrections", async () => {
+  const store = harness();
+  const result = await applyAiCorrectionPass(null, {
+    ...store.deps, apiKey: "key",
+    speakerRangePass: async () => ({ accepted: [], chunksSubmitted: 1, failures: [{ code: "CHUNK_FAILED", message: "429" }] }),
+  });
+  assert.equal(result.status, AI_CORRECTION_STATUS.APPLIED);
+  assert.equal(result.operationCount, 1);
+});
+
+test("a pass that genuinely found nothing is still nothing to apply", async () => {
+  // The distinction the fix must not blur: no failures and no proposals is a real, common answer.
+  const store = harness();
+  const result = await applyAiCorrectionPass(null, {
+    ...store.deps, apiKey: "key",
+    entityPass: async () => ({ accepted: [], chunksSubmitted: 2, failures: [] }),
+    speakerRangePass: async () => ({ accepted: [], chunksSubmitted: 2, failures: [] }),
+  });
+  assert.equal(result.status, AI_CORRECTION_STATUS.NOTHING_TO_APPLY);
 });
 
 test("the status vocabulary distinguishes the failure modes that matter", () => {

@@ -27,6 +27,7 @@ import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { runEntityPass } from "./entity-pass.mjs";
 import { planRangeAcceptance } from "./range-acceptance-planner.mjs";
+import { currentUtterances } from "./correction-chunker.mjs";
 import { applyOverlay as applyOverlayToSegments, emptyOverlay as newOverlay } from "./reporter-overlay.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
 import { computeReviewStateHash as reviewStateHash, proposalWordIds } from "./review-state-hash.mjs";
@@ -41,6 +42,27 @@ export const AI_CORRECTION_STATUS = Object.freeze({
 });
 
 /**
+ * The corrected word, carrying the punctuation the word it replaces already had.
+ *
+ * FOUND IN THE REAL-CLAUDE QUALIFICATION. The entity pass may only propose values that appear in
+ * the deposition's authoritative name list, and that list holds bare names. So "Oconco." became
+ * "Okonkwo" and the sentence lost its full stop; "Kilbright," became "Kilbride" and the clause lost
+ * its comma. One word in, one word out -- and the punctuation of a court record quietly deleted,
+ * on every corrected name that carried any.
+ *
+ * Nothing is invented here. The surrounding characters come from the ASR evidence for that exact
+ * word; only the name between them is the model's. If the proposal itself carries punctuation, it
+ * is left alone and this does nothing.
+ */
+export function preservePunctuation(original, proposed) {
+  if (typeof original !== "string" || !original || typeof proposed !== "string" || !proposed) return proposed;
+  if (/[^\p{L}\p{N}'-]/u.test(proposed)) return proposed;
+  const match = original.match(/^([^\p{L}\p{N}]*)[\s\S]*?([^\p{L}\p{N}]*)$/u);
+  const [, prefix = "", suffix = ""] = match ?? [];
+  return `${prefix}${proposed}${suffix}`;
+}
+
+/**
  * Turns validated proposals into one batch of overlay operations.
  *
  * Conflicts are decided here rather than discovered during application. Two proposals whose word
@@ -52,7 +74,7 @@ export const AI_CORRECTION_STATUS = Object.freeze({
  * earlier operation in the same batch, so there is no intra-batch staleness to resolve: the whole
  * plan describes a single transition from the state that was analysed.
  */
-export function planAiCorrectionBatch({ segments = [], names = [], ranges = [], speakerFor = () => null } = {}) {
+export function planAiCorrectionBatch({ segments = [], names = [], ranges = [], speakerFor = () => null, textFor = () => null } = {}) {
   const claimed = new Map();   // wordId -> the proposal that already owns it
   const applied = [], omitted = [], operations = [];
 
@@ -72,8 +94,13 @@ export function planAiCorrectionBatch({ segments = [], names = [], ranges = [], 
     const wordId = proposal?.wordId;
     if (!wordId) { omitted.push({ kind: "name", proposal, reason: "NO_ANCHOR" }); continue; }
     if (!claim(proposal, [wordId], "name")) continue;
-    operations.push({ op: "replace", wordId, text: proposal.proposedValue });
-    applied.push({ kind: "name", wordId, before: proposal.originalValue ?? null, after: proposal.proposedValue,
+    const was = textFor(wordId);
+    operations.push({ op: "replace", wordId, text: preservePunctuation(was, proposal.proposedValue) });
+    // What it replaced. The entity pass's schema has no originalValue field, so without resolving
+    // the word's current text here the audit trail would record what every correction became and
+    // not one thing it changed -- which is half of what makes it an audit trail.
+    applied.push({ kind: "name", wordId, before: proposal.originalValue ?? was ?? null,
+      after: preservePunctuation(was, proposal.proposedValue),
       correctionType: proposal.correctionType ?? "text", confidence: proposal.confidenceScore ?? null,
       evidenceSource: proposal.evidenceSource ?? null });
   }
@@ -110,7 +137,7 @@ export function planAiCorrectionBatch({ segments = [], names = [], ranges = [], 
 }
 
 /** A record of exactly what one AI pass changed, sufficient to reconstruct before and after. */
-export function correctionPassRecord({ passId, model, promptVersion, startedAt, reviewStateHash, applied, omitted, operations }) {
+export function correctionPassRecord({ passId, model, promptVersion, startedAt, reviewStateHash, resultingReviewStateHash, applied, omitted, operations }) {
   return {
     schemaVersion: "1.0.0",
     recordType: "AI_CORRECTION_PASS",
@@ -119,6 +146,10 @@ export function correctionPassRecord({ passId, model, promptVersion, startedAt, 
     // The state the operations were planned against. Anyone reconstructing this pass needs to know
     // which transcript it transformed, not merely that it happened.
     reviewStateHash: reviewStateHash ?? null,
+    // And the state it produced. Without this, clicking Correct Transcript a second time on a
+    // transcript the AI has just corrected looks like a new state and buys a second analysis --
+    // the guard would only ever catch a double-click that changed nothing.
+    resultingReviewStateHash: resultingReviewStateHash ?? null,
     operationCount: operations.length,
     // The operations themselves, not merely how many. Undoing the pass as a unit requires proving
     // the overlay's last transaction IS this pass, and a count cannot prove that.
@@ -202,7 +233,7 @@ export function writeAiCorrectionPass(root, { depositionId, storageRoot, record 
 export async function applyAiCorrectionPass(root, {
   depositionId, storageRoot, apiKey, model, passStartedAt = new Date().toISOString(), force = false,
   entityPass = runEntityPass, speakerRangePass = runSpeakerRangePass,
-  getWorkingTranscript, readReporterOverlay, getSpeakerCandidates, appendReporterOperations,
+  getWorkingTranscript, readReporterOverlay, getSpeakerCandidates, appendReporterOperations, readAsrEvidence = () => [],
   applyOverlay = applyOverlayToSegments, emptyOverlay = newOverlay, computeReviewStateHash = reviewStateHash,
   listPasses = listAiCorrectionPasses, writePassRecord = writeAiCorrectionPass,
 } = {}) {
@@ -219,18 +250,40 @@ export async function applyAiCorrectionPass(root, {
 
   // Repeating the pass against a transcript nobody has changed would buy the same corrections twice
   // and append them a second time. `force` is the reporter deliberately asking again.
-  if (!force && listPasses(root, store).some(pass => pass?.reviewStateHash === before)) {
+  // Two states count as already corrected: the one a pass analysed, and the one it left behind.
+  // The second is the case that actually happens -- the reporter looks at the corrected transcript
+  // and presses the button again.
+  if (!force && listPasses(root, store).some(pass =>
+    pass?.reviewStateHash === before || pass?.resultingReviewStateHash === before)) {
     return { status: AI_CORRECTION_STATUS.ALREADY_CORRECTED, applied: [], omitted: [], operationCount: 0, retryable: false,
       message: "This transcript has already been corrected in its current state. Nothing was changed." };
   }
 
   const options = { depositionId, storageRoot, apiKey, model, passStartedAt, limitChunks: null, additionalInstructions: "" };
   const [names, ranges] = await Promise.allSettled([entityPass(root, options), speakerRangePass(root, options)]);
+
+  // A pass that returns is not the same as a pass that ran. Each pass catches its own chunk errors
+  // and still resolves, so a wholly failed analysis -- an unusable model, a revoked key, Anthropic
+  // down -- arrives here as a clean result with an empty accepted list. Measured during the
+  // synthetic qualification: a bad model name produced two HTTP 404s and the reporter was told
+  // "The AI found nothing it could correct", which is a false statement about their transcript.
+  //
+  // So the test is per pass: every chunk failed and nothing was accepted means that pass failed.
+  const ran = outcome => {
+    if (outcome.status === "rejected") return false;
+    const value = outcome.value ?? {};
+    const failed = (value.failures ?? []).length;
+    return !(failed > 0 && failed >= (value.chunksSubmitted ?? failed) && !(value.accepted ?? []).length);
+  };
   const failures = [];
   for (const [label, outcome] of [["names", names], ["speaker-ranges", ranges]]) {
-    if (outcome.status === "rejected") failures.push(`${label}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
+    if (outcome.status === "rejected") {
+      failures.push(`${label}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
+    } else if (!ran(outcome)) {
+      for (const failure of outcome.value?.failures ?? []) failures.push(`${label}: ${failure.message ?? failure.code ?? "chunk failed"}`);
+    }
   }
-  if (names.status === "rejected" && ranges.status === "rejected") {
+  if (!ran(names) && !ran(ranges)) {
     return { status: AI_CORRECTION_STATUS.FAILED, applied: [], omitted: [], operationCount: 0, failures, retryable: true,
       message: "The AI correction pass could not run. The transcript is unchanged and nothing was applied; you can run it again." };
   }
@@ -248,11 +301,20 @@ export async function applyAiCorrectionPass(root, {
 
   const projection = applyOverlay(transcript?.segments ?? [], overlay ?? emptyOverlay(depositionId));
   const candidates = getSpeakerCandidates(root, store)?.candidates ?? [];
+  // The words as they read right now -- the same view the passes were given. This is what lets the
+  // audit trail say what each correction REPLACED, not merely what it became.
+  const currentText = new Map();
+  try {
+    for (const utterance of currentUtterances({ transcript, evidence: readAsrEvidence(root, store), overlay })) {
+      for (const word of utterance.words ?? []) currentText.set(word.id, word.text);
+    }
+  } catch { /* the before-text is a courtesy to the reader; its absence must not stop a correction */ }
   const batch = planAiCorrectionBatch({
     segments: projection.segments,
-    names: names.status === "fulfilled" ? (names.value?.accepted ?? []) : [],
-    ranges: ranges.status === "fulfilled" ? (ranges.value?.accepted ?? []) : [],
+    names: ran(names) ? (names.value?.accepted ?? []) : [],
+    ranges: ran(ranges) ? (ranges.value?.accepted ?? []) : [],
     speakerFor: id => candidates.find(person => person.id === id) ?? null,
+    textFor: id => currentText.get(id) ?? null,
   });
 
   if (!batch.operations.length) {
@@ -263,11 +325,27 @@ export async function applyAiCorrectionPass(root, {
   // ONE transaction, guarded by the state it was planned against. Undo pops a whole transaction, so
   // this is what makes the pass reversible as a unit; the guard is what makes it refuse rather than
   // rebase if the reporter edited something while it was thinking.
-  appendReporterOperations(root, { ...store, operations: batch.operations, expectedReviewStateHash: before });
+  const written = appendReporterOperations(root, { ...store, operations: batch.operations, expectedReviewStateHash: before });
+
+  // What LANDED, not what was planned. The overlay validates and normalises every operation on the
+  // way in, so the planned objects and the stored ones are not identical -- and the undo control,
+  // which proves the pass is still the last transaction by comparing them, never offered itself.
+  // Found in the real-Claude qualification: four operations applied, "Undo AI Correction Pass"
+  // absent, because it was comparing a plan against a record of that plan being carried out.
+  const landedOps = (() => {
+    const sizes = written?.transactionSizes ?? [];
+    const size = sizes.length ? sizes[sizes.length - 1] : 0;
+    const operations = written?.operations ?? [];
+    return size ? operations.slice(operations.length - size) : batch.operations;
+  })();
 
   const record = correctionPassRecord({
     passId: `ai-correction-${passStartedAt}`, model, promptVersion: null, startedAt: passStartedAt,
-    reviewStateHash: before, applied: batch.applied, omitted: batch.omitted, operations: batch.operations,
+    reviewStateHash: before,
+    resultingReviewStateHash: computeReviewStateHash({
+      transcript: getWorkingTranscript(root, store), overlay: readReporterOverlay(root, store),
+    }),
+    applied: batch.applied, omitted: batch.omitted, operations: landedOps,
   });
   writePassRecord(root, { ...store, record });
 

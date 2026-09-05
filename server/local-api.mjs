@@ -760,6 +760,7 @@ const server = http.createServer(async (req, res) => {
         readReporterOverlay,
         getSpeakerCandidates,
         appendReporterOperations,
+        readAsrEvidence,
       }), origin);
     }
     // What the AI has already done to this transcript, and whether its last pass can still be
@@ -771,7 +772,13 @@ const server = http.createServer(async (req, res) => {
       try { passes = listAiCorrectionPasses(root, store); } catch { passes = []; }
       const undo = aiPassUndoState(root, { ...store, readOverlay: readReporterOverlay });
       return json(res, 200, {
-        passes: passes.map(({ operations, ...summary }) => summary),
+        // Summaries only. The operations are in the stored record for anyone reconstructing the
+        // pass; a list of every pass carrying every operation would grow without bound.
+        passes: passes.map(pass => ({
+          passId: pass.passId, appliedAt: pass.appliedAt, startedAt: pass.startedAt,
+          model: pass.model, reviewStateHash: pass.reviewStateHash,
+          operationCount: pass.operationCount, applied: pass.applied?.length ?? 0, omitted: pass.omitted?.length ?? 0,
+        })),
         undo: { undoable: undo.undoable, reason: undo.reason, passId: undo.pass?.passId ?? null,
           operationCount: undo.pass?.operationCount ?? 0 },
       }, origin);

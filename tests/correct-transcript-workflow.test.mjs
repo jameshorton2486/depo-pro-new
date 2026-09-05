@@ -6,7 +6,8 @@ import fs from "node:fs";
 //
 //   "Correct Transcript"  suggested the button corrected the transcript, which it did not.
 //   "AI Review"           said what it did: propose, and apply nothing without the reporter.
-//   "AI Correct Transcript"  applies, deliberately.
+//   "Correct Transcript"  applies, deliberately. Third time, same words as the first -- because
+//                        it is now true.
 //
 // The third is the one that is live. The scopist and the reporter read the whole transcript against
 // the audio afterwards regardless, so an approval queue in front of that is the same reading done
@@ -16,8 +17,8 @@ import fs from "node:fs";
 // applying pass is qualified on real depositions; these assertions keep its parts wired together.
 test("Workspace applies AI corrections as one reporter-initiated pass", () => {
   const source = fs.readFileSync(new URL("../app/WorkspaceScreen.tsx", import.meta.url), "utf8");
-  assert.match(source, />AI Correct Transcript</, "the panel names the act");
-  assert.match(source, /AI Correcting Transcript…/, "and says so while it runs");
+  assert.match(source, />Correct Transcript</, "the panel names the act");
+  assert.match(source, /Correcting Transcript…/, "and says so while it runs");
   assert.match(source, /\/api\/correction\/ai-apply/, "one request, and the server decides the rest");
   assert.match(source, /Corrections are applied directly, as one pass you can undo/,
     "the reporter is told the model where they read it");
