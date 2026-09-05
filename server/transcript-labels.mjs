@@ -282,7 +282,17 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
     // Keyed on examiner AND type. The examiner alone is not enough -- a recross by the same
     // attorney who just crossed is a new examination with a new heading, and the labeller
     // correctly treats it as no change to who is asking. Two different facts about one word.
-    if (previous && previous.examinerPersonId === examinerPersonId && previous.type === type) return;
+    if (previous && previous.examinerPersonId === examinerPersonId && previous.type === type) {
+      // The reporter's own boundary outranks the derived one. Both name the same examination, so a
+      // second heading would be wrong -- but the implicit entry carries no anchor and places itself
+      // at the examiner's first printing question, which is where the machine guessed rather than
+      // where the examination began. Found on Heath Thomas: the reporter marked the paragraph after
+      // the witness was sworn, and the boundary was discarded as a duplicate, leaving EXAMINATION /
+      // BY NUNEZ: standing above the appearances. Replacing keeps one heading and puts it where the
+      // reporter said, which is the only authority that actually knows.
+      if (previous.implicit && !implicit) examinationSequence[examinationSequence.length - 1] = { examinerPersonId, type, atWordId, implicit };
+      return;
+    }
     examinationSequence.push({ examinerPersonId, type, atWordId, implicit });
   };
   if (examinerIdentity) openExamination(examinerIdentity, "DIRECT", null, true);

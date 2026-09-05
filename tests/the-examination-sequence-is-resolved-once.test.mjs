@@ -126,11 +126,31 @@ test("boundaries marked out of order still resolve in transcript order", () => {
 });
 
 test("a boundary restating the examiner already examining adds no second examination", () => {
-  // It says nothing new about the proceeding, and a duplicate entry would print a duplicate
-  // heading and a duplicate index line.
+  // It says nothing new about WHO is examining, and a duplicate entry would print a duplicate
+  // heading and a duplicate index line. That is still the contract, and it still holds: one entry.
+  //
+  // What it does say something new about is WHERE. The implicit entry carries no anchor and places
+  // itself at the examiner's first printing question; the reporter's boundary names a word. So the
+  // explicit one now replaces the implicit one rather than being discarded as a duplicate.
+  //
+  // Found on Heath Thomas: the reporter marked the paragraph after the witness was sworn, the
+  // boundary was dropped as redundant, and EXAMINATION / BY NUNEZ: stayed above the appearances.
+  // The only control for correcting a wrong placement could not correct it.
   const direct = say("alvarez", "QUESTIONING_ATTORNEY", "Where were you going?");
-  assert.deepEqual(brief(resolve([direct], { examinerIdentity:"alvarez", examinations:[at(direct, "alvarez", "DIRECT")] })),
-    ["DIRECT:alvarez:implicit"]);
+  const resolved = resolve([direct], { examinerIdentity:"alvarez", examinations:[at(direct, "alvarez", "DIRECT")] });
+  assert.equal(resolved.length, 1, "one examination, so one heading and one index line");
+  assert.deepEqual(brief(resolved), ["DIRECT:alvarez"], "and it is the reporter's, not the derived one");
+  assert.equal(resolved[0].atWordId, direct.wordId, "carrying the anchor the reporter chose");
+});
+
+test("a derived placement is kept when the reporter has not overridden it", () => {
+  // The other half of the same rule, so the replacement above cannot be mistaken for "explicit
+  // always wins even when there is no explicit". With no boundary marked, the entry stays implicit
+  // and anchorless, and every existing deposition renders exactly as it did.
+  const direct = say("alvarez", "QUESTIONING_ATTORNEY", "Where were you going?");
+  const resolved = resolve([direct], { examinerIdentity:"alvarez" });
+  assert.deepEqual(brief(resolved), ["DIRECT:alvarez:implicit"]);
+  assert.equal(resolved[0].atWordId, null);
 });
 
 test("a boundary naming nobody is not recorded as an examination", () => {

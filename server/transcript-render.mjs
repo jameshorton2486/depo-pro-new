@@ -194,8 +194,22 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   for (const examination of examinationSequence) {
     const heading = EXAMINATION_HEADINGS[examination.type];
     if (!heading) continue;
+    // A paragraph the reporter has emptied cannot announce an examination.
+    //
+    // The implicit heading goes to the examiner's first question, and "first" used to mean first in
+    // the list rather than first that prints. Measured on Heath Thomas: the reporter struck every
+    // word of two early paragraphs the AI had labelled Q. -- pre-record crosstalk, correctly
+    // deleted -- and EXAMINATION / BY NUNEZ: then anchored to a paragraph that renders as nothing,
+    // putting the heading at the top of page 1, above the oath. The examination appeared to begin
+    // before the witness was sworn.
+    //
+    // An explicit boundary is exempt: the reporter chose that word deliberately, and a boundary
+    // whose anchor has been struck is a different problem, reported below as an unrendered anchor.
+    // Struck words stay in the paragraph flagged `deleted` so the reporter can still see and undo
+    // them, so "has words" is not the question. What prints is what survives.
+    const prints = paragraph => (paragraph.words ?? []).some(word => !word.deleted);
     const index = examination.implicit
-      ? paragraphs.findIndex(paragraph => paragraph.elementType === ELEMENT.QUESTION && paragraph.speakerIdentity === examination.examinerPersonId)
+      ? paragraphs.findIndex(paragraph => paragraph.elementType === ELEMENT.QUESTION && paragraph.speakerIdentity === examination.examinerPersonId && prints(paragraph))
       : paragraphs.findIndex(paragraph => (paragraph.asrWordIds ?? []).includes(examination.atWordId));
     // Defence, and unreachable through renderTranscript today: applyOverlay resolves boundaries
     // against segment order and drops any whose anchor no longer exists, so an unresolvable one
