@@ -170,10 +170,39 @@ export function readAsrEvidence(root,{depositionId,storageRoot}){const directory
 // honorific is forwarded so buildSpeakerLabels can render "MR. BENTLEY" instead of "BENTLEY".
 // It is never inferred -- absent stays absent and raises HONORIFIC_MISSING -- but it has to
 // reach the label builder at all, or the field the reporter fills has no observable effect.
+/**
+ * The transcript role a counsel's appearance role implies, or null when it implies none.
+ *
+ * FOUND ON THE FIRST REAL AI CORRECTION PASS. This used to be
+ * `appearanceRole.toUpperCase().replaceAll(" ","_")`, which is not a translation into
+ * TRANSCRIPT_ROLES -- it is a string transformation that happens to land on a valid role for
+ * "defending attorney" and on nothing for anything else. Heath Thomas's examining attorney is
+ * recorded as "examining attorney", so 49 label operations wrote EXAMINING_ATTORNEY into the
+ * reporter overlay: a value the vocabulary does not contain, that reconcileSpeakerMap refuses, and
+ * that produced colloquy labels where Q. belonged.
+ *
+ * An appearance role that does not clearly imply a transcript role returns NULL rather than a
+ * plausible guess. Co-counsel and of-counsel are counsel of record; whether they examine or defend
+ * on this record is not stated anywhere, and a wrong default writes an unearned Q. or A. into a
+ * certified transcript. Null is read downstream as "label them by name", which is what a reporter
+ * does for anyone who is not the one examining.
+ */
+export function transcriptRoleForAppearance(appearanceRole){
+  const text=String(appearanceRole??"").trim().toUpperCase().replaceAll(" ","_");
+  if(!text)return null;
+  if(TRANSCRIPT_ROLES.includes(text))return text;
+  if(/EXAMIN|QUESTION/.test(text))return "QUESTIONING_ATTORNEY";
+  if(/DEFEND/.test(text))return "DEFENDING_ATTORNEY";
+  return null;
+}
 export function getSpeakerCandidates(root,{depositionId,storageRoot}){
   const directory=depositionDirectory(root,depositionId,{storageRoot}),canonical=readJson(path.join(directory,"intake","canonical-deposition-record.json"));
   const raw=field=>field&&typeof field==="object"&&"value" in field?field.value:field,value=field=>String(raw(field)??"").trim();
-  const counsel=(canonical?.counsel||[]).filter(item=>raw(item.actualAppearance)!==false).map(item=>({id:item.id,label:value(item.fullName)||item.id,defaultRole:value(item.appearanceRole).toUpperCase().replaceAll(" ","_"),honorific:value(item.honorific)||null}));
+  const counsel=(canonical?.counsel||[]).filter(item=>raw(item.actualAppearance)!==false).map(item=>({id:item.id,label:value(item.fullName)||item.id,// `?? ""` because a candidate has always said "no role" with an empty string, and the select
+// that renders this list, the tests, and every consumer treat "" as unselected. The mapper
+// returns null because that is the honest answer for a function; the shape stored here is not
+// this repair's to change.
+defaultRole:transcriptRoleForAppearance(value(item.appearanceRole))??"",honorific:value(item.honorific)||null}));
   const candidates=[
     {id:"witness",label:value(canonical?.deposition?.witness)||"Witness",defaultRole:"WITNESS"},
     {id:"reporter",label:value(canonical?.reporter?.fullName)||"Court Reporter",defaultRole:"COURT_REPORTER"},
