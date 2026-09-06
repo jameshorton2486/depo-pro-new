@@ -21,12 +21,13 @@ The deposition root can be changed explicitly with `DEPO_PRO_DEPOSITIONS_ROOT`. 
 ## Prerequisites
 
 - Windows 11
-- Bundled Node.js 22.13.0 installed through the project dependencies
+- Node.js 22.13.0 or newer (the minimum version is checked in CI; a Node 22 runtime is also installed through project dependencies)
 - FFmpeg and FFprobe on `PATH`
 - Python environment at `.venv-pedalboard`
 - `pedalboard==0.9.24`
 - iZotope RX 12 Audio Editor and the allow-listed RX 12 VST3 modules
 - Claude and Deepgram credentials configured through Administrator Settings
+- Word renderer dependencies installed with `python -m pip install -r requirements-docx.txt`; set `DEPO_PRO_PYTHON` if using a separate interpreter
 
 ## Run locally
 
@@ -109,8 +110,14 @@ Nothing in the working tree is carried between runs. Only the npm download cache
 
 ## Current boundaries
 
-- The reporter directory still originates in browser-managed configuration and should be migrated into the filesystem-authoritative profile store.
+- Reporter profiles are persisted in the filesystem store, support corrections, and import legacy browser profiles without replacing existing records.
 - Deepgram processing is synchronous behind a durable job abstraction because the local Windows service has no public callback endpoint.
-- Reporter editing, AI correction proposals, final transcript classification/pagination, and certification lifecycle remain downstream phases.
+- The workspace supports audited reporter edits, speaker reconciliation, AI proposals requiring acceptance, complete transcript pagination, Word/PDF generation, and finalization readiness checks. Availability of a final artifact depends on the recorded facts and applicable approved templates; implementation alone does not establish certification readiness.
 - Federal certification text and final UFM layout measurements require approved authoritative sources before those variants can be released.
 - Cloudflare/Vinext scaffolding is transitional. Native RX, DPAPI, filesystem evidence, and localhost services are intentionally not cloud-deployed.
+
+## Failure recovery
+
+External analysis and transcription deadlines include the response body. A timeout can mean that the provider processed the request but the response was lost; the application does not automatically resubmit an ambiguous timeout. Credential checks have a 15-second deadline per provider.
+
+Backups verify file hashes before and after copying and hash large recordings in bounded chunks. Symbolic links and junctions within backup contents are refused because they cannot be represented as verified regular files. Backups cannot target the source deposition through a junction, and restore refuses destinations redirected outside the configured storage root. Stop recording and editing before taking a backup.
