@@ -25,8 +25,8 @@ const EVIDENCE = [{ words: WORDS.map((text, i) => ({ id: `job:word:${i + 1}`, pu
 const SEGMENTS = () => [{ id: "seg-1", speakerIdentity: "counsel-1", transcriptRole: "QUESTIONING_ATTORNEY",
   text: WORDS.join(" "), asrWordIds: WORDS.map((_, i) => `job:word:${i + 1}`) }];
 
-function harness({ passes = [], entity, ranges, appendThrows = false } = {}) {
-  const calls = { appended: [], written: [], anthropic: 0 };
+function harness({ passes = [], entity, ranges, boundaries, appendThrows = false } = {}) {
+  const calls = { appended: [], written: [], anthropic: 0, boundary: 0 };
   let current = emptyOverlay("DEP-1");
   return {
     calls,
@@ -50,6 +50,9 @@ function harness({ passes = [], entity, ranges, appendThrows = false } = {}) {
       writePassRecord: (_root, input) => { calls.written.push(input.record); return input.record; },
       entityPass: entity ?? (async () => { calls.anthropic++; return { accepted: [{ wordId: "job:word:6", originalValue: "Bardado", proposedValue: "Bardot", confidenceScore: 0.94, evidenceSource: "ROSTER" }] }; }),
       speakerRangePass: ranges ?? (async () => { calls.anthropic++; return { accepted: [] }; }),
+      // This fixture holds no opening procedure, so the structural pass has nothing to establish.
+      // It is injected for the same reason the other two are: no network, and no key.
+      boundaryPass: boundaries ?? (async () => { calls.boundary++; return { proposals: [], failures: [], chunksSubmitted: 1 }; }),
     },
   };
 }

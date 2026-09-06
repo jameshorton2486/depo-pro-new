@@ -26,6 +26,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { depositionDirectory } from "./deposition-store.mjs";
 import { runEntityPass } from "./entity-pass.mjs";
+import { runExaminationBoundaryPass } from "./examination-boundary-pass.mjs";
+import { planExaminationBoundaries } from "./examination-boundary-rules.mjs";
 import { planRangeAcceptance } from "./range-acceptance-planner.mjs";
 import { currentUtterances } from "./correction-chunker.mjs";
 import { applyOverlay as applyOverlayToSegments, emptyOverlay as newOverlay } from "./reporter-overlay.mjs";
@@ -243,7 +245,7 @@ export function writeAiCorrectionPass(root, { depositionId, storageRoot, record 
  */
 export async function applyAiCorrectionPass(root, {
   depositionId, storageRoot, apiKey, model, passStartedAt = new Date().toISOString(), force = false,
-  entityPass = runEntityPass, speakerRangePass = runSpeakerRangePass,
+  entityPass = runEntityPass, speakerRangePass = runSpeakerRangePass, boundaryPass = runExaminationBoundaryPass,
   getWorkingTranscript, readReporterOverlay, getSpeakerCandidates, appendReporterOperations, readAsrEvidence = () => [],
   applyOverlay = applyOverlayToSegments, emptyOverlay = newOverlay, computeReviewStateHash = reviewStateHash,
   listPasses = listAiCorrectionPasses, writePassRecord = writeAiCorrectionPass,
@@ -276,7 +278,13 @@ export async function applyAiCorrectionPass(root, {
   }
 
   const options = { depositionId, storageRoot, apiKey, model, passStartedAt, limitChunks: null, additionalInstructions: "" };
-  const [names, ranges] = await Promise.allSettled([entityPass(root, options), speakerRangePass(root, options)]);
+  // Three analyses of one committed state, run together. The structural pass answers a different
+  // question from the other two -- where the examination begins, rather than what a word says --
+  // but it analyses the same transcript, and its result lands in the same transaction so that one
+  // undo takes back everything this pass did.
+  const [names, ranges, boundaries] = await Promise.allSettled([
+    entityPass(root, options), speakerRangePass(root, options), boundaryPass(root, options),
+  ]);
 
   // A pass that returns is not the same as a pass that ran. Each pass catches its own chunk errors
   // and still resolves, so a wholly failed analysis -- an unusable model, a revoked key, Anthropic
@@ -289,16 +297,23 @@ export async function applyAiCorrectionPass(root, {
     if (outcome.status === "rejected") return false;
     const value = outcome.value ?? {};
     const failed = (value.failures ?? []).length;
-    return !(failed > 0 && failed >= (value.chunksSubmitted ?? failed) && !(value.accepted ?? []).length);
+    // `accepted` for the passes that validate their own proposals, `proposals` for the structural
+    // pass, which does not -- the boundary validator runs here, against state the pass never saw.
+    const produced = (value.accepted ?? value.proposals ?? []).length;
+    return !(failed > 0 && failed >= (value.chunksSubmitted ?? failed) && !produced);
   };
   const failures = [];
-  for (const [label, outcome] of [["names", names], ["speaker-ranges", ranges]]) {
+  for (const [label, outcome] of [["names", names], ["speaker-ranges", ranges], ["examination-boundary", boundaries]]) {
     if (outcome.status === "rejected") {
       failures.push(`${label}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
     } else if (!ran(outcome)) {
       for (const failure of outcome.value?.failures ?? []) failures.push(`${label}: ${failure.message ?? failure.code ?? "chunk failed"}`);
     }
   }
+  // Deliberately not widened to include the structural pass. All three share one key and one
+  // network, so a state where those two failed and it succeeded is not one that occurs -- and
+  // "the AI correction pass could not run" is the honest thing to say when the corrections the
+  // reporter pressed the button for could not be attempted.
   if (!ran(names) && !ran(ranges)) {
     return { status: AI_CORRECTION_STATUS.FAILED, applied: [], omitted: [], operationCount: 0, failures, retryable: true,
       message: "The AI correction pass could not run. The transcript is unchanged and nothing was applied; you can run it again." };
@@ -333,15 +348,38 @@ export async function applyAiCorrectionPass(root, {
     textFor: id => currentText.get(id) ?? null,
   });
 
-  if (!batch.operations.length) {
-    return { status: AI_CORRECTION_STATUS.NOTHING_TO_APPLY, applied: [], omitted: batch.omitted, operationCount: 0, failures, retryable: false,
+  // WHERE THE EXAMINATION BEGINS, validated against the deposition's own record.
+  //
+  // The anchor sets are derived here and never taken from the proposal: `known` is every word the
+  // transcript holds, `printed` those that survive the overlay, and the difference between them is
+  // how a struck anchor is refused as an edit that overtook the analysis rather than as a word the
+  // model invented. `before` is passed as the current state, so a proposal that analysed a
+  // different transcript fails closed even though the whole-pass guard above already re-checked it.
+  const known = new Set(), printed = new Set();
+  for (const segment of projection.segments ?? []) {
+    for (const id of segment.asrWordIds ?? []) { known.add(id); if (!projection.deleted.has(id)) printed.add(id); }
+  }
+  const structural = planExaminationBoundaries({
+    proposals: ran(boundaries) ? (boundaries.value?.proposals ?? []) : [],
+    printedWordIds: printed, knownWordIds: known, participants: candidates,
+    existingBoundaries: projection.examinations ?? [], reviewStateHash: before,
+  });
+  // Boundaries last in the transaction. They anchor to words rather than changing any, so nothing
+  // above depends on them -- and keeping them at the end means an operation list read in order
+  // still reads as the corrections first and the structure they sit in second.
+  const operations = [...batch.operations, ...structural.operations];
+  const applied = [...batch.applied, ...structural.applied];
+  const omitted = [...batch.omitted, ...structural.omitted];
+
+  if (!operations.length) {
+    return { status: AI_CORRECTION_STATUS.NOTHING_TO_APPLY, applied: [], omitted, operationCount: 0, failures, retryable: false,
       message: "The AI found nothing it could correct with sufficient evidence. The transcript is unchanged." };
   }
 
   // ONE transaction, guarded by the state it was planned against. Undo pops a whole transaction, so
   // this is what makes the pass reversible as a unit; the guard is what makes it refuse rather than
   // rebase if the reporter edited something while it was thinking.
-  const written = appendReporterOperations(root, { ...store, operations: batch.operations, expectedReviewStateHash: before });
+  const written = appendReporterOperations(root, { ...store, operations, expectedReviewStateHash: before });
 
   // What LANDED, not what was planned. The overlay validates and normalises every operation on the
   // way in, so the planned objects and the stored ones are not identical -- and the undo control,
@@ -351,8 +389,8 @@ export async function applyAiCorrectionPass(root, {
   const landedOps = (() => {
     const sizes = written?.transactionSizes ?? [];
     const size = sizes.length ? sizes[sizes.length - 1] : 0;
-    const operations = written?.operations ?? [];
-    return size ? operations.slice(operations.length - size) : batch.operations;
+    const stored = written?.operations ?? [];
+    return size ? stored.slice(stored.length - size) : operations;
   })();
 
   const record = correctionPassRecord({
@@ -361,11 +399,11 @@ export async function applyAiCorrectionPass(root, {
     resultingReviewStateHash: computeReviewStateHash({
       transcript: getWorkingTranscript(root, store), overlay: readReporterOverlay(root, store),
     }),
-    applied: batch.applied, omitted: batch.omitted, operations: landedOps,
+    applied, omitted, operations: landedOps,
   });
   writePassRecord(root, { ...store, record });
 
-  return { status: AI_CORRECTION_STATUS.APPLIED, applied: batch.applied, omitted: batch.omitted,
-    operationCount: batch.operations.length, passId: record.passId, failures, retryable: false,
-    message: `AI correction complete — ${batch.applied.length} correction${batch.applied.length === 1 ? "" : "s"} applied in one pass. Review the corrected transcript.` };
+  return { status: AI_CORRECTION_STATUS.APPLIED, applied, omitted,
+    operationCount: operations.length, passId: record.passId, failures, retryable: false,
+    message: `AI correction complete — ${applied.length} correction${applied.length === 1 ? "" : "s"} applied in one pass. Review the corrected transcript.` };
 }

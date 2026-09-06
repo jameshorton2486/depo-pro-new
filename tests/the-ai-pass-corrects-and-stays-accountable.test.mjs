@@ -216,7 +216,7 @@ test("every applied correction names its evidence and confidence", () => {
 // A harness that stands in for the store. It records every call, so a test can assert what the pass
 // did NOT do -- which is most of what matters here.
 function harness({ transcript = { segments: segments() }, overlay = emptyOverlay("DEP-1"), passes = [] } = {}) {
-  const calls = { appended: [], written: [], entity: 0, ranges: 0, order: [] };
+  const calls = { appended: [], written: [], entity: 0, ranges: 0, boundary: 0, order: [] };
   let current = overlay;
   return {
     calls,
@@ -237,6 +237,9 @@ function harness({ transcript = { segments: segments() }, overlay = emptyOverlay
       writePassRecord: (_root, input) => { calls.order.push("write"); calls.written.push(input.record); return input.record; },
       entityPass: async () => { calls.entity++; return { accepted: [{ wordId: "job:word:2", originalValue: "Bardado", proposedValue: "Bardot", confidenceScore: 0.94, evidenceSource: "ROSTER" }] }; },
       speakerRangePass: async () => { calls.ranges++; return { accepted: [] }; },
+      // The structural pass, answering that this opening establishes no boundary. Injected rather
+      // than defaulted so these tests exercise the orchestration and never the network.
+      boundaryPass: async () => { calls.boundary++; return { proposals: [], failures: [], chunksSubmitted: 1 }; },
     },
   };
 }
