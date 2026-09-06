@@ -1,0 +1,746 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { apiJson, postJson } from "./api-client";
+
+type Finding = { code: string; message: string; exhibitId?: string };
+type Reference = {
+  sourceAnchor: string;
+  paragraphId: string | null;
+  sourceWordId: string | null;
+  quotedText: string | null;
+};
+type Exhibit = {
+  id: string;
+  exhibitId: string;
+  label: string;
+  description: string;
+  markedAt: string;
+  markedBy: string;
+  status: string;
+  transcriptReferences: Reference[];
+  material: {
+    kind: string;
+    file?: {
+      relativePath: string;
+      sha256: string;
+      bytes: number;
+      mimeType: string;
+      pageCount: number | null;
+    } | null;
+  };
+  custody: { holder: string | null };
+  sealedHandling: { status: string; instructions: string | null };
+  packageDisposition: string;
+  packageDispositionReason: string | null;
+  recordedBy: string;
+};
+type Readiness = {
+  status:
+    | "UNKNOWN"
+    | "NO_EXHIBITS"
+    | "EXHIBITS_PRESENT_COMPLETE"
+    | "EXHIBITS_PRESENT_INCOMPLETE";
+  ready: boolean;
+  audit: null | { id: string; result: string };
+  exhibits: Exhibit[];
+  findings: Finding[];
+};
+type Transcript = {
+  paragraphs: Array<{
+    id: string;
+    text: string;
+    label: string | null;
+    words: Array<{ id: string; text: string }>;
+  }>;
+};
+type Draft = {
+  exhibitId: string;
+  expectedEventId: string;
+  label: string;
+  description: string;
+  markedAt: string;
+  markedBy: string;
+  paragraphId: string;
+  materialKind: "DIGITAL_FILE" | "PHYSICAL" | "RETAINED_BY_COUNSEL" | "NONE";
+  existingRelativePath: string;
+  custodyHolder: string;
+  sealedStatus: "NOT_APPLICABLE" | "RESOLVED";
+  sealedInstructions: string;
+  packageDisposition: "INCLUDED" | "EXCLUDED" | "NOT_APPLICABLE";
+  packageReason: string;
+  correctionReason: string;
+};
+const fresh = (): Draft => ({
+  exhibitId: "",
+  expectedEventId: "",
+  label: "",
+  description: "",
+  markedAt: new Date().toISOString().slice(0, 16),
+  markedBy: "",
+  paragraphId: "",
+  materialKind: "PHYSICAL",
+  existingRelativePath: "",
+  custodyHolder: "",
+  sealedStatus: "NOT_APPLICABLE",
+  sealedInstructions: "",
+  packageDisposition: "INCLUDED",
+  packageReason: "",
+  correctionReason: "",
+});
+const fileBase64 = async (file: File) => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
+};
+const statusText = (status: Readiness["status"]) =>
+  status === "NO_EXHIBITS"
+    ? "No exhibits — review complete"
+    : status === "EXHIBITS_PRESENT_COMPLETE"
+      ? "Exhibits complete"
+      : status === "EXHIBITS_PRESENT_INCOMPLETE"
+        ? "Exhibits need attention"
+        : "Exhibit review required";
+
+export default function ExhibitReconciliationScreen({
+  deposition,
+  onBack,
+  onPreview,
+}: {
+  deposition: { id: string; caseStyle: string; witness: string };
+  onBack: () => void;
+  onPreview: () => void;
+}) {
+  const [readiness, setReadiness] = useState<Readiness | null>(null),
+    [transcript, setTranscript] = useState<Transcript | null>(null),
+    [loading, setLoading] = useState(true),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [auditChoice, setAuditChoice] = useState<
+      "NO_EXHIBITS" | "EXHIBITS_PRESENT"
+    >("NO_EXHIBITS"),
+    [auditReason, setAuditReason] = useState(""),
+    [draft, setDraft] = useState<Draft>(fresh),
+    [digitalFile, setDigitalFile] = useState<File | null>(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [state, words] = await Promise.all([
+        apiJson<Readiness>(
+          `/api/exhibits/readiness?depositionId=${encodeURIComponent(deposition.id)}`,
+          { cache: "no-store" },
+        ),
+        apiJson<Transcript>(
+          `/api/transcript/rendered?depositionId=${encodeURIComponent(deposition.id)}`,
+          { cache: "no-store" },
+        ),
+      ]);
+      setReadiness(state);
+      if (
+        state.audit?.result === "NO_EXHIBITS" ||
+        state.audit?.result === "EXHIBITS_PRESENT"
+      )
+        setAuditChoice(state.audit.result);
+      setTranscript(words);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Exhibit information could not be loaded.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [deposition.id]);
+  useEffect(() => {
+    let current = true;
+    Promise.all([
+      apiJson<Readiness>(
+        `/api/exhibits/readiness?depositionId=${encodeURIComponent(deposition.id)}`,
+        { cache: "no-store" },
+      ),
+      apiJson<Transcript>(
+        `/api/transcript/rendered?depositionId=${encodeURIComponent(deposition.id)}`,
+        { cache: "no-store" },
+      ),
+    ])
+      .then(([state, words]) => {
+        if (!current) return;
+        setReadiness(state);
+        if (
+          state.audit?.result === "NO_EXHIBITS" ||
+          state.audit?.result === "EXHIBITS_PRESENT"
+        )
+          setAuditChoice(state.audit.result);
+        setTranscript(words);
+      })
+      .catch((reason) => {
+        if (current)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Exhibit information could not be loaded.",
+          );
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [deposition.id]);
+  const selected = useMemo(
+    () =>
+      transcript?.paragraphs.find((item) => item.id === draft.paragraphId) ??
+      null,
+    [draft.paragraphId, transcript],
+  );
+  const run = async (
+    work: () => Promise<{ readiness: Readiness }>,
+    success: string,
+  ) => {
+    if (busy) return false;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    let saved = false;
+    try {
+      setReadiness((await work()).readiness);
+      setNotice(success);
+      saved = true;
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "The server refused the exhibit operation.",
+      );
+    } finally {
+      setBusy(false);
+    }
+    return saved;
+  };
+  const saveAudit = () =>
+    run(
+      () =>
+        postJson("/api/exhibits/audit", {
+          depositionId: deposition.id,
+          audit: {
+            result: auditChoice,
+            sourceAnchor: "reporter-review:exhibits",
+            expectedEventId: readiness?.audit?.id ?? null,
+            correctionReason: readiness?.audit ? auditReason.trim() : undefined,
+          },
+        }),
+      auditChoice === "NO_EXHIBITS"
+        ? "The no-exhibits review was recorded."
+        : "The exhibits-present review was recorded.",
+    ).then((saved) => {
+      if (saved) setAuditReason("");
+    });
+  const edit = (item: Exhibit) => {
+    setDigitalFile(null);
+    setDraft({
+      exhibitId: item.exhibitId,
+      expectedEventId: item.id,
+      label: item.label,
+      description: item.description,
+      markedAt: item.markedAt.slice(0, 16),
+      markedBy: item.markedBy,
+      paragraphId: item.transcriptReferences[0]?.paragraphId ?? "",
+      materialKind: item.material.kind as Draft["materialKind"],
+      existingRelativePath: item.material.file?.relativePath ?? "",
+      custodyHolder: item.custody.holder ?? "",
+      sealedStatus:
+        item.sealedHandling.status === "RESOLVED"
+          ? "RESOLVED"
+          : "NOT_APPLICABLE",
+      sealedInstructions: item.sealedHandling.instructions ?? "",
+      packageDisposition: (item.packageDisposition === "UNRESOLVED"
+        ? "INCLUDED"
+        : item.packageDisposition) as Draft["packageDisposition"],
+      packageReason: item.packageDispositionReason ?? "",
+      correctionReason: "",
+    });
+  };
+  const saveExhibit = async (event: FormEvent) => {
+    event.preventDefault();
+    const paragraph = selected,
+      word = paragraph?.words[0];
+    if (!paragraph || !word) {
+      setError("Choose the transcript passage where the exhibit was marked.");
+      return;
+    }
+    if (
+      draft.materialKind === "DIGITAL_FILE" &&
+      !digitalFile &&
+      !draft.existingRelativePath
+    ) {
+      setError("Choose the digital exhibit file.");
+      return;
+    }
+    const anchor = `transcript:${paragraph.id}:${word.id}`,
+      material =
+        draft.materialKind === "DIGITAL_FILE"
+          ? {
+              kind: draft.materialKind,
+              relativePath: draft.existingRelativePath || undefined,
+              fileName: digitalFile?.name,
+              fileBase64: digitalFile
+                ? await fileBase64(digitalFile)
+                : undefined,
+            }
+          : { kind: draft.materialKind };
+    void run(
+      () =>
+        postJson("/api/exhibits/record", {
+          depositionId: deposition.id,
+          exhibit: {
+            exhibitId: draft.exhibitId || undefined,
+            expectedEventId: draft.expectedEventId || undefined,
+            label: draft.label,
+            description: draft.description,
+            markedAt: new Date(draft.markedAt).toISOString(),
+            markedBy: draft.markedBy,
+            status: "ACTIVE",
+            transcriptReferences: [
+              {
+                sourceAnchor: anchor,
+                paragraphId: paragraph.id,
+                sourceWordId: word.id,
+                quotedText: paragraph.text,
+              },
+            ],
+            material,
+            custody: {
+              status: "RESOLVED",
+              holder: draft.custodyHolder,
+              sourceAnchor: anchor,
+            },
+            sealedHandling: {
+              status: draft.sealedStatus,
+              instructions:
+                draft.sealedStatus === "RESOLVED"
+                  ? draft.sealedInstructions
+                  : undefined,
+              sourceAnchor:
+                draft.sealedStatus === "RESOLVED" ? anchor : undefined,
+            },
+            packageDisposition: draft.packageDisposition,
+            packageDispositionReason:
+              draft.packageDisposition === "EXCLUDED"
+                ? draft.packageReason
+                : undefined,
+            sourceAnchor: anchor,
+            correctionReason: draft.exhibitId
+              ? draft.correctionReason
+              : undefined,
+          },
+        }),
+      draft.exhibitId
+        ? "The corrected exhibit was saved and its history preserved."
+        : "The exhibit was recorded.",
+    ).then((saved) => {
+      if (saved) {
+        setDraft(fresh());
+        setDigitalFile(null);
+      }
+    });
+  };
+  return (
+    <main className="exhibits-screen">
+      <header className="exhibits-header">
+        <div>
+          <span className="eyebrow">FINAL TRANSCRIPT PREPARATION</span>
+          <h1>Exhibit Reconciliation</h1>
+          <p>
+            {deposition.caseStyle} · {deposition.witness}
+          </p>
+        </div>
+        <div>
+          <button type="button" className="secondary-button" onClick={onBack}>
+            Back to Workspace
+          </button>
+          <button type="button" className="primary-button" onClick={onPreview}>
+            Preview &amp; Finalize
+          </button>
+        </div>
+      </header>
+      <section className="exhibits-card" aria-busy={loading || busy}>
+        <div
+          className={`exhibits-summary ${readiness?.ready ? "ready" : "blocked"}`}
+        >
+          <div>
+            <span className="eyebrow">SERVER STATUS</span>
+            <h2>
+              {readiness
+                ? statusText(readiness.status)
+                : "Loading exhibit authority…"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading || busy}
+          >
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+        <div aria-live="polite">
+          {error ? (
+            <p className="exhibits-message error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {notice ? (
+            <p className="exhibits-message success" role="status">
+              {notice}
+            </p>
+          ) : null}
+        </div>
+        {readiness?.findings.length ? (
+          <section className="exhibits-findings">
+            <h3>Needs attention</h3>
+            <ul>
+              {readiness.findings.map((item, index) => (
+                <li key={`${item.code}-${item.exhibitId ?? index}`}>
+                  <strong>{item.code.replaceAll("_", " ")}</strong>
+                  <span>{item.message}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        <section className="exhibits-audit">
+          <div>
+            <h3>Were exhibits marked?</h3>
+            <p>
+              An empty list does not establish that no exhibits were marked.
+              Record your review explicitly.
+            </p>
+          </div>
+          <div
+            className="exhibits-choice"
+            role="group"
+            aria-label="Exhibit review result"
+          >
+            <button
+              type="button"
+              aria-pressed={auditChoice === "NO_EXHIBITS"}
+              onClick={() => setAuditChoice("NO_EXHIBITS")}
+            >
+              No exhibits
+            </button>
+            <button
+              type="button"
+              aria-pressed={auditChoice === "EXHIBITS_PRESENT"}
+              onClick={() => setAuditChoice("EXHIBITS_PRESENT")}
+            >
+              Exhibits were marked
+            </button>
+          </div>
+          {readiness?.audit ? (
+            <label>
+              Reason for correcting or renewing this review
+              <input
+                value={auditReason}
+                onChange={(event) => setAuditReason(event.target.value)}
+                placeholder="Explain what changed or what was rechecked"
+              />
+            </label>
+          ) : null}
+          <button
+            type="button"
+            className="primary-button"
+            disabled={busy || Boolean(readiness?.audit && !auditReason.trim())}
+            onClick={() => void saveAudit()}
+          >
+            {busy ? "Recording…" : "Record Exhibit Review"}
+          </button>
+        </section>
+        {readiness?.audit?.result === "EXHIBITS_PRESENT" ||
+        readiness?.exhibits.length ? (
+          <>
+            <section className="exhibits-list">
+              <header>
+                <div>
+                  <h3>Current exhibits</h3>
+                  <p>Corrections preserve earlier authoritative events.</p>
+                </div>
+                <button type="button" onClick={() => setDraft(fresh())}>
+                  Add exhibit
+                </button>
+              </header>
+              {readiness.exhibits.length ? (
+                <div>
+                  {readiness.exhibits.map((item) => (
+                    <article key={item.exhibitId}>
+                      <div>
+                        <strong>{item.label}</strong>
+                        <span>{item.description}</span>
+                        <small>
+                          {item.material.kind
+                            .replaceAll("_", " ")
+                            .toLowerCase()}{" "}
+                          · {item.packageDisposition.toLowerCase()} · recorded
+                          by {item.recordedBy}
+                        </small>
+                      </div>
+                      <button type="button" onClick={() => edit(item)}>
+                        Correct
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p>No canonical exhibits have been recorded yet.</p>
+              )}
+            </section>
+            <form className="exhibit-form" onSubmit={saveExhibit}>
+              <h3>
+                {draft.exhibitId ? `Correct ${draft.label}` : "Add an exhibit"}
+              </h3>
+              <div className="exhibit-form-grid">
+                <label>
+                  Exhibit label
+                  <input
+                    required
+                    value={draft.label}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        label: event.target.value,
+                      }))
+                    }
+                    placeholder="Exhibit 1"
+                  />
+                </label>
+                <label>
+                  Description
+                  <input
+                    required
+                    value={draft.description}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        description: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Marked at
+                  <input
+                    required
+                    type="datetime-local"
+                    value={draft.markedAt}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        markedAt: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Marked or identified by
+                  <input
+                    required
+                    value={draft.markedBy}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        markedBy: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="wide">
+                  Transcript passage
+                  <select
+                    required
+                    value={draft.paragraphId}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        paragraphId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Choose a passage…</option>
+                    {transcript?.paragraphs
+                      .filter((item) => item.words.length)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label ? `${item.label} ` : ""}
+                          {item.text.slice(0, 120)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Material
+                  <select
+                    value={draft.materialKind}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        materialKind: event.target
+                          .value as Draft["materialKind"],
+                      }))
+                    }
+                  >
+                    <option value="DIGITAL_FILE">
+                      Digital file held by DepoPro
+                    </option>
+                    <option value="PHYSICAL">Physical exhibit</option>
+                    <option value="RETAINED_BY_COUNSEL">
+                      Retained by counsel
+                    </option>
+                    <option value="NONE">No file held by DepoPro</option>
+                  </select>
+                </label>
+                {draft.materialKind === "DIGITAL_FILE" ? (
+                  <label>
+                    Exhibit file
+                    <input
+                      type="file"
+                      accept="application/pdf,image/png,image/jpeg"
+                      required={!draft.existingRelativePath}
+                      onChange={(event) =>
+                        setDigitalFile(event.target.files?.[0] ?? null)
+                      }
+                    />
+                    <small>
+                      {digitalFile?.name ??
+                        (draft.existingRelativePath
+                          ? "Existing verified file retained"
+                          : "PDF, PNG, or JPEG; 25 MB maximum")}
+                    </small>
+                  </label>
+                ) : null}
+                <label>
+                  Current custodian
+                  <input
+                    required
+                    value={draft.custodyHolder}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        custodyHolder: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Confidential or sealed handling
+                  <select
+                    value={draft.sealedStatus}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        sealedStatus: event.target
+                          .value as Draft["sealedStatus"],
+                      }))
+                    }
+                  >
+                    <option value="NOT_APPLICABLE">Not applicable</option>
+                    <option value="RESOLVED">Resolved</option>
+                  </select>
+                </label>
+                {draft.sealedStatus === "RESOLVED" ? (
+                  <label>
+                    Handling instructions
+                    <input
+                      required
+                      value={draft.sealedInstructions}
+                      onChange={(event) =>
+                        setDraft((value) => ({
+                          ...value,
+                          sealedInstructions: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+                <label>
+                  Final transcript package
+                  <select
+                    value={draft.packageDisposition}
+                    onChange={(event) =>
+                      setDraft((value) => ({
+                        ...value,
+                        packageDisposition: event.target
+                          .value as Draft["packageDisposition"],
+                      }))
+                    }
+                  >
+                    <option value="INCLUDED">Included</option>
+                    <option value="EXCLUDED">Excluded</option>
+                    <option value="NOT_APPLICABLE">Not applicable</option>
+                  </select>
+                </label>
+                {draft.packageDisposition === "EXCLUDED" ? (
+                  <label>
+                    Reason excluded
+                    <input
+                      required
+                      value={draft.packageReason}
+                      onChange={(event) =>
+                        setDraft((value) => ({
+                          ...value,
+                          packageReason: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+                {draft.exhibitId ? (
+                  <label className="wide">
+                    Reason for correction
+                    <input
+                      required
+                      value={draft.correctionReason}
+                      onChange={(event) =>
+                        setDraft((value) => ({
+                          ...value,
+                          correctionReason: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <p className="exhibit-digital-note">
+                Digital files are copied into authoritative deposition storage
+                and identified by SHA-256. A replacement selected during a
+                correction preserves the earlier event and file identity.
+              </p>
+              <div className="exhibit-form-actions">
+                {draft.exhibitId ? (
+                  <button type="button" onClick={() => setDraft(fresh())}>
+                    Cancel correction
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={busy}
+                >
+                  {busy
+                    ? "Saving…"
+                    : draft.exhibitId
+                      ? "Save Corrected Exhibit"
+                      : "Record Exhibit"}
+                </button>
+              </div>
+            </form>
+          </>
+        ) : null}
+      </section>
+    </main>
+  );
+}

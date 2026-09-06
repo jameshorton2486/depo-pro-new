@@ -37,6 +37,10 @@ export function templateContentDigest(variant, manifest) {
   return sha256({ variant, templates: Object.fromEntries(templates) });
 }
 
+export function templateAuthorityDigest(manifest) {
+  return manifest.authority ? sha256(manifest.authority) : null;
+}
+
 // A missing approvals file is not a pass. It is the same answer as an approvals file with no entry
 // for this variant: nothing has been approved, so nothing generates.
 export async function readTemplateApprovals(root = DEFAULT_TEMPLATE_ROOT) {
@@ -51,8 +55,11 @@ export async function readTemplateApprovals(root = DEFAULT_TEMPLATE_ROOT) {
 export function templateApproval(variant, manifest, approvals) {
   const recorded = approvals?.[variant] ?? null;
   const contentDigest = templateContentDigest(variant, manifest);
-  const state = !recorded ? "unrecorded" : recorded.contentDigest === contentDigest ? "current" : "stale";
-  return { state, contentDigest, approvedDigest: recorded?.contentDigest ?? null, approvedBy: recorded?.approvedBy ?? null, approvedAt: recorded?.approvedAt ?? null };
+  const authorityDigest = templateAuthorityDigest(manifest);
+  const contentCurrent = recorded?.contentDigest === contentDigest;
+  const authorityCurrent = !authorityDigest || recorded?.authorityDigest === authorityDigest;
+  const state = !recorded ? "unrecorded" : contentCurrent && authorityCurrent ? "current" : "stale";
+  return { state, contentDigest, authorityDigest, approvedDigest: recorded?.contentDigest ?? null, approvedAuthorityDigest: recorded?.authorityDigest ?? null, approvedBy: recorded?.approvedBy ?? null, approverRole:recorded?.approverRole ?? null, approvalScope:recorded?.approvalScope ?? null, approvedAt: recorded?.approvedAt ?? null };
 }
 
 export async function loadTemplateVariant(variant, { root = DEFAULT_TEMPLATE_ROOT } = {}) {
@@ -109,8 +116,12 @@ export async function insertionTemplateCatalog(options = {}) {
   const variants = [
     "TEXAS_STATE_SIGNATURE_REQUESTED",
     "TEXAS_STATE_SIGNATURE_WAIVED",
-    "FEDERAL_SIGNATURE_REQUESTED",
-    "FEDERAL_SIGNATURE_WAIVED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",
+    "FEDERAL_OATH_REVIEW_REQUESTED",
+    "FEDERAL_OATH_REVIEW_NOT_REQUESTED",
+    "FEDERAL_AFFIRMATION_REVIEW_REQUESTED",
+    "FEDERAL_AFFIRMATION_REVIEW_NOT_REQUESTED",
   ];
   return Promise.all(variants.map(async (variant) => {
     const loaded = await templateAvailability(variant, options);

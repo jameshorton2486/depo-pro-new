@@ -14,7 +14,11 @@
 
 export const OVERLAY_SCHEMA_VERSION = "2.0.0";
 export const LEGACY_OVERLAY_SCHEMA_VERSION = "1.0.0";
-export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review"]);
+export const OPERATIONS = Object.freeze(["split", "join", "label", "replace", "delete", "insert", "flag", "unflag", "review", "examination", "colloquy", "uncolloquy"]);
+// The examinations a Texas deposition actually contains, in the order they can occur. Closed on
+// purpose: an examination type is a thing the record can be asked to prove, not a free-text note,
+// and a heading nobody recognises is worse than a refusal.
+export const EXAMINATION_TYPES = Object.freeze(["DIRECT", "CROSS", "REDIRECT", "RECROSS"]);
 export const emptyOverlay = depositionId => ({ schemaVersion:OVERLAY_SCHEMA_VERSION, recordType:"REPORTER_OVERLAY", depositionId:depositionId ?? null, operations:[], transactionSizes:[], redoTransactions:[] });
 
 const text = value => String(value ?? "");
@@ -38,7 +42,19 @@ export function validateOperation(input) {
   // holding the anchor IS the new tail, so labelling by the same word needs no second lookup.
   if (op === "split") {
     if (!trimmed(input.beforeWordId)) return { ok:false, message:"split requires beforeWordId." };
-    return { ok:true, operation:{ op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId) } };
+    // The speaker of the paragraph the split creates, optional and carried by the same operation.
+    //
+    // Two operations were needed before -- split, then label -- because the tail inherits the head's
+    // speaker. Across the Etminan deposition that is roughly 450 corrections instead of 224, and the
+    // second one is the hazardous one: a split names its tail `${segment.id}#${beforeWordId}`, so a
+    // caller labelling it has to rebuild that id, and getting it wrong lands the speaker on the head.
+    //
+    // Omitted, it behaves exactly as it always did. Nothing here infers a speaker; the reporter says
+    // who it is, and Q./A. is derived downstream from that and from the examination structure.
+    return { ok:true, operation:{
+      op, segmentId:trimmed(input.segmentId) || null, beforeWordId:trimmed(input.beforeWordId),
+      speakerIdentity:trimmed(input.speakerIdentity) || null, transcriptRole:trimmed(input.transcriptRole) || null,
+    } };
   }
   if (op === "join") {
     if (!trimmed(input.leadingWordId) || !trimmed(input.trailingWordId)) return { ok:false, message:"join requires leadingWordId and trailingWordId." };
@@ -80,6 +96,56 @@ export function validateOperation(input) {
     if (!trimmed(input.fromWordId)) return { ok:false, message:"unflag requires fromWordId." };
     return { ok:true, operation:{ op, fromWordId:trimmed(input.fromWordId) } };
   }
+  // An utterance by the active examiner that is not a question.
+  //
+  // §247. `labelParagraphs` emits Q. for anything the active examiner says, so "I will rephrase."
+  // and "Let me back up." print as testimony. Whether an utterance is a question is a THIRD fact,
+  // separate from who spoke and from who is examining, and nothing in this repository recorded it.
+  //
+  // Stated by the reporter, never inferred. Measured on a real deposition, 456 of 1,972 sentences
+  // end in a question mark against 484 examiner turns, and "Counsel, can we take a short break?"
+  // carries one while being colloquy -- a punctuation rule would be wrong in both directions at
+  // once. Deepgram carries no question, type or intent field anywhere.
+  //
+  // The reporter had no way to say it either: measured against every value `label` can set, all five
+  // roles still emit Q., because the identity test precedes the role test. The one lever that worked
+  // was changing who spoke, which puts another person's name on a line they did not say.
+  //
+  // Paired with `uncolloquy` rather than relying on undo. Undo pops the last transaction; a reporter
+  // who finds a bad mark an hour later cannot reach it that way. `flag`/`unflag` set the precedent
+  // and the naming follows it -- `uncolloquy` is not a word, and consistency with the nine
+  // operations already here is worth more than a prettier name nobody else in the file uses.
+  if (op === "colloquy") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"colloquy requires wordId." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId) } };
+  }
+  // Removes the reporter's determination. It does NOT assert that the utterance is a question: the
+  // paragraph returns to whatever the examination model derives for it, which is the only honest
+  // meaning of clearing a mark.
+  if (op === "uncolloquy") {
+    if (!trimmed(input.wordId)) return { ok:false, message:"uncolloquy requires wordId." };
+    return { ok:true, operation:{ op, wordId:trimmed(input.wordId) } };
+  }
+  // Where one examination stops and the next begins.
+  //
+  // `labelParagraphs` holds a single examiner for the whole transcript, so defending counsel's
+  // cross renders as colloquy and the answers to it render as THE WITNESS rather than A. The
+  // missing thing is not a label -- it is that the transcript has no notion of an examination
+  // having a beginning. This operation supplies one; nothing consumes it yet.
+  //
+  // A boundary carries no end. The next boundary terminates the previous one and the last runs to
+  // the end of testimony, so an examination cannot be left with an end that contradicts where the
+  // following one starts.
+  //
+  // `examinerPersonId` is a canonical participant id, never a typed name. A name entered twice is
+  // two examiners as far as the index is concerned, and the index is printed.
+  if (op === "examination") {
+    if (!trimmed(input.atWordId)) return { ok:false, message:"examination requires atWordId." };
+    if (!trimmed(input.examinerPersonId)) return { ok:false, message:"examination requires examinerPersonId; a boundary that names nobody cannot say whose examination begins." };
+    const type = trimmed(input.type).toUpperCase();
+    if (!EXAMINATION_TYPES.includes(type)) return { ok:false, message:`examination type must be one of ${EXAMINATION_TYPES.join(", ")}.` };
+    return { ok:true, operation:{ op, atWordId:trimmed(input.atWordId), examinerPersonId:trimmed(input.examinerPersonId), type } };
+  }
   if (op === "review") {
     if (!trimmed(input.wordId)) return { ok:false, message:"review requires wordId." };
     const disposition=trimmed(input.disposition).toUpperCase();
@@ -109,7 +175,7 @@ export function validateOverlay(value, depositionId) {
 
 const segmentHolding = (segments, wordId) => segments.findIndex(segment => (segment.asrWordIds || []).includes(wordId));
 
-function splitSegments(segments, segmentId, beforeWordId) {
+function splitSegments(segments, segmentId, beforeWordId, speaker = null) {
   const index = segmentId ? segments.findIndex(segment => segment.id === segmentId) : segmentHolding(segments, beforeWordId);
   if (index < 0) return { ok:false, reason:segmentId ? "SEGMENT_NOT_FOUND" : "WORD_NOT_FOUND" };
   const segment = segments[index];
@@ -125,6 +191,14 @@ function splitSegments(segments, segmentId, beforeWordId) {
   // speaker attribution to the wrong half. The anchor word is unique within the segment and
   // deterministic, so replaying the same overlay rebuilds the same ids.
   const tail = { ...segment, id:`${segment.id}#${beforeWordId}`, asrWordIds:segment.asrWordIds.slice(at), start:null, end:null };
+  // The reporter's determination about the paragraph this split creates, applied here so it is one
+  // operation rather than a split followed by a label addressed at the id above. deepgramSpeaker is
+  // deliberately untouched: the evidence keeps its own account of who spoke, beside the reporter's,
+  // so the record can still show that a human disagreed with the machine.
+  if (speaker?.speakerIdentity) {
+    tail.speakerIdentity = speaker.speakerIdentity;
+    tail.transcriptRole = speaker.transcriptRole;
+  }
   return { ok:true, segments:[...segments.slice(0, index), head, tail, ...segments.slice(index + 1)] };
 }
 
@@ -156,12 +230,20 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   // Keyed by the word the flag starts at, so flagging the same passage twice moves the mark
   // rather than stacking two, and an unflag has one thing to address.
   const flags = new Map(), reviews = new Map();
+  // Keyed by the word the examination begins at, which is what makes a second boundary on the
+  // same word detectable.
+  const examinations = new Map();
+  // The utterances the reporter has said are colloquy. A set, not a list: marking one paragraph
+  // twice says the same thing twice and discards nothing, which is why this is idempotent where a
+  // second examination boundary on one word is refused -- that one carries a person and a type that
+  // could differ, and silently replacing it would lose a recorded fact.
+  const colloquy = new Set();
   const anchorExists = id => (knownWordIds ? knownWordIds.has(id) : current.some(segment => segment.asrWordIds.includes(id)));
 
   overlay.operations.forEach((operation, index) => {
     const orphan = reason => orphaned.push({ index, operation, reason });
     if (operation.op === "split") {
-      const result = splitSegments(current, operation.segmentId, operation.beforeWordId);
+      const result = splitSegments(current, operation.segmentId, operation.beforeWordId, operation);
       if (!result.ok) return orphan(result.reason);
       current = result.segments;
       return;
@@ -211,6 +293,33 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
       reviews.set(operation.wordId,{disposition:operation.disposition,at:operation.at,actor:operation.actor});
       return;
     }
+    if (operation.op === "examination") {
+      // Resolved against segment order rather than anchorExists, for the reason flags are: a word
+      // that exists in the evidence but sits in no segment cannot begin anything in the reading.
+      if (segmentHolding(current, operation.atWordId) < 0) return orphan("WORD_NOT_FOUND");
+      // Refused, not overwritten -- and this is where it differs from `flag`, deliberately.
+      // Re-flagging a passage moves a mark that means "listen again"; nothing is lost. A boundary
+      // is the reporter's statement that a named person began examining at this word, so quietly
+      // replacing one discards a recorded fact about the proceeding while looking like success.
+      // The correction path is undo, which is the correction path for every other operation here.
+      if (examinations.has(operation.atWordId)) return orphan("EXAMINATION_ALREADY_BOUNDED");
+      examinations.set(operation.atWordId, { atWordId:operation.atWordId, examinerPersonId:operation.examinerPersonId, type:operation.type });
+      return;
+    }
+    if (operation.op === "colloquy") {
+      // Resolved against segment order for the reason flags and boundaries are: a word present in
+      // the evidence but held by no segment cannot classify anything in the reading.
+      if (segmentHolding(current, operation.wordId) < 0) return orphan("WORD_NOT_FOUND");
+      colloquy.add(operation.wordId);
+      return;
+    }
+    if (operation.op === "uncolloquy") {
+      // Reported rather than ignored, exactly as unflag is. A clear that silently did nothing
+      // leaves the reporter believing a line reads as a question again when it still reads as
+      // colloquy on the page they are about to certify.
+      if (!colloquy.delete(operation.wordId)) return orphan("COLLOQUY_NOT_FOUND");
+      return;
+    }
     const anchor=operation.afterWordId??operation.beforeWordId;
     if (!anchorExists(anchor)) return orphan("WORD_NOT_FOUND");
     const target=operation.beforeWordId?insertedBefore:inserted;
@@ -237,7 +346,20 @@ export function applyOverlay(segments = [], overlay = emptyOverlay(), { knownWor
   }
   // `flagged` is deliberately not folded into replaced/deleted/inserted. A flag changes nothing a
   // reader reads, and a caller that only asks for the text gets the text.
-  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, orphaned };
+  // Transcript order, not the order the reporter marked them in. A reporter who notices the
+  // redirect first and goes back for the cross has still described the same proceeding, and
+  // whatever walks paragraphs in order needs the boundaries in the order it will meet them.
+  const examinationBoundaries = [...examinations.values()]
+    .map(boundary => ({ boundary, at:order.indexOf(boundary.atWordId) }))
+    .filter(item => item.at >= 0)
+    .sort((left, right) => left.at - right.at)
+    .map(item => item.boundary);
+  // Like `flagged`, deliberately not folded into replaced/deleted/inserted: a boundary changes no
+  // word the reader reads.
+  // Like `flagged` and the boundaries, deliberately not folded into replaced/deleted/inserted: a
+  // classification changes no word the reader reads. Nothing consumes this yet -- §247-B is the
+  // labeller, and keeping the operation inert first is the discipline Phase B used.
+  return { segments:current, replaced, deleted, inserted, insertedBefore, flagged, reviews, examinations:examinationBoundaries, colloquy, orphaned };
 }
 
 /** Removes the last operation. Undo is a pop, deliberately: no editing, no history browsing. */

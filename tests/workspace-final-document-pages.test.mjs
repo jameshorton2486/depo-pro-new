@@ -25,7 +25,14 @@ test("Phase 5 uses a controlled one-paragraph editor and the stale-state transac
   assert.match(pages,/onSaveParagraph/);
   assert.doesNotMatch(pages,/contentEditable/);
   assert.match(workspace,/paragraphEditTransaction/);
-  assert.match(workspace,/expectedReviewStateHash:printModel\.source\.reviewStateHash/);
+  // The hash is no longer spelled at each call site. Every overlay mutation is built by
+  // overlayMutationRequest / overlayHistoryRequest, which THROW when the hash is missing rather than
+  // sending a request the server is certain to refuse -- the defect that made six reporter actions
+  // fail silently. Pinning the builder rather than the literal is the stronger check: a new call
+  // site that spells its own payload no longer satisfies this.
+  assert.match(workspace,/overlayMutationRequest\(\{depositionId,operations,reviewStateHash:printModel\.source\.reviewStateHash\}\)/);
+  assert.doesNotMatch(workspace,/expectedReviewStateHash/,"no Workspace call site may assemble the hash by hand");
+  assert.match(workspace,/overlayHistoryRequest\(\{ depositionId, reviewStateHash:printModel\?\.source\.reviewStateHash \}\)/);
   assert.match(workspace,/api\/transcript\/overlay\/redo/);
 });
 
@@ -34,8 +41,46 @@ test("a continuation-page word opens its canonical paragraph editor immediately"
   assert.match(pages,/onActivate\(line\.paragraphId,fragment\.id,event\.shiftKey,lineKey,fragment\.sourceStart\?\?0,event\.altKey\)/);
   assert.match(pages,/if\(!\(await save\(\)\)\)return;/);
   assert.match(pages,/onSelect\(paragraphId,wordId,shiftKey\)/);
-  assert.match(pages,/if\(!shiftKey\)openEdit\(paragraphId,lineKey,offset\)/);
-  assert.match(pages,/Press Enter at the cursor to split there/);
+  assert.match(pages,/if\(!shiftKey&&!paragraphRangeMode\)openEdit\(paragraphId,lineKey,offset\)/);
+  // The on-screen instructions, which used to promise that Enter split a paragraph. It stopped
+  // doing so when a structural change to a court record stopped being something a reflex during
+  // typing could cause, and the help text outlived the behaviour by a whole browser gate.
+  assert.match(pages,/Use Split here in the transcript tools/);
+  assert.match(pages,/Ctrl\+S saves; Escape cancels/);
+});
+
+test("reporters can select a complete paragraph range across transcript pages",()=>{
+  const workspace=fs.readFileSync(new URL("../app/WorkspaceScreen.tsx",import.meta.url),"utf8"),pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(workspace,/Select a range of complete paragraphs/);
+  assert.match(workspace,/Select the first paragraph/);
+  assert.match(workspace,/Select the last paragraph/);
+  assert.match(workspace,/selectedParagraphIds=\{selectedParagraphIds\}/);
+  assert.match(pages,/selectedParagraphIds\.has\(line\.paragraphId\)/);
+  assert.match(pages,/range-selected/);
+  assert.match(pages,/captureHighlightedRange/);
+  assert.match(pages,/browserRange\.intersectsNode\(token\)/);
+  assert.match(pages,/onSelect\(first\.dataset\.paragraphId,first\.dataset\.tokenId,false\)/);
+  assert.match(pages,/onSelect\(last\.dataset\.paragraphId,last\.dataset\.tokenId,true\)/);
+  assert.match(pages,/data-paragraph-id=\{line\.paragraphId\?\?undefined\}/);
+});
+
+test("the designation selects its own paragraph, and a blank line is never selected",()=>{
+  // Both found by a reporter on the real record, reported as "the WHO SPOKE? buttons are disabled".
+  //
+  // They had clicked SPEAKER 4: -- which is exactly where you aim when you want to change who spoke
+  // -- and it was generated text with no handler. The click did nothing, and dragging across it
+  // left a grey browser text-selection that reads as a selection. Nothing was wrong with the
+  // controls; nothing had been selected.
+  const pages=fs.readFileSync(new URL("../app/WorkspaceDocumentPages.tsx",import.meta.url),"utf8");
+  assert.match(pages,/workspace-page-label/,"the designation is a control");
+  assert.match(pages,/title="Select this paragraph"/);
+  assert.match(pages,/fragment\.text\.trim\(\)/,"and only the fragment carrying it -- a button per space is a hazard, not a target");
+
+  // 21 blank lines on the last page rendered as selected at the same time. A page holding neither
+  // the old nor the new selection is held back by pageRenderEqual, so it keeps selectedParagraphId
+  // as null -- and a blank line's own paragraphId is null, so null matched null.
+  assert.match(pages,/line\.paragraphId&&line\.paragraphId===selectedParagraphId\?"selected":""/,
+    "a line with no paragraph cannot be the selected paragraph");
 });
 
 test("modeled line timestamps are visible playback controls",()=>{

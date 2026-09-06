@@ -95,6 +95,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Immutable final-artifact tests exercise the production Word renderer. The renderer's
+      # Python dependencies are deliberately declared outside package.json and must be present
+      # on a clean runner; otherwise CI fails before it can qualify DOCX/PDF provenance.
+      - name: Install DOCX renderer dependencies
+        run: python -m pip install -r requirements-docx.txt
+
       - name: Report checkout line endings
         shell: pwsh
         run: |

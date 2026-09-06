@@ -194,6 +194,22 @@ test("a manifest edit that changes nothing rendered leaves the approval standing
   assert.equal(template.available, true);
 });
 
+test("changing a qualified variant's authority metadata makes its approval stale", async (t) => {
+  const root = await templateRoot(t);
+  const variant = "FEDERAL_OATH_REVIEW_REQUESTED";
+  const before = await loadTemplateVariant(variant, { root });
+  assert.equal(before.approval.state, "current", "control: the shipped authority and content must be approved");
+
+  const manifestPath = path.join(root, variant, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.authority.reviewElection.push("Unapproved authority amendment");
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const changed = await loadTemplateVariant(variant, { root });
+  assert.equal(changed.approval.state, "stale");
+  assert.equal(changed.available, false, "authority changes require a fresh named approval even when template bytes are unchanged");
+});
+
 test("an unreviewed stub variant still reports unavailable, not unapproved", async (t) => {
   // Two different facts, kept apart. No approval is recorded for the federal stubs either, and if
   // approval were checked first they would start reporting an approval problem instead of the

@@ -5,7 +5,20 @@ import path from "node:path";
 import test from "node:test";
 import { saveOpeningState } from "../server/opening-procedures.mjs";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/word-service.mjs";
+
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
 
 // The reopening condition in ADR-0021, enforced.
 //
@@ -36,7 +49,7 @@ function scratch(t, { witness = "Mohammad Etminan, M.D." } = {}) {
   fs.writeFileSync(
     path.join(folder, "intake", "canonical-deposition-record.json"),
     JSON.stringify(
-      createCanonicalDepositionRecord({
+      attested({
         court: "In the 285th Judicial District Court",
         causeNumber: "2024-CI-11223",
         caseStyle: "Etminan v. Baptist",

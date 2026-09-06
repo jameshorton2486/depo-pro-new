@@ -307,7 +307,8 @@ test("well-formed proposals against the right chunk are accepted",()=>{
     good(editable[0].id),
     good(editable[5].id, { correctionType: "punctuation", proposedValue: "wg,", confidenceScore: 0.71, evidenceSource: "transcript" }),
     good(editable[9].id, { correctionType: "word_replacement", proposedValue: "cervical", endWordId: editable[10].id, confidenceScore: 0.55, evidenceSource: "case_material" }),
-    good(editable[20].id, { correctionType: "speaker_assignment", proposedValue: "witness", speakerIdentity: "witness", confidenceScore: 0.8, evidenceSource: "case_context" }),
+    // No proposedValue: a speaker assignment proposes an identity, and it has no text authority.
+    good(editable[20].id, { correctionType: "speaker_assignment", proposedValue: null, speakerIdentity: "witness", confidenceScore: 0.8, evidenceSource: "case_context" }),
   ]);
   const result = validateProposals(response, { chunk, roster: ROSTER });
   assert.equal(result.rejected, null);
@@ -413,6 +414,8 @@ test("a speaker named who is not in this case is declined, and reported verbatim
   // only detail worth having.
   const { chunk, editable } = chunkForResponses();
   const result = validateProposals(respond(chunk, [
+    // Carries text as well as an absent identity. The roster finding is reported, because a person
+    // absent from this record being proposed is the more serious of the two.
     good(editable[0].id, { correctionType: "speaker_assignment", proposedValue: "Karen M. Alvarado", speakerIdentity: "attorney-karen-alvarado", confidenceScore: 0.88, evidenceSource: "case_context" }),
     good(editable[3].id, { correctionType: "speaker_assignment", proposedValue: "witness", confidenceScore: 0.9, evidenceSource: "transcript" }),
   ]), { chunk, roster: ROSTER });
@@ -420,6 +423,28 @@ test("a speaker named who is not in this case is declined, and reported verbatim
   assert.equal(result.declined[0].rule, "R11");
   assert.equal(result.declined[0].attemptedIdentity, "attorney-karen-alvarado");
   assert.equal(result.declined[1].code, "SPEAKER_ASSIGNMENT_WITHOUT_IDENTITY");
+});
+
+test("a speaker assignment may not carry text, and the text rules do not apply to it",()=>{
+  // A speaker assignment proposes an IDENTITY. Before this split, R9 forced it to emit a text value
+  // it has no authority over, and R12 then compared the digits of the spanned testimony against the
+  // digits of that value -- so a speaker assignment over "I was 42 then" was refused as
+  // DIGITS_ALTERED, a rule about rewriting testimony firing on a proposal that rewrites nothing.
+  // Nothing had noticed because nothing emits this type yet.
+  const { chunk, editable } = chunkForResponses();
+  const carries = validateProposals(respond(chunk, [
+    good(editable[0].id, { correctionType: "speaker_assignment", proposedValue: "Jennifer Baier", speakerIdentity: "witness", confidenceScore: 0.9, evidenceSource: "transcript" }),
+  ]), { chunk, roster: ROSTER });
+  assert.equal(carries.accepted.length, 0);
+  assert.equal(carries.declined[0].code, "SPEAKER_ASSIGNMENT_CARRIES_TEXT");
+  assert.equal(carries.declined[0].rule, "R15");
+
+  // And a range with no text proposed is accepted whatever the words inside it say.
+  const clean = validateProposals(respond(chunk, [
+    good(editable[0].id, { correctionType: "speaker_assignment", proposedValue: null, endWordId: editable[6].id, speakerIdentity: "witness", confidenceScore: 0.9, evidenceSource: "transcript" }),
+  ]), { chunk, roster: ROSTER });
+  assert.equal(clean.accepted.length, 1);
+  assert.deepEqual(clean.declined, []);
 });
 
 test("an empty response is valid and proposes nothing",()=>{

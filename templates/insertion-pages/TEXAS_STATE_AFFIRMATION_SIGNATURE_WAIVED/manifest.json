@@ -1,0 +1,21 @@
+{
+  "templateId": "texas-state-affirmation-signature-waived",
+  "version": "1.0.0",
+  "available": true,
+  "reviewStatus": "reviewed",
+  "reviewedBy": "James Horton, product owner",
+  "reviewedAt": "2026-09-02",
+  "scope": "Approved affirmation adaptation of the existing Texas signature-waived page set; only the administration sentence differs",
+  "authority": {
+    "affirmation": ["Tex. R. Evid. 603", "Tex. Const. art. I, § 5"],
+    "certificate": ["Tex. R. Civ. P. 203.2"]
+  },
+  "templates": {
+    "fieldInventory": { "file": "../TEXAS_STATE_SIGNATURE_WAIVED/field-inventory.tmpl", "sha256": "efb750f96d59efe4225e2144851dd959b89157c87ebe7d65a3e9eaffe3d9eaf3" },
+    "title": { "file": "../common/title.tmpl", "sha256": "20f82cb6050c8fdf7babf4f5891b937117a4b5497b2701dda3d8da464efbd5de" },
+    "appearances": { "file": "../common/appearances.tmpl", "sha256": "f05b1933925306924a164725b184e57d01a1747cec8fdfa4f2f4c192ee777fda" },
+    "index": { "file": "../common/index.tmpl", "sha256": "648e04ea36c210ecd31f3a36e0bfb1d3993a3699b02a3e46f0fbd5668a4219f7" },
+    "certification1": { "file": "../common/texas-affirmation-waived-certification-1.tmpl", "sha256": "ea1c0943dc0ad2e8a5c565e994b140c3c28de1afa41b109793c8f084ce472e2e" },
+    "certification2": { "file": "../TEXAS_STATE_SIGNATURE_WAIVED/certification-2.tmpl", "sha256": "3b66de6fb05957eeb9795d6f13b7a9895c02d15dad66d455cd74690eb0dfca6d" }
+  }
+}

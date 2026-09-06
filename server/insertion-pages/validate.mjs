@@ -2,7 +2,7 @@ import { appearancePhrase } from "./assemble.mjs";
 import { captionOverflowFindings } from "./build-pages.mjs";
 import { isLayoutProfileVerified } from "./layout-profile.mjs";
 import { pageOverflowFindings } from "./page-model.mjs";
-import { captionJurisdiction } from "./variants.mjs";
+import { STAGE_ONE_DEFERRED_RULE_WIDTHS, captionJurisdiction } from "./variants.mjs";
 
 // What is left is exactly the set with no producer: submittedToWitnessDate, dueDate and serviceDate
 // are declared WORKFLOW_DERIVED in the canonical record, and no workflow writes them. They are
@@ -13,11 +13,46 @@ import { captionJurisdiction } from "./variants.mjs";
 // them. Leaving them here would have meant a reporter who skips the form still gets a certificate
 // with a dropped clause and a clean bill of health -- the defect this list is next to, not a use
 // for it. An entry added merely to make validation pass is how the guard stops meaning anything.
+// Fields a variant may legitimately leave blank.
+//
+// The eight below are DEFERRED, not optional. Rule 203 certification happens in stages: the initial
+// certification is signed when the transcript is produced, the witness then examines and returns it,
+// and only afterwards can return, custody, charges and service be certified. A transcript produced
+// at stage one cannot state facts that have not occurred, and the reviewed template says so in its
+// own words on the page: "Further certification requirements pursuant to Rule 203 of TRCP will be
+// certified to after they have occurred."
+//
+// Measured against the reporter's own certified 72-page Etminan transcript, which is the known-good
+// output this application is trying to reproduce: eight of these nine fields are blank on the
+// delivered document. Requiring them at stage one asked the reporter for facts their own certified
+// practice defers.
+//
+// Do not read this list as "these fields are optional". Each becomes required at the certification
+// stage that can establish it, and nothing here produces that later page yet. If a further-
+// certification document is ever generated, these must be required there -- a field permitted to be
+// blank forever is how a certificate ends up asserting nothing where it should assert something.
+//
+// cert.chargesResponsibleParty is deliberately NOT here. The certified transcript states it at stage
+// one -- "THE DEPOSITION OFFICER'S CHARGES TO THE PLAINTIFF" -- so it is knowable when the initial
+// certificate is signed, and it stays required.
+//
+// Scoped to the one variant a real deposition has exercised. The waived and federal variants are not
+// changed for symmetry: no source document has been read for them, and a blank permitted without
+// evidence is the same mistake in the other direction.
+// One table, in variants.mjs, so validation and rendering cannot disagree about which fields are
+// deferred. A field permitted to be blank here that has no printed rule there would render an empty
+// clause; a field with a rule but no permission here would block a document it can already print.
+const RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR = Object.freeze(Object.keys(STAGE_ONE_DEFERRED_RULE_WIDTHS));
+
 export const INTENTIONAL_BLANKS = Object.freeze({
-  TEXAS_STATE_SIGNATURE_REQUESTED: Object.freeze([]),
+  TEXAS_STATE_SIGNATURE_REQUESTED: RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR,
+  TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED: RULE_203_DEFERRED_UNTIL_THE_EVENTS_OCCUR,
   TEXAS_STATE_SIGNATURE_WAIVED: Object.freeze([]),
-  FEDERAL_SIGNATURE_REQUESTED: Object.freeze([]),
-  FEDERAL_SIGNATURE_WAIVED: Object.freeze([]),
+  TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED: Object.freeze([]),
+  FEDERAL_OATH_REVIEW_REQUESTED: Object.freeze([]),
+  FEDERAL_OATH_REVIEW_NOT_REQUESTED: Object.freeze([]),
+  FEDERAL_AFFIRMATION_REVIEW_REQUESTED: Object.freeze([]),
+  FEDERAL_AFFIRMATION_REVIEW_NOT_REQUESTED: Object.freeze([]),
 });
 
 // The reviewed certificates that state, in their own words, how much time each party used. Both
@@ -31,6 +66,7 @@ export const INTENTIONAL_BLANKS = Object.freeze({
 // bodies and asserts this set is exactly the ones carrying the caret.
 export const TIME_USED_CERTIFIED = Object.freeze([
   "TEXAS_STATE_SIGNATURE_REQUESTED", "TEXAS_STATE_SIGNATURE_WAIVED",
+  "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED", "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",
 ]);
 
 const blocking = (code, target, message, extra = {}) => ({ code, target, severity: "blocking", message, ...extra });
@@ -42,21 +78,77 @@ const isBlank = (value) => value == null || value === "" || (Array.isArray(value
 // officer". When the record carries an attestation that the witness did not swear, that sentence is
 // false and it goes out under the reporter's name and CSR number. Refuse rather than print it.
 //
-// Only an explicit false refuses. null is MISSING -- nobody has attested -- and still generates.
-// That is a scoping decision, not an oversight: MISSING is the common state and an unattested
-// certificate is a gap in the record rather than a false statement, which is what this application
-// has always produced. Refusing on MISSING is phase 2 and is gated on the existing library being
-// attested first. See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
+// Phase 2, and the reason it waited. MISSING used to generate: nobody had attested, and an
+// unattested certificate was treated as a gap in the record rather than a false statement. But the
+// sentence is a literal in both templates, so an unattested certificate does not omit the claim --
+// it makes it, under the reporter's name and CSR number, resting on nothing the record holds.
 //
-// There is no approved affirmation certificate wording to substitute -- no Texas authority
-// publishes one and no certified specimen contains one -- so refusal is the whole remedy.
-// Do not "fix" this by authoring that sentence.
+// Two codes, because the remedies are not the same and a reporter must be able to tell them apart:
+//
+//   MISSING   nobody has said what happened. The remedy is to attest, in Opening -> Scripts &
+//             Oaths, from actual knowledge. The record can be completed.
+//   false     the record says the witness affirmed. There is nothing to complete. No Texas
+//             authority publishes affirmation certificate wording and no certified specimen
+//             contains any, so refusal is the whole remedy -- do not "fix" this by writing that
+//             sentence.
+//
+// FALSE is not MISSING. Collapsing them would tell a reporter whose witness affirmed to go and
+// attest something they have already correctly attested.
+//
+// See docs/opening-procedures/authorization-o10-oath-basis-on-the-record.md.
 function validateOathBasis(input, findings) {
-  if (input.deposition?.witnessSworn !== false) return;
+  const administration = input.deposition?.oathAdministration;
+  if (administration) {
+    const required=["selection","spokenText","response","occurredAt","verificationSource","recordedAt","recordedBy"];
+    const missing=required.filter(key => !administration[key]);
+    if (!administration.officer?.role || !administration.officer?.name) missing.push("officer");
+    if (missing.length) {
+      findings.push(blocking("CERT_STRUCTURED_OATH_INCOMPLETE", "deposition.oathAdministration", `The canonical administration record is incomplete (${missing.join(", ")}). Certificate wording cannot be selected from a partial event.`));
+      return;
+    }
+  }
+  if (["OATH", "AFFIRMATION"].includes(administration?.selection)) return;
+  if (input.deposition?.witnessSworn !== null && input.deposition?.witnessSworn !== undefined)
+    findings.push(blocking("CERT_STRUCTURED_OATH_MISSING", "deposition.oathAdministration", "A legacy sworn flag exists, but only an attributable canonical administration record may select certificate wording. Record the administration in Opening before generating the certificate."));
+  else
   findings.push(blocking(
-    "CERT_WITNESS_NOT_SWORN", "deposition.witnessSworn",
-    "The record attests that this witness was not sworn, and the certification page states the witness was duly sworn by the officer. No approved wording exists for a witness who affirmed, so the page cannot be generated.",
+    "CERT_OATH_BASIS_UNRESOLVED", "deposition.witnessSworn",
+    "The certification page states that the witness was duly sworn by the officer, and nothing on this record establishes that. Record the oath attestation in Opening, under Scripts & Oaths, before generating the certificate.",
   ));
+}
+
+function validateFederalCertificate(input, findings) {
+  if (input.jurisdiction !== "federal") return;
+  const administration = input.deposition?.oathAdministration;
+  const review = input.reviewElection;
+  const lifecycle = input.reviewLifecycle;
+  if (!administration || !["OATH", "AFFIRMATION"].includes(administration.selection)) {
+    findings.push(blocking("FEDERAL_ADMINISTRATION_UNRESOLVED", "deposition.oathAdministration", "A verified oath or affirmation administration is required for the Federal certificate."));
+    return;
+  }
+  const reporterName = String(input.reporter?.name ?? "").trim().toLocaleLowerCase();
+  const officerName = String(administration.officer?.name ?? "").trim().toLocaleLowerCase();
+  if (!reporterName || !officerName || reporterName !== officerName) {
+    findings.push(blocking("FEDERAL_THIRD_PARTY_ADMINISTRATION_UNQUALIFIED", "deposition.oathAdministration.officer", "The approved Federal component covers only a certifying officer who personally administered the oath or affirmation. A different administering officer requires a separately approved component."));
+  }
+  if (!administration.verificationSource || !administration.sourceAnchor) {
+    findings.push(blocking("FEDERAL_ADMINISTRATION_EVIDENCE_REQUIRED", "deposition.oathAdministration.sourceAnchor", "Federal certification requires attributable administration evidence and a source anchor."));
+  }
+  if (!["REQUESTED", "NOT_REQUESTED"].includes(review?.status)) {
+    findings.push(blocking("FEDERAL_RULE_30E_UNRESOLVED", "reviewElection.status", "Record whether Rule 30(e) review was requested before generating the Federal certificate."));
+  } else if (!review.sourceAnchor || !review.recordedBy || !review.recordedAt) {
+    findings.push(blocking("FEDERAL_RULE_30E_EVIDENCE_REQUIRED", "reviewElection.sourceAnchor", "The Rule 30(e) election must be attributable and anchored to evidence."));
+  }
+  if (review?.status === "REQUESTED") {
+    if (!lifecycle?.notification) {
+      findings.push(blocking("FEDERAL_RULE_30E_NOTIFICATION_REQUIRED", "reviewLifecycle.notification", "Requested Rule 30(e) review cannot be finalized until the officer's notification is recorded with attributable evidence."));
+    } else if (!lifecycle.terminal) {
+      findings.push(blocking("FEDERAL_RULE_30E_REVIEW_OPEN", "reviewLifecycle.status", `Requested Rule 30(e) review remains ${String(lifecycle.status ?? "unresolved").toLowerCase()}; final certification is unavailable until the lifecycle reaches an evidence-backed terminal state.`));
+    }
+  }
+  if (!input.fieldValues?.["cert.certificationDate"]) {
+    findings.push(blocking("FEDERAL_CERTIFICATION_DATE_REQUIRED", "cert.certificationDate", "Record the date on which the officer executes the Federal certificate."));
+  }
 }
 
 function validateVariant(input, findings) {
@@ -92,6 +184,7 @@ function validateVariant(input, findings) {
 }
 
 function validateCredentials(input, findings) {
+  if (input.jurisdiction === "federal") return;
   const reporter = input.reporter ?? {};
   const waived = reporter.firmRegistration?.applicable === false && Boolean(reporter.firmRegistration.reason);
   if (!reporter.firmRegistrationNumber && !waived) findings.push(blocking("CERT_FIRM_REGISTRATION_UNRESOLVED", "reporter.firmRegistrationNumber", "Reporter profile has no firm registration number and no explicit inapplicable reason.", { path: "reporter.firmRegistrationNumber" }));
@@ -265,6 +358,13 @@ function validateVideographer(input,findings){
 
 export function validateInsertionInput(input) {
   const findings = [];
+  if (input.jurisdiction === "federal") {
+    validateOathBasis(input, findings);
+    validateFederalCertificate(input, findings);
+    validateVariant(input, findings);
+    validateFields(input, findings);
+    return findings;
+  }
   validateVideographer(input,findings);
   validateOathBasis(input, findings);
   validateVariant(input, findings);

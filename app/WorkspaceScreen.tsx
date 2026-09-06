@@ -5,15 +5,26 @@ import { speakerBuckets } from "./transcript-paragraphs.mjs";
 import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
+import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
+import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
+import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
+import { currentSpeakerDescription, deleteSelectedParagraphOperations, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
+
+// One empty set, so "no low-confidence marks" is the same reference on every render.
+const EMPTY_WORD_IDS: Set<string> = new Set();
+import PartiesEditor from "./PartiesEditor";
 import ProceedingEditor from "./ProceedingEditor";
 import PrepareCompleteTranscript from "./PrepareCompleteTranscript";
 import WorkspaceDocumentPages, { type DocumentPage } from "./WorkspaceDocumentPages";
+import { EXAMINATION_TYPE_CHOICES, examinationControl, examinationOperation, examinationSummary } from "./examination-control.mjs";
+import { examinerColloquyControl, examinerColloquyLabel, examinerColloquyOperation } from "./examiner-colloquy-control.mjs";
 import { paragraphEditTransaction, wordCharacterRanges } from "./paragraph-edit-transaction.mjs";
 
 type Word = { id:string; text:string; display?:string; styled?:boolean; start:number|null; end:number|null; confidence:number|null; deepgramSpeaker:number|null; edited?:boolean; deleted?:boolean; authored?:boolean; originalText?:string; flagged?:boolean; flaggedFrom?:string; lowConfidence?:boolean; reviewDisposition?:"CORRECTED"|"APPROVED"|null };
-type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
+type Paragraph = { id:string; elementType:string; label:string|null; byLine:string|null; speakerIdentity:string|null; transcriptRole:string|null; deepgramSpeaker:number|null; unlabeledSpeaker:boolean; examinerColloquy?:boolean; start:number|null; end:number|null; text:string; words:Word[]; segmentIds:string[]; asrWordIds:string[] };
 type Finding = { code:string; message:string; speakerIdentity?:string; name?:string };
-type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
+type Examination = { examinerPersonId:string; type:string; atWordId:string|null; implicit:boolean };
+type Rendered = { transcriptContentHash:string|null; derivedFrom?:string[]; paragraphs:Paragraph[]; findings:Finding[]; diarized:boolean; labels:Record<string,string>; examinations?:Examination[]; counts:{ paragraphs:number; words:number; operations:number; redoTransactions:number; orphaned:number; flags:number; lowConfidenceUnresolved:number }; speakerMap:{ status:string; assignments:{ sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string; transcriptRole:string }[] }|null };
 type Candidate = { id:string; label:string; defaultRole:string; honorific?:string|null };
 type PrintModel = { recordType?:string; pages:DocumentPage[]; source:{reviewStateHash:string}; layoutProfile:import("./WorkspaceDocumentPages").LayoutProfile; findings:{print?:Finding[];assembly?:Finding[]} };
 
@@ -84,16 +95,34 @@ type Audit = { uploadId:string; originalName:string; selectedSource:string };
 type Job = { jobId:string; uploadId:string; startedAt?:string; status:"processing"|"completed"|"failed"; keyterms?:{ count:number }; failure?:{ message:string }; response?:{ deliveredAudio?:{ converted?:boolean } } };
 type NameProposal = { wordId:string; proposedValue:string; confidenceScore:number; evidenceSource:string };
 type SpeakerSuggestion = { sourceJobIdentity:string; deepgramSpeaker:number; speakerIdentity:string|null; missingParticipantName:string|null; transcriptRole:string|null; confidence:number; evidence:string };
-type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; errors:string[] };
+// A range proposal and a bucket proposal are different claims, so they are different types. A
+// SpeakerSuggestion says "cluster 3 is this person"; a RangeProposal says "these words are". The
+// reporter is owed the difference, and a shared type would have hidden it.
+type RangeProposal = { wordId:string; endWordId:string; speakerIdentity:string; correctionType:string; confidenceScore:number; evidenceSource:string; reviewStateHash:string; text:string; wordCount:number; startTime:number|null; endTime:number|null; deepgramSpeakers:number[]; currentSpeakerIdentity:string|null };
+type CorrectionResult = { names:{ accepted:NameProposal[]; declined:unknown[]; failures:unknown[] }|null; speakers:{ proposals:SpeakerSuggestion[] }|null; ranges:{ accepted:RangeProposal[] }|null; errors:string[] };
 export type WorkspaceDeposition = { id:string; audioFiles:string[]; audioIntakeIds?:string[]; keyterms?:string[]; courtReporterName?:string };
 
-const ROLE_FOR = (role:string) => role.replaceAll("_"," ").toLowerCase();
+// Tool-language only. This never reaches the transcript renderer or its stored labels: it gives
+// the reporter the familiar deposition designation while they decide who spoke.
+const ROLE_FOR = (role:string) => ({
+  COURT_REPORTER:"THE REPORTER",
+  VIDEOGRAPHER:"THE VIDEOGRAPHER",
+  INTERPRETER:"THE INTERPRETER",
+  WITNESS:"THE WITNESS (A. during Q&A)",
+}[role.toUpperCase()] ?? role.replaceAll("_"," ").toLowerCase());
 function clock(seconds:number|null){ if(seconds===null||!Number.isFinite(seconds))return "--:--"; const total=Math.floor(seconds); return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`; }
 
 export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{ deposition:WorkspaceDeposition; audioIndex?:number; onBack:()=>void }) {
   const depositionId = deposition.id;
   const [rendered,setRendered] = useState<Rendered|null>(null);
   const [printModel,setPrintModel] = useState<PrintModel|null>(null);
+  // Set the moment a mutation succeeds, cleared only when the refreshed model lands. Every mutation
+  // control is disabled while it is set, because the hash a second edit would carry is the hash of a
+  // transcript that has already moved -- which the server refuses, correctly, as stale. Rapid
+  // corrections were failing exactly that way during the boundary measurement, and the screen went
+  // on looking ready. The authoritative state comes from the server; nothing here advances the hash
+  // optimistically.
+  const [awaitingRecord,setAwaitingRecord] = useState(false);
   const [documentState,setDocumentState] = useState<{state:string;reason:string;absentSections:string[]}|null>(null);
   const [candidates,setCandidates] = useState<Candidate[]>([]);
   const [roles,setRoles] = useState<string[]>([]);
@@ -103,7 +132,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // reporter extends. A range may cross paragraphs -- turn boundaries are the thing a correction
   // pass is meant to question, so a selection that could not span them would be useless for it.
   const [selected,setSelected] = useState<{ paragraphId:string; wordId:string; extentWordId:string|null }|null>(null);
+  const [paragraphRangeMode,setParagraphRangeMode] = useState(false);
   const [editing,setEditing] = useState<{ wordId:string; text:string }|null>(null);
+  // Both facts the reporter states. Neither is preselected: a boundary names a person and a kind
+  // of examination, and a default that prints a heading nobody chose is the §247 mistake in a new
+  // place.
+  const [examinationType,setExaminationType] = useState("");
+  const [examinationExaminer,setExaminationExaminer] = useState("");
   const [error,setError] = useState("");
   const [errorCode,setErrorCode] = useState("");
   const [busy,setBusy] = useState(false);
@@ -141,6 +176,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // overwrite a fresh one.
   const [reloadToken,setReloadToken] = useState(0);
   const reload = useCallback(()=>setReloadToken(token=>token+1),[]);
+  // Two reload signals, because an overlay edit and a record edit invalidate different things.
+  //
+  // A correction used to refetch seven endpoints. Four of them cannot be affected by an overlay
+  // operation at all -- the audio audit, the playback metadata, the transcription jobs, and the
+  // speaker candidates, which getSpeakerCandidates derives from the canonical record and never from
+  // the overlay. Measured at about 1.4 seconds of a 4 second correction cycle.
+  //
+  // reloadToken still means "everything moved" and is what the counsel, parties, proceeding,
+  // honorific and speaker-map writers use. reloadTranscript means "the transcript moved", which is
+  // all an overlay mutation can do.
+  const [transcriptToken,setTranscriptToken] = useState(0);
+  const reloadTranscript = useCallback(()=>setTranscriptToken(token=>token+1),[]);
   const [media,setMedia] = useState<{ needsProxy:boolean; proxy:{ alignment?:{ aligned:boolean; message:string } }|null; sourceMedia:{ codec:string } }|null>(null);
   const [building,setBuilding] = useState(false);
   const playbackSource = media
@@ -161,7 +208,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     let cancelled = false;
     void (async ()=>{
       try {
-        const [renderRes,printOutcome,candidateRes,mediaRes] = await Promise.all([
+        const [renderRes,printOutcome] = await Promise.all([
           fetch(`${API}/api/transcript/rendered?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`),
           // The fallback stays -- a reporter with no assembly authority still needs to see and
           // work the testimony -- but the reason the complete model refused no longer goes in
@@ -172,10 +219,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             const blockedReason = await response.json().then(payload=>String(payload?.error||"")).catch(()=>"");
             return { response: await fetch(`${API}/api/transcript/print-model?depositionId=${encodeURIComponent(depositionId)}${examiner?`&examinerIdentity=${encodeURIComponent(examiner)}`:""}`,{cache:"no-store"}), blockedReason };
           }),
-          fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
-          fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
         ]);
-        if(mediaRes.ok && !cancelled) setMedia(await mediaRes.json());
         const body = await renderRes.json();
         if(cancelled) return;
         if(!renderRes.ok){ setErrorCode(String(body.code||"")); throw new Error(body.error||"Could not load the transcript."); }
@@ -186,13 +230,31 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
         const printRes=printOutcome.response;
         const servedModel=printRes.ok?await printRes.json():null;
         setPrintModel(servedModel);
+      setAwaitingRecord(false);
         setDocumentState(deriveDocumentStatus({ servedRecordType:servedModel?.recordType??null, blockedReason:printOutcome.blockedReason }));
-        if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
         if(!cancelled){ setError(""); setErrorCode(""); }
       } catch(e){ if(!cancelled) setError(e instanceof Error?e.message:"Could not load the transcript."); }
     })();
     return ()=>{ cancelled = true; };
-  },[depositionId,examiner,audioIndex,reloadToken]);
+  },[depositionId,examiner,reloadToken,transcriptToken]);
+
+  // The participant roster and the media. Neither can be changed by an overlay operation --
+  // getSpeakerCandidates derives candidates from the canonical record and never reads the overlay --
+  // so this deliberately does NOT depend on transcriptToken. It reloads when the RECORD moves, which
+  // is what the counsel, parties, proceeding and participant writers signal.
+  useEffect(()=>{
+    let cancelled=false;
+    void (async ()=>{
+      const [candidateRes,mediaRes]=await Promise.all([
+        fetch(`${API}/api/transcript/speaker-candidates?depositionId=${encodeURIComponent(depositionId)}`),
+        fetch(`${API}/api/depositions/playback?id=${encodeURIComponent(depositionId)}&index=${audioIndex}&meta=1`),
+      ]);
+      if(cancelled) return;
+      if(mediaRes.ok) setMedia(await mediaRes.json());
+      if(candidateRes.ok){ const data=await candidateRes.json(); if(!cancelled){ setCandidates(data.candidates||[]); setRoles(data.roles||[]); } }
+    })();
+    return ()=>{ cancelled=true; };
+  },[depositionId,audioIndex,reloadToken]);
 
   // Audio and job state load independently of the transcript. When there is no transcript the
   // render effect above fails by design, and this is the only thing left to show -- so it must
@@ -261,13 +323,16 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // The key matches the one reconcileSpeakerMap validates against server-side.
   const buckets = useMemo(()=>speakerBuckets(rendered?.paragraphs ?? []) as Bucket[],[rendered]);
 
-  async function post(path:string, payload:Record<string,unknown>) {
+  // scope says what the write can have invalidated. "transcript" refetches the rendered transcript
+  // and the document model; "record" refetches everything, including the participant roster.
+  async function post(path:string, payload:Record<string,unknown>, scope:"record"|"transcript"="record") {
     setBusy(true); setError("");
     try {
       const response = await fetch(`${API}${path}`,{ method:"POST", headers:{ "content-type":"application/json" }, body:JSON.stringify(payload) });
       const body = await response.json();
       if(!response.ok) throw new Error(body.error||"The edit could not be saved.");
-      reload();
+      setAwaitingRecord(true);
+      if(scope==="transcript") reloadTranscript(); else reload();
       return true;
     } catch(e){ setError(e instanceof Error?e.message:"The edit could not be saved."); return false; }
     finally { setBusy(false); }
@@ -278,7 +343,14 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // it was true of a certified transcript and of a bare testimony body alike, which is exactly
   // what made it useless to the person deciding whether to send the file.
   async function generateDocx(){setBusy(true);setError("");try{const endpoint=documentState?.state===DOCUMENT_STATUS.READY?"/api/transcript/complete-document-docx":"/api/transcript/final-document-docx";const response=await fetch(`${API}${endpoint}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The Word document could not be generated.");setNotice(generationNotice({producedKind:result.documentKind,outputPath:result.outputPath}))}catch(reason){setError(reason instanceof Error?reason.message:"The Word document could not be generated.")}finally{setBusy(false)}}
-  const append = (operations:Operation[]) => post("/api/transcript/overlay",{ depositionId, operations });
+  async function generatePdf(){setBusy(true);setError("");try{const response=await fetch(`${API}/api/transcript/complete-document-pdf`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,examinerIdentity:examiner||null})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The PDF could not be generated.");const download=await fetch(`${API}${result.downloadUrl}`);if(!download.ok)throw new Error("The PDF was generated but could not be downloaded.");const objectUrl=URL.createObjectURL(await download.blob()),link=document.createElement("a");link.href=objectUrl;link.download="complete-transcript.pdf";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(objectUrl);setNotice(`Searchable complete transcript PDF generated: ${result.outputPath}`)}catch(reason){setError(reason instanceof Error?reason.message:"The PDF could not be generated.")}finally{setBusy(false)}}
+  // Every overlay mutation is built in one place, where a missing review-state hash throws instead
+  // of producing a request the server is certain to refuse. This helper used to send no hash at all,
+  // so six reporter actions -- label and speaker correction, split-with-speaker, marking for another
+  // listen, clearing a mark, correcting a word, striking a word -- failed every time while the
+  // buttons looked available.
+  const append = (operations:Operation[]) =>
+    post("/api/transcript/overlay", overlayMutationRequest({ depositionId, operations, reviewStateHash:printModel?.source.reviewStateHash }), "transcript");
   const saveParagraph = useCallback(async (paragraphId:string,before:string,after:string,caret:number) => {
     const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);
     if(!paragraph||!printModel){setError("The paragraph is no longer current. Reload it before saving.");return false}
@@ -288,17 +360,18 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!operations.length)return true;
     setBusy(true);setError("");
     try{
-      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(overlayMutationRequest({depositionId,operations,reviewStateHash:printModel.source.reviewStateHash}))});
       const body=await response.json();
       if(!response.ok)throw new Error(body.error||"The paragraph edit could not be saved.");
+        setAwaitingRecord(true);
       setSelected(previous=>previous?.paragraphId===paragraphId?previous:{paragraphId,wordId:paragraph.words[0]?.id??previous?.wordId??"",extentWordId:null});
-      reload();
+      reloadTranscript();
       requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-token-id="${paragraph.words[0]?.id}"]`)?.scrollIntoView({block:"center"}));
       void caret;
       return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The paragraph edit could not be saved.");return false}
     finally{setBusy(false)}
-  },[depositionId,printModel,reload,rendered]);
+  },[depositionId,printModel,reloadTranscript,rendered]);
 
   // useCallback with no dependencies, because every one of these is passed to a memoized paragraph.
   // A callback rebuilt each render would give all 306 paragraphs a new prop and defeat the memo
@@ -323,9 +396,13 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // make the callback depend on the selection, which changes on exactly the interaction this is
   // meant to make cheap.
   const selectWord = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>{
-    setSelected(previous=>shiftKey&&previous?{...previous,extentWordId:wordId}:{paragraphId,wordId,extentWordId:null});
+    setSelected(previous=>paragraphRangeMode&&previous&&!previous.extentWordId
+      ? {...previous,extentWordId:wordId}
+      : shiftKey&&previous
+        ? {...previous,extentWordId:wordId}
+        : {paragraphId,wordId,extentWordId:null});
     setEditing(null);
-  },[]);
+  },[paragraphRangeMode]);
   const selectPageFragment = useCallback((paragraphId:string,wordId:string,shiftKey:boolean)=>selectWord(paragraphId,wordId,shiftKey),[selectWord]);
   const editWord = useCallback((wordId:string,text:string)=>setEditing({wordId,text}),[]);
 
@@ -335,7 +412,23 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   // Both operations address a word, never a segment. A rendered paragraph can span several
   // segments and the client cannot tell which one holds a given word; addressing by word lets
   // the server resolve it, and after a split the segment holding the anchor is the new tail.
+  //
+  // Two things one control does, chosen by WHERE the reporter clicked. Select the word a paragraph
+  // already begins at and this relabels that paragraph. Select any later word and it starts a new
+  // paragraph there, belonging to the speaker chosen -- which is what the hint beside these buttons
+  // has always promised and what the buttons did not do.
+  //
+  // The second case is the Etminan repair. Deepgram ran two turns together across most of the
+  // deposition, so roughly 224 boundaries are missing; before the overlay could carry a speaker on a
+  // split, each one cost a split and then a label addressed at a derived id the caller had to
+  // rebuild. One click, one operation, one undo.
   function relabel(paragraph:Paragraph, speakerIdentity:string|null, transcriptRole:string|null) {
+    // Scope is what the reporter CHOSE, not where they happened to click. Passing the selected word
+    // unconditionally is what turned "this paragraph is the witness" into "cut counsel's question in
+    // half and give the second half away" on the real record.
+    const cutAt = speakerScope === "here" ? (selected?.wordId ?? null) : null;
+    const startsHere = splitWithSpeakerOperation({ paragraph, selectedWordId:cutAt, speakerIdentity, transcriptRole });
+    if (startsHere) { setSelected(null); void append([startsHere]); return; }
     const anchor = paragraph.words.find(word=>!word.authored)?.id;
     if(!anchor) return;
     setSelected(null);
@@ -346,16 +439,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!printModel)return false;
     setBusy(true);setError("");
     try{
-      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,operations,expectedReviewStateHash:printModel.source.reviewStateHash})});
-      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");reload();return true;
+      const response=await fetch(`${API}/api/transcript/overlay`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(overlayMutationRequest({depositionId,operations,reviewStateHash:printModel.source.reviewStateHash}))});
+      const body=await response.json();if(!response.ok)throw new Error(body.error||"The structural edit could not be saved.");setAwaitingRecord(true);reloadTranscript();return true;
     }catch(reason){setError(reason instanceof Error?reason.message:"The structural edit could not be saved.");return false}finally{setBusy(false)}
-  },[depositionId,printModel,reload]);
-  const splitParagraph=useCallback(async(paragraphId:string,caret:number)=>{
-    const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)return false;
-    const anchor=wordCharacterRanges(paragraph).find(range=>range.start>=caret)?.word;
-    if(!anchor||anchor.id===paragraph.words[0]?.id){setError("Place the caret at a word boundary inside the paragraph before pressing Enter.");return false}
-    return structuralTransaction([{op:"split",beforeWordId:anchor.id},{op:"label",wordId:anchor.id,speakerIdentity:paragraph.speakerIdentity,transcriptRole:paragraph.transcriptRole}]);
-  },[rendered,structuralTransaction]);
+  },[depositionId,printModel,reloadTranscript]);
   const joinParagraph=useCallback(async(paragraphId:string,direction:"previous"|"next")=>{
     const paragraphs=rendered?.paragraphs??[],index=paragraphs.findIndex(item=>item.id===paragraphId);
     const left=direction==="previous"?paragraphs[index-1]:paragraphs[index],right=direction==="previous"?paragraphs[index]:paragraphs[index+1];
@@ -363,11 +450,74 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     if(!leadingWordId||!trailingWordId){setError("These paragraphs do not share a safely traceable evidence boundary.");return false}
     return structuralTransaction([{op:"join",leadingWordId,trailingWordId,leadingFirstWordId,trailingLastWordId}]);
   },[rendered,structuralTransaction]);
-  const editingChange=useCallback((value:boolean)=>{if(value){setToolsCollapsed(true);player.current?.pause()}},[]);
+  // Editing no longer hides the tools, and the browser gate is why the old behaviour had to go.
+  //
+  // It collapsed the panel the moment an edit opened, which made sense while the editor was a
+  // floating box that needed the room. The editor now sits in the paragraph's own lines and the
+  // panel is sticky, so collapsing it took away the speaker and structure controls at exactly the
+  // moment the reporter had chosen the paragraph to use them on.
+  //
+  // Pausing playback stays: typing over audio that keeps running is its own problem.
+  const editingChange=useCallback((value:boolean)=>{if(value)player.current?.pause()},[]);
   const activePlaybackWordId=useMemo(()=>{if(playbackTime===null)return null;for(const paragraph of rendered?.paragraphs??[])for(const word of paragraph.words)if(word.start!==null&&word.end!==null&&playbackTime>=word.start&&playbackTime<word.end)return word.id;return null},[rendered,playbackTime]);
   useEffect(()=>{const key=(event:KeyboardEvent)=>{const target=event.target as HTMLElement|null;if(event.code!=="Space"||target?.matches("input,textarea,select,[contenteditable=true]"))return;if(!player.current||!playbackSource)return;event.preventDefault();if(player.current.paused)void player.current.play().catch(()=>{});else player.current.pause()};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[playbackSource]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  // Stable identities so the transcript pages below can be held back. Both read through a ref rather
+  // than listing their function as a dependency: those functions are rebuilt every render, so a
+  // dependency would hand every page a new handler again and defeat the comparator.
+  const playParagraphRef=useRef(playParagraph),playAtRef=useRef(playAt);
+  useEffect(()=>{playParagraphRef.current=playParagraph;playAtRef.current=playAt});
+  const playParagraphById = useCallback((id:string)=>playParagraphRef.current(rendered?.paragraphs.find(item=>item.id===id)??null),[rendered]);
+  const playAtSeconds = useCallback((seconds:number)=>{void playAtRef.current(seconds)},[]);
+  // Who the reporter may say spoke, built from this deposition's record. speakerChoices above still
+  // serves split-with-speaker; this is the panel's own list and it includes procedural roles nobody
+  // on the roster holds -- the videographer Trial #1 could name a role for and never a person.
+  const speakerList = useMemo(()=>speakerActions({ candidates, labels:rendered?.labels ?? {}, examinerIdentity:examiner || null }),[candidates,examiner,rendered]);
+  const [showDetails,setShowDetails] = useState(false);
+  const [showSetup,setShowSetup] = useState(false);
+  // Always the safe reading after a selection moves. A destructive scope that persisted across
+  // clicks would be the same defect wearing a different hat.
+  //
+  // Derived from the selection rather than reset by an effect: the choice is remembered against the
+  // selection it was made for, so moving the selection returns to "this whole paragraph" without
+  // anything having to fire.
+  const [scopeChoice,setScopeChoice] = useState<{ key:string; scope:"paragraph"|"here" }|null>(null);
+  const selectionKey = `${selected?.paragraphId ?? ""}:${selected?.wordId ?? ""}`;
+  const speakerScope = scopeChoice?.key === selectionKey ? scopeChoice.scope : "paragraph";
+  const setSpeakerScope = (scope:"paragraph"|"here") => setScopeChoice({ key:selectionKey, scope });
+  const scopeChoices = useMemo(()=>speakerScopeChoices({ paragraph:active, selectedWordId:selected?.wordId ?? null }),[active,selected]);
+  // What the paragraph prints as now, and how big the other scope would be. Both read from the
+  // record rather than being spelled here.
+  const currentSpeaker = useMemo(()=>currentSpeakerDescription({ paragraph:active, labels:rendered?.labels ?? {} }),[active,rendered]);
+  const globalScope = useMemo(()=>globalScopeOption({ paragraph:active, paragraphs:rendered?.paragraphs ?? [] }),[active,rendered]);
+  const selectedSummary = useMemo(()=>selectedParagraphSummary({ paragraph:active, pages:printModel?.pages??[], labels:rendered?.labels??{}, saveState:(busy||awaitingRecord)?"saving":"saved" }),[active,printModel,rendered,busy,awaitingRecord]);
+  // What the examination button will record, so it can be checked against the screen before it is
+  // pressed. A control reading "Record" leaves the reporter to remember which two lists they set.
+  const examinationSummaryText = useMemo(()=>examinationSummary({ type:examinationType, examinerPersonId:examinationExaminer, labels:rendered?.labels ?? {}, candidates }),[examinationType,examinationExaminer,rendered,candidates]);
+  const [reviewKey,setReviewKey] = useState("");
+  // Speaker findings from a pass run earlier, so the worklist survives closing the screen. Loaded
+  // ONLY when the pass was generated against the transcript as it stands now: a proposal made
+  // against a transcript that has since moved points at words that have moved with it, and putting
+  // it in a worklist would send the reporter somewhere the finding no longer applies.
+  const [storedRanges,setStoredRanges] = useState<RangeProposal[]>([]);
+  const [reviewIndex,setReviewIndex] = useState(-1);
+  const currentReviewStateHash = printModel?.source.reviewStateHash ?? null;
+  useEffect(()=>{
+    let cancelled=false;
+    void (async()=>{
+      if(!currentReviewStateHash){if(!cancelled)setStoredRanges([]);return}
+      try{
+        const list=await fetch(`${API}/api/correction/passes?depositionId=${encodeURIComponent(depositionId)}`).then(response=>response.json()) as { passes?:Array<{ passId:string; passType:string }> };
+        const latest=(list.passes??[]).find(item=>item.passType==="speaker-range");
+        if(!latest){if(!cancelled)setStoredRanges([]);return}
+        const record=await fetch(`${API}/api/correction/pass?depositionId=${encodeURIComponent(depositionId)}&passId=${encodeURIComponent(latest.passId)}`).then(response=>response.json()) as { reviewStateHash?:string; accepted?:RangeProposal[] };
+        if(cancelled)return;
+        setStoredRanges(record.reviewStateHash===currentReviewStateHash?(record.accepted??[]):[]);
+      }catch{ if(!cancelled)setStoredRanges([]) }
+    })();
+    return()=>{cancelled=true};
+  },[depositionId,currentReviewStateHash]);
   // Where the selected paragraph sits, so the two join controls can refuse at the ends of the
   // transcript rather than calling joinParagraph and letting it fail. The first paragraph has
   // nothing above it and the last has nothing below.
@@ -413,13 +563,14 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   },[buckets,savedAssignment]);
 
   async function correctTranscript(){
-    setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setError("");
+    setCorrecting(true);setCorrectionResult(null);setSelectedCorrections(new Set());setRangeApplied(false);setError("");
     const request=(path:string)=>fetch(`${API}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({depositionId,additionalInstructions:correctionInstructions})}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"The AI correction check failed.");return payload});
-    const [names,speakers]=await Promise.allSettled([request("/api/correction/entity-pass"),request("/api/transcript/speaker-suggestions")]);
+    const [names,speakers,ranges]=await Promise.allSettled([request("/api/correction/entity-pass"),request("/api/transcript/speaker-suggestions"),request("/api/correction/speaker-range-pass")]);
     const errors:string[]=[];
     if(names.status==="rejected")errors.push(`Names: ${names.reason instanceof Error?names.reason.message:String(names.reason)}`);
     if(speakers.status==="rejected")errors.push(`Speakers: ${speakers.reason instanceof Error?speakers.reason.message:String(speakers.reason)}`);
-    const result:CorrectionResult={names:names.status==="fulfilled"?names.value:null,speakers:speakers.status==="fulfilled"?speakers.value:null,errors};
+    if(ranges.status==="rejected")errors.push(`Speaker ranges: ${ranges.reason instanceof Error?ranges.reason.message:String(ranges.reason)}`);
+    const result:CorrectionResult={names:names.status==="fulfilled"?names.value:null,speakers:speakers.status==="fulfilled"?speakers.value:null,ranges:ranges.status==="fulfilled"?ranges.value:null,errors};
     setCorrectionResult(result);setSelectedCorrections(new Set(result.names?.accepted.map(item=>item.wordId)??[]));setCorrecting(false);
   }
   function proposalOriginal(proposal:NameProposal){for(const paragraph of rendered?.paragraphs??[]){const word=paragraph.words.find(item=>item.id===proposal.wordId);if(word)return word.text}return "(word unavailable)"}
@@ -430,6 +581,32 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       setCorrectionResult(current=>current?{...current,names:current.names?{...current.names,accepted:current.names.accepted.filter(item=>!selectedCorrections.has(item.wordId))}:null}:null);
       setSelectedCorrections(new Set());
     }
+  }
+  // Accepting sends WHICH proposal, and nothing else. No operations are built here: the server
+  // plans them against the projection the proposal was analyzed against, and applies the whole plan
+  // as one transaction. A client that worked out its own operations would be deciding how the
+  // record is written from the side of the wire that cannot check the transcript has not moved.
+  const [acceptingRange,setAcceptingRange]=useState("");
+  const [rangeApplied,setRangeApplied]=useState(false);
+  const rangeKey=(proposal:RangeProposal)=>rangeProposalKey(proposal);
+  function dropRange(proposal:RangeProposal){
+    setCorrectionResult(current=>current?{...current,ranges:current.ranges?{...current.ranges,accepted:remainingAfterRejection(current.ranges.accepted,proposal)}:null}:null);
+  }
+  async function acceptRange(proposal:RangeProposal){
+    if(!printModel)return;
+    setAcceptingRange(rangeKey(proposal));setError("");
+    try{
+      const response=await fetch(`${API}/api/transcript/range-proposal/accept`,{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify(rangeAcceptanceRequest({depositionId,proposal,reviewStateHash:printModel.source.reviewStateHash}))});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||"This speaker proposal could not be applied.");
+      // Every remaining proposal was generated against the state this acceptance just changed, so
+      // they are all stale now. Clearing them is honest; leaving them offers a button that refuses.
+      setRangeApplied(true);
+      setCorrectionResult(current=>current?{...current,ranges:{accepted:remainingAfterAcceptance()}}:null);
+      setAwaitingRecord(true);reloadTranscript();
+    }catch(reason){setError(reason instanceof Error?reason.message:"This speaker proposal could not be applied.")}
+    finally{setAcceptingRange("")}
   }
   function acceptSpeakerSuggestion(suggestion:SpeakerSuggestion){
     const key=`${suggestion.sourceJobIdentity}:${suggestion.deepgramSpeaker}`;
@@ -456,6 +633,21 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return { first:Math.min(from,to), last:Math.max(from,to) };
   },[selected,wordOrder]);
   const rangeWords = range ? range.last-range.first+1 : 0;
+  const paragraphDeleteOperations = useMemo(()=>deleteSelectedParagraphOperations({ paragraphs:rendered?.paragraphs??[], selectedParagraphId:selected?.paragraphId??null, wordIndexes:wordOrder, range }),[rendered,selected,wordOrder,range]);
+  const paragraphDeleteCount = useMemo(()=>new Set(paragraphDeleteOperations.map(operation=>{
+    for(const paragraph of rendered?.paragraphs??[]) if(paragraph.words.some(word=>word.id===operation.wordId)) return paragraph.id;
+    return null;
+  }).filter(Boolean)).size,[paragraphDeleteOperations,rendered]);
+  const selectedParagraphIds = useMemo(()=>new Set((rendered?.paragraphs??[]).filter(paragraph=>{
+    if(!range)return paragraph.id===selected?.paragraphId;
+    return paragraph.words.some(word=>{const index=wordOrder.get(word.id);return index!==undefined&&index>=range.first&&index<=range.last});
+  }).map(paragraph=>paragraph.id)),[range,rendered,selected,wordOrder]);
+  function deleteSelectedParagraphs(){
+    if(!paragraphDeleteOperations.length)return;
+    const label=paragraphDeleteCount===1?"this paragraph":`these ${paragraphDeleteCount} paragraphs`;
+    if(!window.confirm(`Delete ${label} from the transcript? The original audio, source words, and timestamps remain preserved. One Undo restores the entire action.`))return;
+    setSelected(null);setParagraphRangeMode(false);void append(paragraphDeleteOperations);
+  }
 
   // Every flagged word in transcript order, and the passage each belongs to. The scopist works
   // through places rather than words, so the walker steps to the next passage, not the next word.
@@ -470,6 +662,11 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     return null;
   },[rendered,selected]);
   const lowConfidenceWords=useMemo(()=>(rendered?.paragraphs??[]).flatMap(paragraph=>paragraph.words.filter(word=>word.lowConfidence).map(word=>({paragraphId:paragraph.id,wordId:word.id}))),[rendered]);
+  // Rebuilt inline on every render before this, including the empty branch -- `new Set()` is a new
+  // reference each time, which alone was enough to defeat memo on all 63 transcript pages.
+  const lowConfidenceWordIdSet = useMemo(
+    ()=>lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):EMPTY_WORD_IDS,
+    [lowConfidenceMode,lowConfidenceWords]);
   const searchMatches=useMemo(()=>{
     if(!searchText)return[];
     const escaped=searchText.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),pattern=wholeWords?`\\b${escaped}\\b`:escaped,flags=matchCase?"g":"gi",matches:{id:string;paragraphId:string;start:number;end:number;context:string}[]=[];
@@ -479,7 +676,31 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   useEffect(()=>{const key=(event:KeyboardEvent)=>{if(!(event.ctrlKey||event.metaKey))return;if(event.key.toLowerCase()==="f"){event.preventDefault();setSearchOpen(true);setReplaceOpen(false);setToolsCollapsed(false)}if(event.key.toLowerCase()==="h"){event.preventDefault();setSearchOpen(true);setReplaceOpen(true);setToolsCollapsed(false)}};window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key)},[]);
   function navigateMatch(index:number){if(!searchMatches.length)return;const bounded=(index+searchMatches.length)%searchMatches.length,match=searchMatches[bounded],paragraph=rendered?.paragraphs.find(item=>item.id===match.paragraphId),word=paragraph&&wordCharacterRanges(paragraph).find(range=>range.end>match.start)?.word;if(!word)return;setSearchIndex(bounded);setSelected({paragraphId:paragraph.id,wordId:word.id,extentWordId:null});document.querySelector<HTMLElement>(`[data-token-id="${word.id}"]`)?.scrollIntoView({block:"center",behavior:"smooth"})}
   async function replaceMatches(matches:typeof searchMatches){const byParagraph=new Map<string,typeof searchMatches>();for(const match of matches){const list=byParagraph.get(match.paragraphId)??[];list.push(match);byParagraph.set(match.paragraphId,list)}const operations:Operation[]=[];for(const [paragraphId,list] of byParagraph){const paragraph=rendered?.paragraphs.find(item=>item.id===paragraphId);if(!paragraph)continue;let value=paragraph.text;for(const match of [...list].sort((a,b)=>b.start-a.start))value=`${value.slice(0,match.start)}${replaceText}${value.slice(match.end)}`;operations.push(...paragraphEditTransaction(paragraph,value) as Operation[])}if(operations.length)await structuralTransaction(operations)}
-  function moveLowConfidence(direction:1|-1){if(!lowConfidenceWords.length)return;const at=selected?lowConfidenceWords.findIndex(item=>item.wordId===selected.wordId):-1;const next=at<0?(direction===1?0:lowConfidenceWords.length-1):(at+direction+lowConfidenceWords.length)%lowConfidenceWords.length,target=lowConfidenceWords[next];setSelected({paragraphId:target.paragraphId,wordId:target.wordId,extentWordId:null});document.querySelector<HTMLElement>(`[data-token-id="${target.wordId}"]`)?.scrollIntoView({block:"center",behavior:"smooth"})}
+  // The worklist. Speaker findings are grouped by printed paragraph rather than listed per
+  // proposal: Trial #1 produced 173 proposals sitting in 62 paragraphs, and a reporter visits
+  // paragraphs. Sending them back to the same one eleven times is not a worklist.
+  const speakerLocations = useMemo(()=>speakerReviewLocations({
+    proposals:correctionResult?.ranges?.accepted?.length?correctionResult.ranges.accepted:storedRanges,
+    paragraphs:rendered?.paragraphs??[],
+  }),[correctionResult,storedRanges,rendered]);
+  const markedWords = useMemo(()=>(rendered?.paragraphs??[]).flatMap(paragraph=>paragraph.words.filter(word=>word.flagged).map(word=>({paragraphId:paragraph.id,wordId:word.id}))),[rendered]);
+  const unlabelledParagraphs = useMemo(()=>(rendered?.paragraphs??[]).filter(paragraph=>!paragraph.speakerIdentity).map(paragraph=>({paragraphId:paragraph.id,wordId:paragraph.words.find(word=>!word.authored)?.id??null})),[rendered]);
+  const reviewList = useMemo(()=>reviewCategories({
+    speakerLocations, lowConfidenceWords, markedWords, unlabelledParagraphs,
+    wordCorrections:correctionResult?.names?.accepted??[],
+  }),[speakerLocations,lowConfidenceWords,markedWords,unlabelledParagraphs,correctionResult]);
+
+  /** Moves to the next place in a category and puts it on screen. Selection is how the panel follows. */
+  function stepReview(category:{items:Array<{paragraphId?:string;wordId?:string|null}>},direction:1|-1){
+    const { index, item } = reviewStep({ items:category.items, index:reviewIndex, direction });
+    setReviewIndex(index);
+    if(!item)return;
+    const wordId=item.wordId??null;
+    if(item.paragraphId&&wordId)setSelected({paragraphId:item.paragraphId,wordId,extentWordId:null});
+    const target=wordId?document.querySelector<HTMLElement>(`[data-token-id="${wordId}"]`):null;
+    target?.scrollIntoView({block:"center",behavior:"smooth"});
+  }
+
 
   // The mark. One button, one meaning: this passage needs another listen. A range marks the range,
   // a single word marks that word -- validation turns the second into a range of one, so there is
@@ -505,6 +726,27 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
     setSelected({ paragraphId:paragraph.id, wordId:target.id, extentWordId:null });
     document.getElementById(`w-${target.id}`)?.scrollIntoView({ block:"center", behavior:"smooth" });
   }
+
+  const quickTools = ({canInsertAtCaret,insertAtCaret}:{canInsertAtCaret:boolean;insertAtCaret:(text:string)=>void}) => <aside className="workspace-quick-tools" aria-label="Quick transcript actions">
+    <div className="workspace-quick-tools-copy">
+      <strong>Quick tools</strong>
+      <span>{paragraphRangeMode?(range?`${paragraphDeleteCount} paragraphs selected`:selected?"Select the last paragraph":"Select the first paragraph"):active?"Selected paragraph":"Select a word or range"}</span>
+    </div>
+    <div className="workspace-quick-tools-grid">
+      <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
+      <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
+      <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
+      <button type="button" title="Insert an ellipsis at the paragraph editor cursor" aria-label="Insert ellipsis at cursor" disabled={!canInsertAtCaret||busy||awaitingRecord} onMouseDown={event=>event.preventDefault()} onClick={()=>insertAtCaret("...")}>…<small>Ellipsis</small></button>
+      <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
+      <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
+      <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
+      <button type="button" title="Mark selection for review" aria-label="Mark selection for review" disabled={!selected||busy||awaitingRecord} onClick={flagSelection}>⚑<small>Review</small></button>
+      <button type="button" title={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} aria-label={range?`Delete ${paragraphDeleteCount} selected paragraphs`:"Delete selected paragraph"} disabled={!paragraphDeleteOperations.length||busy||awaitingRecord} onClick={deleteSelectedParagraphs}>⌫<small>Delete</small></button>
+      <button type="button" title="Undo last transcript operation" aria-label="Undo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations} onClick={()=>void post("/api/transcript/overlay/undo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↶<small>Undo</small></button>
+      <button type="button" title="Redo last transcript operation" aria-label="Redo last transcript operation" disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions} onClick={()=>void post("/api/transcript/overlay/redo",overlayHistoryRequest({depositionId,reviewStateHash:printModel?.source.reviewStateHash}),"transcript")}>↷<small>Redo</small></button>
+      <button type="button" title={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} aria-label={toolsCollapsed?"Open full transcript tools":"Collapse full transcript tools"} onClick={()=>setToolsCollapsed(value=>!value)}>☷<small>{toolsCollapsed?"Open":"Close"}</small></button>
+    </div>
+  </aside>;
 
   return (
     <main className="workspace">
@@ -548,10 +790,9 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
             at when they press the button. Fetching a fresh hash here would satisfy the server and
             defeat the check: a stale tab would undo an edit it had never displayed. For the same
             reason both controls are inert without a model: there is no observed state to act on. */}
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/undo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.operations}>Undo last edit or mark</button>
-        <button type="button" onClick={()=>void post("/api/transcript/overlay/redo",{ depositionId, expectedReviewStateHash:printModel?.source.reviewStateHash })} disabled={busy||!printModel||!rendered?.counts.redoTransactions}>Redo last edit or mark</button>
         <button type="button" onClick={()=>setCorrectionOpen(value=>!value)} disabled={!rendered||correcting} aria-expanded={correctionOpen}>{correcting?"Correcting transcript…":"Correct Transcript"}</button>
-        <button type="button" onClick={()=>void generateDocx()} disabled={busy||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
+        <button type="button" onClick={()=>void generateDocx()} disabled={busy||awaitingRecord||!printModel}>{documentControlLabel(documentState?.state ?? "")}</button>
+        <button type="button" onClick={()=>void generatePdf()} disabled={busy||awaitingRecord||!printModel||documentState?.state!==DOCUMENT_STATUS.READY}>Generate Working PDF</button>
       </header>
 
       {correctionOpen&&<section className="workspace-correction-panel" aria-label="AI transcript correction review">
@@ -569,6 +810,30 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               <span><strong>{proposalOriginal(proposal)} → {proposal.proposedValue}</strong><small>{Math.round(proposal.confidenceScore*100)}% confidence · {proposal.evidenceSource}</small></span>
             </div>)}
             <button type="button" disabled={!selectedCorrections.size||busy} onClick={()=>void applySelectedCorrections()}>Apply selected word corrections ({selectedCorrections.size})</button>
+          </section>
+          {/* Range proposals sit in their own section and say so in their heading, because a
+              reporter accepting one is being asked to believe something narrower than a whole
+              cluster: THESE words, which they can read here, were spoken by this person. A
+              surface that mixed the two would be asking the wrong question about half of them.
+
+              Every proposal is accepted or rejected on its own. There is no Select All: a bulk
+              action over speaker attributions is a reporter agreeing to claims they did not read. */}
+          <section><h3>Speaker range proposals ({correctionResult.ranges?.accepted.length??0})</h3>
+            <p className="workspace-hint">Each of these covers a specific stretch of words, not a whole machine speaker. Accepting one changes only the words selectedSummary.</p>
+            {!correctionResult.ranges?.accepted.length&&<p>{emptyRangeListMessage({accepted:rangeApplied})}</p>}
+            {correctionResult.ranges?.accepted.map(proposal=>{const shown=rangeProposalSummary(proposal,candidates);return <div className="workspace-range-proposal" key={shown.key}>
+              <p className="workspace-range-words">&ldquo;{shown.text}&rdquo;</p>
+              <p><strong>{shown.speakerLabel}</strong>{shown.speakerRole?` · ${ROLE_FOR(shown.speakerRole)}`:""}{shown.currentSpeakerLabel?` · currently ${shown.currentSpeakerLabel}`:" · currently unattributed"}</p>
+              <small>
+                {clock(shown.startTime)}&ndash;{clock(shown.endTime)} · {shown.wordCount} {shown.wordCount===1?"word":"words"}
+                {shown.deepgramSpeakers.length?` · machine speaker ${shown.deepgramSpeakers.join(", ")}`:""}
+                {` · ${Math.round((shown.confidenceScore??0)*100)}% confidence · ${shown.evidenceSource}`}
+              </small>
+              <div className="workspace-range-actions">
+                <button type="button" className="primary-button" disabled={busy||acceptingRange===rangeKey(proposal)} onClick={()=>void acceptRange(proposal)}>{acceptingRange===rangeKey(proposal)?"Applying…":"Accept"}</button>
+                <button type="button" disabled={busy} onClick={()=>dropRange(proposal)}>Reject</button>
+              </div>
+            </div>})}
           </section>
           <section><h3>Speaker and label proposals ({correctionResult.speakers?.proposals.length??0})</h3>
             {correctionResult.speakers?.proposals.map(proposal=>{const candidate=candidates.find(item=>item.id===proposal.speakerIdentity);return <div className="workspace-speaker-proposal" key={`${proposal.sourceJobIdentity}:${proposal.deepgramSpeaker}`}>
@@ -671,121 +936,265 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       )}
 
       <div className={`workspace-body ${toolsCollapsed?"tools-collapsed":""}`}>
-        {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceMode?new Set(lowConfidenceWords.map(item=>item.wordId)):new Set()} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onSplitParagraph={splitParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={id=>playParagraph(rendered?.paragraphs.find(item=>item.id===id)??null)} onPlayAt={seconds=>{void playAt(seconds)}} onEditingChange={editingChange}/>
-          :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
+        <div className="workspace-stage">
+          {printModel?<WorkspaceDocumentPages pages={printModel.pages} profile={printModel.layoutProfile} paragraphs={rendered?.paragraphs??[]} selectedParagraphId={selected?.paragraphId??null} selectedParagraphIds={selectedParagraphIds} selectedWordId={selected?.wordId||null} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIdSet} paragraphRangeMode={paragraphRangeMode} quickTools={quickTools} onSelect={selectPageFragment} onSaveParagraph={saveParagraph} onJoinParagraph={joinParagraph} onPlayParagraph={playParagraphById} onPlayAt={playAtSeconds} onEditingChange={editingChange}/>
+            :<section className="workspace-transcript" aria-label="Transcript">{rendered?.paragraphs.map(paragraph=>{
             const first=wordOrder.get(paragraph.words[0]?.id ?? ""),last=wordOrder.get(paragraph.words[paragraph.words.length-1]?.id ?? ""),touches=Boolean(range)&&first!==undefined&&last!==undefined&&!(range!.last<first||range!.first>last),mine=selected?.paragraphId===paragraph.id;
             return <TranscriptParagraph key={paragraph.id} paragraph={paragraph} wordOrder={wordOrder} isSelected={mine} selectedWordId={mine?selected!.wordId:null} rangeFirst={touches?range!.first:-1} rangeLast={touches?range!.last:-1} onSeek={seek} onSelect={selectWord} onEdit={editWord}/>})}</section>}
 
+          {!printModel&&quickTools({canInsertAtCaret:false,insertAtCaret:()=>{}})}
+        </div>
+
         <button type="button" className="workspace-tools-toggle" onClick={()=>setToolsCollapsed(value=>!value)} aria-expanded={!toolsCollapsed}>{toolsCollapsed?"Open transcript tools":"Collapse transcript tools"}</button>
-        <aside className="workspace-menu" aria-label="Paragraph labels" hidden={toolsCollapsed}>
-          <h2>Label</h2>
-          <section className="workspace-review-tools" aria-label="Low confidence review">
-            <h3>Low confidence</h3>
-            <label><input type="checkbox" checked={lowConfidenceMode} onChange={event=>setLowConfidenceMode(event.target.checked)}/> Show review marks</label>
-            <p className="workspace-hint">{lowConfidenceWords.length} unresolved · provisional configurable threshold</p>
-            <div><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(-1)}>Previous</button><button type="button" disabled={!lowConfidenceWords.length} onClick={()=>moveLowConfidence(1)}>Next</button></div>
-            {selectedWord?.lowConfidence&&<button type="button" disabled={busy} onClick={()=>void structuralTransaction([{op:"review",wordId:selectedWord.id,disposition:"APPROVED",at:new Date().toISOString()}])}>Approve selected occurrence</button>}
-          </section>
-          <section className="workspace-review-tools" aria-label="Find and replace">
-            <h3>Find / Replace</h3>
-            <button type="button" onClick={()=>setSearchOpen(value=>!value)} aria-expanded={searchOpen}>Find transcript (Ctrl+F)</button>
-            {searchOpen&&<>
-              <label>Find<input value={searchText} onChange={event=>setSearchText(event.target.value)}/></label>
-              <label><input type="checkbox" checked={matchCase} onChange={event=>setMatchCase(event.target.checked)}/> Match case</label>
-              <label><input type="checkbox" checked={wholeWords} onChange={event=>setWholeWords(event.target.checked)}/> Whole words</label>
-              <p className="workspace-hint">{searchMatches.length?`${Math.min(searchIndex+1,searchMatches.length)} of ${searchMatches.length} matches across all testimony`:"No matches"}</p>
-              <div><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex-1)}>Previous</button><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex+1)}>Next</button></div>
-              <button type="button" onClick={()=>setReplaceOpen(value=>!value)} aria-expanded={replaceOpen}>Replace (Ctrl+H)</button>
-              {replaceOpen&&<><label>Replace with<input value={replaceText} onChange={event=>setReplaceText(event.target.value)}/></label>
-                <div className="workspace-match-list">{searchMatches.map(match=><label key={match.id}><input type="checkbox" checked={!excludedMatches.has(match.id)} onChange={event=>setExcludedMatches(current=>{const next=new Set(current);if(event.target.checked)next.delete(match.id);else next.add(match.id);return next})}/><span>…{match.context}…</span></label>)}</div>
-                <button type="button" disabled={!searchMatches.length||busy} onClick={()=>{const match=searchMatches[searchIndex];if(match)void replaceMatches([match])}}>Replace current</button>
-                <button type="button" disabled={!searchMatches.some(match=>!excludedMatches.has(match.id))||busy} onClick={()=>{const chosen=searchMatches.filter(match=>!excludedMatches.has(match.id));if(window.confirm(`Replace ${chosen.length} selected occurrence${chosen.length===1?"":"s"} as one undoable action?`))void replaceMatches(chosen)}}>Replace selected ({searchMatches.filter(match=>!excludedMatches.has(match.id)).length})</button>
-              </>}
+        {/* THE CORRECTION COCKPIT.
+            Five sections, in the order a correction is actually made: see where you are, say who
+            spoke, fix the structure, fix the words, then move to the next piece of work.
+
+            Production Trial #1 decided the shape of the last one. The diagnostic measured 77
+            genuine missing turn boundaries in Baier, none of which needed audio to locate, and
+            found that accepting AI proposals one at a time costs a 195-second re-analysis each --
+            about 580 times slower than correcting the same locations by hand with these controls.
+            So REVIEW points at the work and these controls do it. */}
+        <aside className="workspace-menu" aria-label="Transcript tools" hidden={toolsCollapsed}>
+          {/* Beside the corrections, because undoing one is part of making them. */}
+          <div className="workspace-history">
+            <button type="button" onClick={()=>void post("/api/transcript/overlay/undo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.operations}>Undo</button>
+            <button type="button" onClick={()=>void post("/api/transcript/overlay/redo", overlayHistoryRequest({ depositionId, reviewStateHash:printModel?.source.reviewStateHash }), "transcript")} disabled={busy||awaitingRecord||!printModel||!rendered?.counts.redoTransactions}>Redo</button>
+          </div>
+
+          {/* ---- SELECTED PARAGRAPH ------------------------------------------------------ */}
+          <h2>Selected paragraph</h2>
+          {!active&&<p className="workspace-hint">Click a word in the transcript to correct its paragraph.</p>}
+          {active&&selectedSummary&&
+            <section className="workspace-selection-context" aria-label="Selected paragraph">
+              <p className="workspace-where">
+                {selectedSummary.location?<strong>Page {selectedSummary.location.page}, line {selectedSummary.location.line}</strong>:<strong>Not yet paginated</strong>}
+                <span> · {clock(selectedSummary.start)}–{clock(selectedSummary.end)}</span>
+              </p>
+              {/* "Current: SPEAKER 3" rather than "no speaker recorded". The reporter is looking at
+                  SPEAKER 3: on the page; saying something true but differently worded leaves them to
+                  connect the two, which is the whole job this panel exists to do. */}
+              <p className="workspace-who">
+                <span className="workspace-current-label">Current</span>
+                {currentSpeaker
+                  ? <strong className={currentSpeaker.known?"":"workspace-unresolved"}>{currentSpeaker.text}</strong>
+                  : <em>Nothing selected</em>}
+                {selectedSummary.designation?<span className="workspace-designation"> · prints as {selectedSummary.designation}</span>:null}
+              </p>
+              <div className="workspace-row">
+                <button type="button" disabled={multiVolume||!selectedSummary.playable||!playbackSource} onClick={()=>playParagraph(active)}>Play</button>
+                <span className="workspace-save-state" role="status">{error?<strong className="workspace-save-failed">Not saved — {error}</strong>:selectedSummary.saveState==="saving"?"Saving…":"Saved"}</span>
+              </div>
+              {selectedSummary.marked&&<p className="workspace-hint">Marked for another listen.</p>}
+              <button type="button" className="workspace-details-toggle" aria-expanded={showDetails} onClick={()=>setShowDetails(value=>!value)}>{showDetails?"Hide details":"Details"}</button>
+              {showDetails&&<dl>
+                <div><dt>Machine speaker</dt><dd>{selectedSummary.details.deepgramSpeaker??"—"}</dd></div>
+                <div><dt>Role</dt><dd>{selectedSummary.details.transcriptRole?ROLE_FOR(selectedSummary.details.transcriptRole):"Unassigned"}</dd></div>
+                <div><dt>Words</dt><dd>{selectedSummary.details.words}</dd></div>
+                <div><dt>Average confidence</dt><dd>{selectedSummary.details.averageConfidence===null?"Not available":`${(selectedSummary.details.averageConfidence*100).toFixed(1)}%`}</dd></div>
+                <div><dt>Low confidence</dt><dd>{selectedSummary.details.lowConfidenceWords}</dd></div>
+                <div><dt>Reporter-authored</dt><dd>{selectedSummary.details.authored}</dd></div>
+              </dl>}
+            </section>}
+
+          {/* ---- SPEAKER ---------------------------------------------------------------- */}
+          {/* One place for who spoke, built from this deposition's own record. Q. and A. are not
+              buttons here: they are derived from the speaker and the examination state, and a
+              button offering one would be the panel deciding something the transcript decides. */}
+          {/* A question, not a noun. "Speaker" names a topic; "Who spoke?" names the decision the
+              reporter came here to make, and it is the first actionable thing under the paragraph
+              they just clicked. The gate failed on exactly this: the control was present and could
+              not be found. */}
+          <h2>Who spoke?</h2>
+          {/* The scope is chosen, and the safe one is chosen already. Before this the panel read it
+              off the click position and said so in a sentence -- which is how counsel's question
+              ended up attributed to the witness, mid-sentence, from one click. */}
+          {active&&<div className="workspace-scope-choice" role="radiogroup" aria-label="What the speaker applies to">
+            {range
+              ? <p className="workspace-scope"><strong>These {rangeWords} words.</strong></p>
+              : scopeChoices.map(choice=>(
+                  <button type="button" key={choice.key} role="radio" aria-checked={speakerScope===choice.key}
+                    className={`workspace-scope-option ${speakerScope===choice.key?"chosen":""}`}
+                    onClick={()=>setSpeakerScope(choice.key as "paragraph"|"here")}>{choice.label}</button>
+                ))}
+          </div>}
+          {speakerList.map(action=>action.kind==="other"
+            ? <button type="button" key={action.key} className="workspace-speaker-other" disabled={busy||awaitingRecord} onClick={()=>{
+                document.getElementById("workspace-add-missing-counsel")?.click();
+                document.getElementById("workspace-counsel-editor")?.scrollIntoView({behavior:"smooth",block:"start"});
+              }}>{action.label} <small>{action.note}</small></button>
+            : <button type="button" key={action.key} className="workspace-speaker-choice" disabled={!active||busy||awaitingRecord}
+                title={action.role?ROLE_FOR(action.role):undefined}
+                onClick={()=>active&&relabel(active,action.speakerIdentity,action.transcriptRole)}>
+                {action.label}
+                {action.note?<small>{action.note}</small>:action.role?<small>{ROLE_FOR(action.role)}{action.examiner?" · examining":""}</small>:null}
+              </button>)}
+
+          {/* The OTHER scope, named with its size and deliberately not a one-click action here.
+              Trial #1's cluster 3 holds 86 passages and at least four of them are not the witness,
+              including opposing counsel reserving questions. A reporter who clicked a name should
+              never discover afterwards that they moved 86 passages. */}
+          {globalScope&&<p className="workspace-global-scope">
+            All {globalScope.passages} passages the recording grouped as <strong>{globalScope.label}</strong>?{" "}
+            <button type="button" className="workspace-linklike" onClick={()=>{setShowSetup(true);setShowSpeakers(true);window.setTimeout(()=>document.getElementById("workspace-speakers")?.scrollIntoView({behavior:"smooth",block:"center"}),0)}}>Map the whole speaker in Speaker setup</button>
+          </p>}
+
+          {/* ---- STRUCTURE -------------------------------------------------------------- */}
+          <h2>Structure</h2>
+          {!active&&<p className="workspace-hint">Select a paragraph to change its structure.</p>}
+          {active&&structureActions({
+            paragraph:active, index:activeIndex, total:rendered?.paragraphs.length??0, selectedWordId:selected?.wordId??null,
+            examinerColloquyAvailable:!examinerColloquyControl({paragraph:active}).disabledReason,
+            examinationAvailable:!examinationControl({paragraph:active,candidates,examinations:rendered?.examinations??[],labels:rendered?.labels??{}}).disabledReason,
+          }).map(item=>{
+            if(item.key==="examination")return item.available?<Fragment key={item.key}>
+              <label className="workspace-field" htmlFor="examination-type">What begins here
+                <select id="examination-type" value={examinationType} disabled={busy||awaitingRecord} onChange={event=>setExaminationType(event.target.value)}>
+                  <option value="">Choose…</option>
+                  {EXAMINATION_TYPE_CHOICES.map(choice=>(<option key={choice.value} value={choice.value}>{choice.label}</option>))}
+                </select>
+              </label>
+              <label className="workspace-field" htmlFor="examination-examiner">Who is examining
+                <select id="examination-examiner" value={examinationExaminer} disabled={busy||awaitingRecord} onChange={event=>setExaminationExaminer(event.target.value)}>
+                  <option value="">Choose…</option>
+                  {examinationControl({paragraph:active,candidates,examinations:rendered?.examinations??[],labels:rendered?.labels??{}}).examiners.map(person=>(<option key={person.id} value={person.id}>{person.label}</option>))}
+                </select>
+              </label>
+              {/* The button says what it will record, so it can be checked against the screen. */}
+              <button type="button" disabled={busy||awaitingRecord||!examinationSummaryText} onClick={()=>{
+                const operation=examinationOperation({ paragraph:active, type:examinationType, examinerPersonId:examinationExaminer });
+                if(!operation)return;
+                setExaminationType(""); setExaminationExaminer(""); setSelected(null);
+                void structuralTransaction([operation]);
+              }}>{examinationSummaryText||"Choose what begins here and who is examining"}</button>
+            </Fragment>:null;
+            if(item.key==="examiner-colloquy")return item.available?<button type="button" key={item.key} disabled={busy||awaitingRecord} onClick={()=>{
+              const operation=examinerColloquyOperation({ paragraph:active });
+              if(!operation)return;
+              setSelected(null);
+              void structuralTransaction([operation]);
+            }}>{examinerColloquyLabel({ paragraph:active, labels:rendered?.labels??{} })}</button>:null;
+            // Striking removes testimony, so it asks first and says how much. It is one transaction
+            // whatever the paragraph's length, so one Undo brings all of it back.
+            const onClick=item.key==="strike"?()=>{
+              const operations=strikeParagraphOperations({paragraph:active});
+              if(!operations.length)return;
+              const preview=active.words.filter(word=>!word.deleted).map(word=>word.text).join(" ");
+              if(!window.confirm(`Strike ${operations.length} word${operations.length===1?"":"s"} from the transcript?
+
+${preview.length>160?`${preview.slice(0,160)}…`:preview}
+
+The recording is not changed, and Undo restores this in one step.`))return;
+              setSelected(null);
+              void structuralTransaction(operations);
+            }
+              :item.key==="split"?()=>{const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}
+              :item.key==="join-previous"?()=>void joinParagraph(active.id,"previous")
+              :item.key==="join-next"?()=>void joinParagraph(active.id,"next")
+              :flagSelection;
+            const label=item.key==="mark"&&range?`Mark these ${rangeWords} words for another listen`:item.label;
+            return <button type="button" key={item.key} className={item.destructive?"workspace-destructive":undefined} disabled={!item.available||busy||awaitingRecord} title={item.available?undefined:item.unavailable??undefined} onClick={onClick}>{label}</button>;
+          })}
+          {selectedWord?.flagged&&<button type="button" disabled={busy||awaitingRecord} onClick={()=>{const from=selectedWord.flaggedFrom;if(from)void append([{ op:"unflag", fromWordId:from }])}}>Clear this mark</button>}
+
+          {/* ---- TEXT ------------------------------------------------------------------- */}
+          <h2>Text</h2>
+          {editing&&<form className="workspace-edit" onSubmit={event=>{ event.preventDefault(); const text=editing.text.trim(); setEditing(null); if(text) void append([{ op:"replace", wordId:editing.wordId, text }]); }}>
+            <label htmlFor="workspace-word-edit">Correct this word</label>
+            <input id="workspace-word-edit" value={editing.text} ref={node=>{ node?.focus(); }} onChange={event=>setEditing({ ...editing, text:event.target.value })} />
+            <button type="submit" className="primary-button" disabled={busy||awaitingRecord}>Save</button>
+            <button type="button" onClick={()=>setEditing(null)}>Cancel</button>
+          </form>}
+          {/* Word controls appear when a word is selected. Hidden while a range is: a range is not
+              a word, and leaving "Strike the word" pointing at the anchor invites striking one
+              word when eleven look selected. */}
+          {selected&&!editing&&!range&&<>
+            <button type="button" disabled={busy||awaitingRecord} onClick={()=>{ const word=active?.words.find(item=>item.id===selected.wordId); if(word) setEditing({ wordId:word.id, text:word.text }); }}>Correct the word</button>
+            <button type="button" disabled={busy||awaitingRecord} onClick={()=>{ const id=selected.wordId; setSelected(null); void append([{ op:"delete", wordId:id }]); }}>Strike the word</button>
+          </>}
+          <button type="button" onClick={()=>setSearchOpen(value=>!value)} aria-expanded={searchOpen}>Find / Replace (Ctrl+F)</button>
+          {searchOpen&&<>
+            <label>Find<input value={searchText} onChange={event=>setSearchText(event.target.value)}/></label>
+            <label><input type="checkbox" checked={matchCase} onChange={event=>setMatchCase(event.target.checked)}/> Match case</label>
+            <label><input type="checkbox" checked={wholeWords} onChange={event=>setWholeWords(event.target.checked)}/> Whole words</label>
+            {/* An empty box has not failed to find anything. Reporting "No matches" before a word
+                has been typed reads as a broken search, which is exactly how it was reported. */}
+            <p className="workspace-hint">{!searchText.trim()?"Type to search all testimony."
+              :searchMatches.length?`${Math.min(searchIndex+1,searchMatches.length)} of ${searchMatches.length} matches across all testimony`
+              :`No match for “${searchText}”.`}</p>
+            <div className="workspace-row"><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex-1)}>Previous</button><button type="button" disabled={!searchMatches.length} onClick={()=>navigateMatch(searchIndex+1)}>Next</button></div>
+            <button type="button" onClick={()=>setReplaceOpen(value=>!value)} aria-expanded={replaceOpen}>Replace (Ctrl+H)</button>
+            {replaceOpen&&<><label>Replace with<input value={replaceText} onChange={event=>setReplaceText(event.target.value)}/></label>
+              <div className="workspace-match-list">{searchMatches.map(match=><label key={match.id}><input type="checkbox" checked={!excludedMatches.has(match.id)} onChange={event=>setExcludedMatches(current=>{const next=new Set(current);if(event.target.checked)next.delete(match.id);else next.add(match.id);return next})}/><span>…{match.context}…</span></label>)}</div>
+              <button type="button" disabled={!searchMatches.length||busy} onClick={()=>{const match=searchMatches[searchIndex];if(match)void replaceMatches([match])}}>Replace current</button>
+              <button type="button" disabled={!searchMatches.some(match=>!excludedMatches.has(match.id))||busy} onClick={()=>{const chosen=searchMatches.filter(match=>!excludedMatches.has(match.id));if(window.confirm(`Replace ${chosen.length} selected occurrence${chosen.length===1?"":"s"} as one undoable action?`))void replaceMatches(chosen)}}>Replace selected ({searchMatches.filter(match=>!excludedMatches.has(match.id)).length})</button>
             </>}
-          </section>
-          <section className="workspace-review-tools" aria-label="Unresolved participant honorifics">
+          </>}
+
+          {/* ---- REVIEW ----------------------------------------------------------------- */}
+          {/* A worklist, not an acceptance queue. AI says where to look; everything above does the
+              work. The counts are outstanding items, so a category that is finished disappears
+              rather than reading zero. */}
+          <h2>Review</h2>
+          <label className="workspace-review-marks"><input type="checkbox" checked={lowConfidenceMode} onChange={event=>setLowConfidenceMode(event.target.checked)}/> Show review marks in the transcript</label>
+          {!reviewList.length&&<p className="workspace-hint">Nothing outstanding. Run Correct Transcript to look for speaker and spelling issues.</p>}
+          {reviewList.map(category=><div className="workspace-review-category" key={category.key}>
+            <button type="button" className={`workspace-review-open ${reviewKey===category.key?"chosen":""}`} aria-expanded={reviewKey===category.key}
+              onClick={()=>{setReviewKey(current=>current===category.key?"":category.key);setReviewIndex(-1)}}>
+              <span>{category.label}</span><strong>{category.count}</strong>
+            </button>
+            {reviewKey===category.key&&<div className="workspace-review-body">
+              <div className="workspace-row">
+                <button type="button" onClick={()=>stepReview(category,-1)}>Previous</button>
+                <button type="button" onClick={()=>stepReview(category,1)}>Next</button>
+                <span className="workspace-hint">{reviewIndex>=0?`${reviewIndex+1} of ${category.count}`:`${category.count} ${category.unit}`}</span>
+              </div>
+              {category.key==="speaker"&&reviewIndex>=0&&(()=>{
+                const item=category.items[reviewIndex];
+                const first=item?.proposals?.[0];
+                if(!first)return null;
+                const scope=proposalScopeDescription(first,{labels:rendered?.labels??{}});
+                return <div className="workspace-review-reason">
+                  <p><strong>{scope.headline}</strong></p>
+                  <p className="workspace-hint">{scope.detail}</p>
+                  <p className="workspace-review-words">“{first.text}”</p>
+                  <p className="workspace-hint">{Math.round((first.confidenceScore??0)*100)}% confidence · {first.evidenceSource}{(item.proposals?.length??0)>1?` · ${item.proposals?.length} findings in this paragraph`:""}</p>
+                </div>;
+              })()}
+            </div>}
+          </div>)}
+
+          {/* ---- SPEAKER SETUP ------------------------------------------------------------ */}
+          {/* Deposition-level work: who was in the room, which voice is which, how each name is
+              titled. None of it is per-paragraph, and all of it used to sit in the same scroll as
+              the correction controls -- which is how a reporter looking for "who spoke this
+              paragraph" ended up reading a Counsel Editor. Collapsed by default; the correction
+              controls above never move because of what is in here. */}
+          <h2>Speaker setup</h2>
+          <button type="button" className="workspace-setup-toggle" aria-expanded={showSetup} onClick={()=>setShowSetup(value=>!value)}>
+            {showSetup?"Hide participants and speaker map":"Participants, speaker map and honorifics"}
+          </button>
+          {showSetup&&<>
+          {showSetup&&unresolvedHonorifics.length>0&&<section className="workspace-review-tools" aria-label="Unresolved participant honorifics">
+            {/* Beside the participants rather than in the per-paragraph tools: an honorific is a
+                fact about a person, settled once, not a decision made per paragraph. */}
             <h3>Honorifics</h3>
             <p className="workspace-hint">{unresolvedHonorifics.length} unresolved participant{unresolvedHonorifics.length===1?"":"s"}</p>
             {unresolvedHonorifics.map(finding=><div className="workspace-honorific" key={finding.speakerIdentity}>
               <strong>{finding.name||finding.speakerIdentity}</strong>
-              {["MR.","MS.","MRS.","DR."].map(value=><button type="button" key={value} disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,value)}>{value}</button>)}
-              <button type="button" disabled={busy} onClick={()=>{const value=window.prompt("Enter the participant's honorific");if(value&&finding.speakerIdentity)void resolveHonorific(finding.speakerIdentity,value)}}>Other</button>
-              <button type="button" disabled={busy} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,null)}>None</button>
+              {["MR.","MS.","MRS.","DR."].map(value=><button type="button" key={value} disabled={busy||awaitingRecord} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,value)}>{value}</button>)}
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>{const value=window.prompt("Enter the participant's honorific");if(value&&finding.speakerIdentity)void resolveHonorific(finding.speakerIdentity,value)}}>Other</button>
+              <button type="button" disabled={busy||awaitingRecord} onClick={()=>finding.speakerIdentity&&void resolveHonorific(finding.speakerIdentity,null)}>None</button>
             </div>)}
-          </section>
-          <p className="workspace-hint">
-            {range ? `${rangeWords} words selected. Choosing a label still acts on the anchor word; single-word edits are unavailable while a range is selected.`
-              : active ? `Selected "${active.words.find(word=>word.id===selected?.wordId)?.text ?? ""}". Choosing a label starts a new paragraph at that word. Hold shift and click another word to select a range.`
-              : "Click a word, then choose what its paragraph should be."}
-          </p>
-          {active&&<section className="workspace-selection-context" aria-label="Selected paragraph evidence">
-            <h3>Selected paragraph</h3>
-            <dl><div><dt>Speaker</dt><dd>{active.label??`Speaker ${active.deepgramSpeaker??"?"}`}</dd></div><div><dt>Role</dt><dd>{active.transcriptRole?ROLE_FOR(active.transcriptRole):"Unassigned"}</dd></div><div><dt>Evidence</dt><dd>{active.start!==null&&active.end!==null?`${clock(active.start)}–${clock(active.end)}`:"No measured audio range"}</dd></div><div><dt>Confidence</dt><dd>{(()=>{const measured=active.words.filter(word=>word.confidence!==null);return measured.length?`${(measured.reduce((sum,word)=>sum+(word.confidence??0),0)/measured.length*100).toFixed(1)}% average`:"Not available"})()}</dd></div><div><dt>Status</dt><dd>{active.words.some(word=>word.flagged)?"Marked for re-listen":active.words.every(word=>word.authored)?"Reporter-authored":"Evidence-linked"}</dd></div></dl>
-            <button type="button" disabled={multiVolume||active.start===null||active.end===null||!playbackSource} onClick={()=>playParagraph(active)}>Play paragraph</button>
-            {multiVolume&&<p className="workspace-hint">Playback is disabled because the source recording cannot be resolved safely.</p>}
           </section>}
-          {/* One mark, one meaning. A mark whose meaning is chosen per mark asks the scopist to
-              make a decision at the moment this exists to make fast, and everything else a
-              passage might need is already an operation: replace corrects, delete strikes, label
-              reattributes. Marking changes no text -- the passage reads exactly as it did. */}
-          <button type="button" className="workspace-mark" disabled={!selected||busy} onClick={flagSelection}>
-            {range ? `Mark these ${rangeWords} words for another listen` : "Mark for another listen"}
-          </button>
-          {selectedWord?.flagged && (
-            <button type="button" disabled={busy} onClick={()=>{ const from=selectedWord.flaggedFrom; if(from) void append([{ op:"unflag", fromWordId:from }]); }}>
-              Clear this mark
-            </button>
-          )}
-          {/* Join was reachable only from the document pages, on Backspace at the start of a
-              paragraph and Delete at the end. The operation was built, tested and wired -- it was
-              the keystroke nobody could guess. These call the same joinParagraph, so a paragraph
-              broken in the wrong place is repaired the same way from either screen.
-
-              They act on whole paragraphs, which is what join does. Moving a highlighted span
-              alone would be split-then-join, and is deliberately not what these buttons claim. */}
-          <h3>Paragraph</h3>
-          <button type="button" disabled={!active||busy||activeIndex<=0} onClick={()=>active&&void joinParagraph(active.id,"previous")}>
-            Join to previous paragraph
-          </button>
-          <button type="button" disabled={!active||busy||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1} onClick={()=>active&&void joinParagraph(active.id,"next")}>
-            Join to next paragraph
-          </button>
-          <h3>Label</h3>
-          <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="QUESTIONING_ATTORNEY")?.id??examiner??null,"QUESTIONING_ATTORNEY")}>Q.</button>
-          <button type="button" disabled={!active||busy} onClick={()=>active&&relabel(active,candidates.find(item=>item.defaultRole==="WITNESS")?.id??null,"WITNESS")}>A.</button>
-          <h3>Colloquy</h3>
-          {candidates.map(candidate=>(
-            <button type="button" key={candidate.id} disabled={!active||busy} onClick={()=>active&&relabel(active,candidate.id,candidate.defaultRole)}>
-              {rendered?.labels?.[candidate.id] ?? candidate.label}
-            </button>
-          ))}
-          {editing && (
-            <form className="workspace-edit" onSubmit={event=>{ event.preventDefault(); const text=editing.text.trim(); setEditing(null); if(text) void append([{ op:"replace", wordId:editing.wordId, text }]); }}>
-              <label htmlFor="workspace-word-edit">Correct this word</label>
-              {/* Focused via a callback ref rather than autoFocus. The a11y objection to
-                  autoFocus is disorientation on page load; this input appears only in response
-                  to the reporter choosing "Correct the word", where moving focus to it is the
-                  expected behaviour and skipping it would strand keyboard users. */}
-              <input id="workspace-word-edit" value={editing.text} ref={node=>{ node?.focus(); }} onChange={event=>setEditing({ ...editing, text:event.target.value })} />
-              <button type="submit" className="primary-button" disabled={busy}>Save</button>
-              <button type="button" onClick={()=>setEditing(null)}>Cancel</button>
-            </form>
-          )}
-          {/* Hidden while a range is selected: a range is not a word, and leaving "Strike the
-              word" pointing at the anchor invites striking one word when eleven look selected. */}
-          {selected && !editing && !range && (
-            <>
-              <h3>This word</h3>
-              <button type="button" disabled={busy} onClick={()=>{ const word=active?.words.find(item=>item.id===selected.wordId); if(word) setEditing({ wordId:word.id, text:word.text }); }}>Correct the word</button>
-              <button type="button" disabled={busy} onClick={()=>{ const id=selected.wordId; setSelected(null); void append([{ op:"delete", wordId:id }]); }}>Strike the word</button>
-            </>
-          )}
-
-          {/* Beside the speaker work, because that is where a reporter is already deciding who was
-              in the room. Correcting a name here and mapping a voice to it are the same task seen
-              from two sides, and the examining attorney is chosen from this roster. */}
           <h2>Counsel</h2>
           <CounselEditor depositionId={depositionId} onSaved={reload} speakerOptions={speakerOptions} speakerAssignmentForCounsel={speakerAssignmentForCounsel} onSpeakerAssignment={assignCounselSpeaker} />
+
+          {/* And the parties, because the caption names them and nothing else in the application
+              could. A deposition made from an existing recording reaches finalization with an empty
+              parties list and a certified caption with nothing under PLAINTIFF or DEFENDANT. */}
+          <h2>Parties</h2>
+          <PartiesEditor depositionId={depositionId} onSaved={reload} />
 
           <h2>Speakers</h2>
           <button type="button" className="secondary-button" onClick={()=>{
@@ -822,7 +1231,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
                 <small className="workspace-sample">{bucket.sample}…</small>
               </div>
             ))}
-            <button type="button" className="primary-button" disabled={busy} onClick={()=>{ void (async ()=>{
+            <button type="button" className="primary-button" disabled={busy||awaitingRecord} onClick={()=>{ void (async ()=>{
               // Each bucket carries the job its paragraphs came from. The previous payload took
               // one job identity from the first rendered paragraph and stamped it on every
               // assignment, which is right only while a single job is in the transcript.
@@ -853,6 +1262,7 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
               {candidates.filter(candidate=>candidate.defaultRole.includes("ATTORNEY")).map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
             </select>
           </div>
+          </>}
         </aside>
       </div>
     </main>

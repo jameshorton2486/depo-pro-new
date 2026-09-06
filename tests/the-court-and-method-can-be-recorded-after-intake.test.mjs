@@ -28,6 +28,15 @@ function throwawayDeposition() {
     schemaVersion: "1.0.0",
     case: { court: missing(), county: missing(), causeNumber: missing() },
     deposition: { remote: missing(), location: missing(), remotePlatform: missing(), witness: missing() },
+    // These four are canonical deposition facts and are recorded through the correction log now,
+    // which demands who made the change. The reporter is read from this record rather than accepted
+    // from a caller, so a deposition with nobody on it cannot record them -- and the fixture used
+    // to be exactly that, which is how it caught the migration.
+    //
+    // A real deposition always has one: creation requires a courtReporterId, and this shape is what
+    // buildCanonicalRecord produces from it.
+    reporter: { fullName: { value: "Miah Bardot", source: "REPORTER_PROFILE", state: "EXTRACTED", confidence: null, citations: [] },
+                csrNumber: { value: "12129", source: "REPORTER_PROFILE", state: "EXTRACTED", confidence: null, citations: [] } },
   }));
   return { root, storageRoot: path.join(root, "store"), file: path.join(directory, "intake", "canonical-deposition-record.json") };
 }

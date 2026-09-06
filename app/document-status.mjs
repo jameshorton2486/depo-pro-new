@@ -61,7 +61,7 @@ export function deriveDocumentStatus({ servedRecordType = null, blockedReason = 
 
 /** The control names its output, so the reporter reads what they are about to make. */
 export function documentControlLabel(state) {
-  return state === DOCUMENT_STATUS.READY ? "Generate complete transcript Word" : "Generate testimony-only Word";
+  return state === DOCUMENT_STATUS.READY ? "Generate Working DOCX" : "Generate Working testimony-only DOCX";
 }
 
 /**

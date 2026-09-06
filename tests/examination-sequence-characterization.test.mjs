@@ -22,7 +22,7 @@ import { WORKING } from "./fixtures/long-deposition.mjs";
 
 const LABELS = { alvarez: "MR. ALVAREZ", whitfield: "MS. WHITFIELD", ramirez: "MS. RAMIREZ", witness: "THE WITNESS" };
 const say = (id, role, text) => ({ id: `${id}-${text.slice(0, 8)}`, speakerIdentity: id, transcriptRole: role, text });
-const shape = paragraphs => labelParagraphs(paragraphs, { labels: LABELS, examinerIdentity: "alvarez" })
+const shape = paragraphs => labelParagraphs(paragraphs, { labels: LABELS, examinerIdentity: "alvarez" }).paragraphs
   .map(p => `${p.elementType}:${p.label ?? "-"}`);
 
 test("direct examination by the named examiner is testimony, as it should be", () => {

@@ -1,7 +1,7 @@
 # ADR-0022 — The index enumerates the sections it can locate, and does not enumerate examinations
 
 **File:** docs/architecture/adr/ADR-0022-the-index-does-not-enumerate-examinations.md
-**Status:** RATIFIED
+**Status:** SUPERSEDED — by its own reopening condition, 2026-09-01
 **Date:** 2026-08-24
 **Related:** ADR-0021 (unknown is not the same as intentionally blank); the standing ruling that an
 examination boundary is a movable reporter-controlled marker defaulted to the first witness turn
@@ -92,6 +92,31 @@ way to reconcile them when the marker lands.
 **D5 — The omission must be visible.** A certified index that silently omits examinations claims a
 completeness it does not have. The page must not present as a complete index of a document it has
 only partly indexed.
+
+## Superseded, 2026-09-01, on the condition this ADR set for itself
+
+The reopening condition below became true. The persisted examination-boundary marker landed in the
+reporter overlay as the `examination` operation (Phase B, #67); `labelParagraphs` resolves the
+sequence and returns it (Phase D1, #69); the transcript announces each examination (Phase D2, #70);
+and the index enumerates them with ranges read from the paginator's own line traces (Phase D3,
+#71). Qualified through to Word on a 217-page document whose index cites page 138 for a
+cross-examination that prints its heading on page 138.
+
+**D1 through D5 were right when they were written and are not being reversed.** Each rested on the
+marker not existing, and each said so. D3 named the trap precisely -- detection would have made the
+index assert structure the record could not corroborate -- and D4 named the other one, that
+reporter-entered examinations before the marker would create two sources of truth about where an
+examination starts. Both were avoided by waiting rather than by guessing, and the boundary that
+arrived is the movable reporter-controlled marker the standing ruling described.
+
+The two questions this ADR held open are settled by that work: the omission statement is moot
+because nothing is omitted, and the witness heading stays -- it now carries the examinations the
+specimen showed it exists to carry.
+
+Its closing sentence is the one that held: *the specimens say otherwise and this ADR agrees with
+them.*
+
+---
 
 ## Reopening condition (controlling)
 

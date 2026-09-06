@@ -4,7 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { prepareInsertionRenderingArtifact } from "../server/insertion-pages/word-service.mjs";
+
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
 
 // A waived field is a third state, and the certified rendering path now says so.
 //
@@ -35,7 +48,7 @@ function scratch(t, { reporter = {}, court = "In the 285th Judicial District Cou
   fs.writeFileSync(
     path.join(folder, "intake", "canonical-deposition-record.json"),
     JSON.stringify(
-      createCanonicalDepositionRecord({
+      attested({
         court,
         causeNumber: "2024-CI-11223",
         caseStyle: "Etminan v. Baptist",

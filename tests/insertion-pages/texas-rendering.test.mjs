@@ -40,7 +40,13 @@ async function validInput(signatureDisposition, operatorExtras = {}) {
 }
 
 for (const [disposition, expectedRoles] of [
-  ["requested", ["title", "appearances", "index", "changes", "signature", "certification1", "certification2", "certification3"]],
+  // The requested variant carries a second certification1 page. This fixture leaves the three Rule
+  // 203 workflow dates deferred, so the certificate prints their fill-in rules -- and restoring two
+  // lines that used to be dropped altogether, together with a two-party time-used list that wraps,
+  // takes the page past 25 lines. The same fixture with those dates established already overflowed
+  // the same way before stage-one deferral existed, so the continuation is the template's own
+  // behaviour on a long certification, not something the rules introduced.
+  ["requested", ["title", "appearances", "index", "changes", "signature", "certification1", "certification1", "certification2", "certification3"]],
   ["waived", ["title", "appearances", "index", "certification1", "certification2"]],
 ]) test(`Texas ${disposition} variant follows the reviewed UFM figure structure`, async () => {
   const input = await validInput(disposition);

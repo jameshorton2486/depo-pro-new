@@ -46,3 +46,47 @@ export function captionJurisdiction(court = "") {
   if (OTHER_STATES.test(value)) return "unsupported";
   return null;
 }
+
+// Rule 203 facts a stage-one signature-requested certificate cannot yet state, and the width of the
+// rule printed in their place.
+//
+// Three states, not two. A missing required fact refuses; a known fact prints; a fact that has not
+// happened yet prints an intentional fill-in rule so the clause stays whole. The reviewed template
+// carries bare carets, so a deferred field resolving to null silently ate its own sentence --
+// measured, "submitted on ^cert.submissionDate^ to the witness" rendered as "submitted on" and the
+// rest of the clause disappeared. That is what this exists to prevent.
+//
+// Widths. The first six are measured from the reporter's own certified Etminan transcript, clause by
+// clause: a dollar amount gets a shorter rule than an attorney name because that is what the
+// certified form does. The two certification dates are Depo-Pro presentation policy, NOT
+// measurements -- the certified transcript segments them as "___ day of ___, ___" while this
+// reviewed template gives one caret the whole phrase, so there was nothing to measure. Twenty
+// matches the other date rules here.
+//
+// There is deliberately no default. A deferred field with no width refuses rather than receiving a
+// plausible-looking blank, because something the application does not understand must never reach a
+// certified page looking like something it does.
+//
+// Scoped to the one variant a real deposition has exercised. Waived and federal are untouched: no
+// source document has been read for them, and a blank permitted without evidence is the same
+// mistake in the other direction.
+export const STAGE_ONE_DEFERRED_VARIANT = "TEXAS_STATE_SIGNATURE_REQUESTED";
+export const STAGE_ONE_DEFERRED_RULE_WIDTHS = Object.freeze({
+  "cert.submissionDate": 20,
+  "cert.returnDeadline": 20,
+  "cert.returnStatus": 25,
+  "cert.custodialAttorney": 25,
+  "cert.charges": 10,
+  "cert.serviceDate": 11,
+  "cert.certificationDate": 20,
+  "cert.furtherCertificationDate": 20,
+});
+
+/** The printed rule for a deferred field, or a refusal if no width was declared for it. */
+export function deferredRule(field) {
+  const width = STAGE_ONE_DEFERRED_RULE_WIDTHS[field];
+  if (!Number.isInteger(width) || width < 1) {
+    throw new Error(`STAGE_ONE_DEFERRED_WIDTH_REQUIRED: ${field} is deferred at stage one but no printed-rule width is declared for it.`);
+  }
+  return "_".repeat(width);
+}

@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanonicalDepositionRecord } from "../../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "../canonical-oath-fixture.mjs";
 import { assembleInsertionInput } from "../../server/insertion-pages/assemble.mjs";
 import { loadTemplateVariant } from "../../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../../server/insertion-pages/validate.mjs";
 
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
+
 async function thomasFixture() {
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     jurisdictionType: "federal",
     court: "UNITED STATES DISTRICT COURT FOR THE WESTERN DISTRICT OF TEXAS",
     causeNumber: "25-CV-00598-OLG",
@@ -86,15 +99,11 @@ test("Thomas regression fixture produces exactly the approved blocking defects a
     "INDEX_PAGE_MISMATCH:index.section.changesAndSignature",
     "INDEX_UNRESOLVED_ENTRY:index.page.75",
     "INDEX_UNRESOLVED_ENTRY:index.section.changesAndSignature",
-    "UNEXPECTED_BLANK:cert.certificationDate",
-    "UNEXPECTED_BLANK:cert.charges",
+    // Eight of the nine cert.* blanks left this list when Rule 203 stage-one deferral landed:
+    // they name events that have not occurred when a transcript is certified, and they now print
+    // a rule the reporter fills in by hand. chargesResponsibleParty stays, because who is
+    // responsible for the charges is settled at the deposition and Thomas has not recorded it.
     "UNEXPECTED_BLANK:cert.chargesResponsibleParty",
-    "UNEXPECTED_BLANK:cert.custodialAttorney",
-    "UNEXPECTED_BLANK:cert.furtherCertificationDate",
-    "UNEXPECTED_BLANK:cert.returnDeadline",
-    "UNEXPECTED_BLANK:cert.returnStatus",
-    "UNEXPECTED_BLANK:cert.serviceDate",
-    "UNEXPECTED_BLANK:cert.submissionDate",
   ].sort());
   assert.deepEqual(pairs("warning"), [
     "ADDRESS_PUNCTUATION:appearances.address",

@@ -1,0 +1,18 @@
+{
+  "templateId": "federal-certificate-composed-v1",
+  "version": "1.0.0",
+  "available": true,
+  "reviewStatus": "reviewed",
+  "reviewedBy": "James Horton, product owner",
+  "reviewedAt": "2026-09-02",
+  "scope": "Federal Rule 30(f)(1) certificate with affirmation and Rule 30(e)(2) requested-review components; same administering and certifying officer only",
+  "authority": {
+    "certificateCore": ["Fed. R. Civ. P. 30(f)(1)"],
+    "reviewElection": ["Fed. R. Civ. P. 30(e)(1)-(2)"],
+    "affirmationConstruction": ["1 U.S.C. § 1"]
+  },
+  "templates": {
+    "fieldInventory": { "file": "../common/federal-field-inventory.tmpl", "sha256": "64ef7b4b184a517fc3d3b148a30d242f8f43509f7b09506813df9eb196e10d27" },
+    "certification": { "file": "../common/federal-certification.tmpl", "sha256": "a69a118a9da6514a5868017da4d362ef19a75ee48638f721d0b5bec1952ad12f" }
+  }
+}

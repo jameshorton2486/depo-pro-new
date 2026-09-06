@@ -11,7 +11,7 @@ const CANDIDATES = [
 ];
 const { labels } = buildSpeakerLabels(CANDIDATES);
 const say = (speakerIdentity, transcriptRole, text = "words") => ({ speakerIdentity, transcriptRole, text });
-const run = paragraphs => labelParagraphs(paragraphs, { labels, examinerIdentity:"counsel-bentley" });
+const run = paragraphs => labelParagraphs(paragraphs, { labels, examinerIdentity:"counsel-bentley" }).paragraphs;
 const shape = result => result.map(p => [p.elementType, p.label, p.byLine]);
 
 test("attorney labels are honorific plus surname, uppercased",()=>{
@@ -130,12 +130,12 @@ test("the witness speaking outside an answer is THE WITNESS:, not A.",()=>{
 });
 
 test("with no examiner set, the first questioning attorney becomes one",()=>{
-  const result = labelParagraphs([say("counsel-bentley","QUESTIONING_ATTORNEY"), say("witness","WITNESS")], { labels });
+  const result = labelParagraphs([say("counsel-bentley","QUESTIONING_ATTORNEY"), say("witness","WITNESS")], { labels }).paragraphs;
   assert.deepEqual(shape(result),[[ELEMENT.QUESTION,"Q.",null],[ELEMENT.ANSWER,"A.",null]]);
 });
 
 test("an unassigned speaker is flagged rather than labelled blank",()=>{
-  const result = labelParagraphs([{ speakerIdentity:null, transcriptRole:null, text:"unknown" }], { labels });
+  const result = labelParagraphs([{ speakerIdentity:null, transcriptRole:null, text:"unknown" }], { labels }).paragraphs;
   assert.equal(result[0].elementType,ELEMENT.COLLOQUY);
   assert.equal(result[0].label,null);
   assert.equal(result[0].unlabeledSpeaker,true);

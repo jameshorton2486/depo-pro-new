@@ -1,11 +1,59 @@
 {
   "$comment": [
     "Approval for insertion-page templates. An entry approves a variant's template set as it stood at contentDigest -- the sha256 of the variant name plus every template file it renders from and that file's hash. Edit any of those files and re-hash the manifest and the digest changes, so the approval no longer applies and the variant refuses to generate with CERT_TEMPLATE_UNAPPROVED until it is re-approved.",
-    "Write entries with: node scripts/approve-insertion-template.mjs <VARIANT> --by \"<name>\". Do not hand-edit contentDigest; a digest typed by the author who made the edit is the failure this file exists to prevent.",
+    "Write entries with: node scripts/approve-insertion-template.mjs <VARIANT> --by \"<name>\" --role \"<role>\" --scope \"<scope>\". Do not hand-edit contentDigest; a digest typed by the author who made the edit is the failure this file exists to prevent.",
     "approvedBy is a recorded claim, not a verified one -- nothing checks who typed it. The digest is what enforces; the name is what a reader asks about.",
     "The two Texas entries were seeded on 2026-08-24 when this gate was added, carrying forward verbatim the reviewedBy and reviewedAt each manifest already stated. They record what the manifests claimed at that point, now bound to the content that was in the tree at that point."
   ],
   "approvals": {
+    "FEDERAL_AFFIRMATION_REVIEW_NOT_REQUESTED": {
+      "contentDigest": "bb15cbd0d869db39701d15c1684fc69fb40b6c601a40ee27463d26b1bf57e6b4",
+      "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Federal certificate candidate: affirmation and Rule 30(e) review not requested",
+      "approvedAt": "2026-09-02"
+    },
+    "FEDERAL_AFFIRMATION_REVIEW_REQUESTED": {
+      "contentDigest": "e9ef8cdada91a3a420b1d8f8f1fe6453a3e521d99fb067b8c1dc2878201ddb4a",
+      "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Federal certificate candidate: affirmation and Rule 30(e) review requested",
+      "approvedAt": "2026-09-02"
+    },
+    "FEDERAL_OATH_REVIEW_NOT_REQUESTED": {
+      "contentDigest": "7551bce0e146a06ba3722fd6fd7de4b7e8f793de277242e80c236e4cac05ac63",
+      "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Federal certificate candidate: oath and Rule 30(e) review not requested",
+      "approvedAt": "2026-09-02"
+    },
+    "FEDERAL_OATH_REVIEW_REQUESTED": {
+      "contentDigest": "e0735c2138dbad1033b1dd537de7ee1a26d2df622636ca8f157ab9124fbd150a",
+      "authorityDigest": "9e5dc1ab9b62375698701c95959d328c2480bbdb34a5e09626ec0275ed788b9b",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Federal certificate candidate: oath and Rule 30(e) review requested",
+      "approvedAt": "2026-09-02"
+    },
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED": {
+      "contentDigest": "a4824fe9ca3696d3d998a1b6a21734cfd40dac5df2c6b37244efc480261d898c",
+      "authorityDigest": "8bf8258f27477c469d73410308c228c3fc5a7f84dc909d000cda91a2ffcd72b8",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Texas affirmation adaptation with signature requested",
+      "approvedAt": "2026-09-02"
+    },
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED": {
+      "contentDigest": "b489c2972d805bf34f1f8357ea1b1b1c35ffe88af11cacca79178f064be26997",
+      "authorityDigest": "8bf8258f27477c469d73410308c228c3fc5a7f84dc909d000cda91a2ffcd72b8",
+      "approvedBy": "James Horton",
+      "approverRole": "product owner",
+      "approvalScope": "Approved Texas affirmation adaptation with signature waived",
+      "approvedAt": "2026-09-02"
+    },
     "TEXAS_STATE_SIGNATURE_REQUESTED": {
       "contentDigest": "56c9b5f9e135f04089515438c3d0046fbb4626ca95a74c8be1f262b8bb33c72f",
       "approvedBy": "project-owner-approved-UFM-source",

@@ -21,11 +21,24 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { readDepositionAttorneyTime, writeDepositionAttorneyTime } from "../server/deposition-store.mjs";
 import { assembleInsertionInput } from "../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-pages.mjs";
 import { DEFAULT_TEMPLATE_ROOT, canonicalTemplateBody, loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { TIME_USED_CERTIFIED, validateInsertionInput } from "../server/insertion-pages/validate.mjs";
+
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
 
 const ID = "DEP-20260828-TIME1";
 const REPORTER = { name: "Riley Reporter", licenseNumber: "1234", csrExpiration: "2027-12-31", company: "Reporter Firm", firmRegistrationNumber: "5678", address: "300 Main, San Antonio, Texas", phone: "210-555-0103" };
@@ -40,7 +53,7 @@ function throwawayDeposition(caseFields = {}) {
   const directory = path.join(root, "store", "reporter_x", "cause", "witness_2026-08-28");
   fs.mkdirSync(path.join(directory, "intake"), { recursive: true });
   fs.writeFileSync(path.join(directory, "deposition.json"), JSON.stringify({ schemaVersion: "1.0.0", id: ID }));
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS", causeNumber: "2026-CI-10001",
     witness: "Jordan Example", depositionDate: "2026-08-01", remote: true, remotePlatform: "Zoom",
     parties: PARTIES, attorneys: ATTORNEYS, reporterProfile: REPORTER, ...caseFields,
@@ -79,7 +92,14 @@ const textOf = (pages) => pages.pages.flatMap((page) => page.lines).map((line) =
 // and the manifests, not the validator, so it cannot agree with the validator by construction --
 // a new reviewed certificate that prints the clause and is left off the list fails here.
 test("every reviewed certificate that states the clause is on the list that guards it", async () => {
-  const variants = ["TEXAS_STATE_SIGNATURE_REQUESTED", "TEXAS_STATE_SIGNATURE_WAIVED", "FEDERAL_SIGNATURE_REQUESTED", "FEDERAL_SIGNATURE_WAIVED"];
+  const variants = [
+    "TEXAS_STATE_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_SIGNATURE_WAIVED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_REQUESTED",
+    "TEXAS_STATE_AFFIRMATION_SIGNATURE_WAIVED",
+    "FEDERAL_SIGNATURE_REQUESTED",
+    "FEDERAL_SIGNATURE_WAIVED",
+  ];
   const stating = [];
   for (const variant of variants) {
     const directory = path.resolve(DEFAULT_TEMPLATE_ROOT, variant);

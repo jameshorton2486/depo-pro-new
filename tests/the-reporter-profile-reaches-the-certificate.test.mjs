@@ -6,10 +6,23 @@ import path from "node:path";
 import test from "node:test";
 import { createReporter, listReporters } from "../server/reporter-store.mjs";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { assembleInsertionInput } from "../server/insertion-pages/assemble.mjs";
 import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-pages.mjs";
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
+
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
 
 // Two fields a certified page requires that the reporter had no way to supply.
 //
@@ -41,7 +54,7 @@ function stored(t, extra) {
 }
 
 function render(reporterProfile) {
-  const record = createCanonicalDepositionRecord({
+  const record = attested({
     court: "In the 285th Judicial District Court", causeNumber: "2024-CI-11223",
     caseStyle: "Vasquez v. Central Texas Logistics", witness: "Dr. Priya Ramanathan",
     parties: [{ name: "Ruben Vasquez", role: "Plaintiff" }, { name: "Delta LLC", role: "Defendant" }],
@@ -68,12 +81,15 @@ function render(reporterProfile) {
   return { assembled, blocking, pages: buildTexasInsertionPageSet(assembled, { setId: "s", depositionId: "DEP-20260824-CRT01", generatedAt: "2026-08-24T00:00:00.000Z", certificateOnly: true }) };
 }
 
-test("the store keeps both fields now, and still drops a firm registration number", t => {
+test("the store keeps every field the signature block prints, the number included", t => {
   const saved = stored(t, { csrExpiration: "2027-06-30", firmRegistrationWaiver: WAIVER, firmRegistrationNumber: "7788" });
   assert.equal(saved.csrExpiration, "2027-06-30");
   assert.equal(saved.firmRegistrationWaiver, WAIVER);
-  assert.ok(!("firmRegistrationNumber" in saved),
-    "the number is still not storable; no certified specimen justifies one");
+  // This assertion was inverted. It pinned the number as unstorable on the reasoning that no
+  // certified specimen carried one -- and the Etminan Notice then showed a deposition reported
+  // through SA Legal Solutions whose certificate prints none anyway. Silence in the specimens was
+  // never the same as absence in the world.
+  assert.equal(saved.firmRegistrationNumber, "7788");
 });
 
 test("a solo reporter created through the store renders a certification page", t => {

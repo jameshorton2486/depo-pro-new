@@ -1,6 +1,10 @@
 import { counselSidePhrase } from "../../app/manual-intake.mjs";
 import { UFM_FREELANCE_LAYOUT_PROFILE } from "./layout-profile.mjs";
 import { selectInsertionVariant } from "./variants.mjs";
+import { currentCanonicalOpeningFacts } from "../canonical-opening-events.mjs";
+import { filingIdentifier } from "../filing-identifier.mjs";
+import { resolveReviewLifecycle } from "../canonical-review-election.mjs";
+import { certificationRoute } from "./certification-route.mjs";
 
 export function canonicalValue(value) {
   return value && typeof value === "object" && "value" in value ? value.value : value;
@@ -164,9 +168,15 @@ function recordedTimeUsed(record) {
 }
 
 export function assembleInsertionInput({ record, intake = {}, operator = {}, pagination = {}, template = null, layoutProfile = UFM_FREELANCE_LAYOUT_PROFILE }) {
+  const openingFacts = currentCanonicalOpeningFacts(record);
   const jurisdiction = operator.jurisdiction ?? null;
   const signatureDisposition = operator.signatureDisposition ?? null;
-  const variant = selectInsertionVariant({ jurisdiction, signatureDisposition });
+  const reviewLifecycle = resolveReviewLifecycle(record);
+  const reviewElection = reviewLifecycle.election;
+  const route = certificationRoute({ jurisdiction, signatureDisposition, oathAdministration:openingFacts.oathAdministration, reviewElection });
+  const variant = jurisdiction === "federal" || openingFacts.oathAdministration?.selection === "AFFIRMATION"
+    ? route.key
+    : selectInsertionVariant({ jurisdiction, signatureDisposition });
   // Counsel of record who did not appear are not appearances. Two certified specimens settle it
   // and they cover both shapes: on the Etminan page Marco Crawford is absent while MARCO CRAWFORD
   // LAW, PLLC still prints, because Bentley appeared from that firm; on the Thomas page both
@@ -182,7 +192,8 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
   const volumes = operator.volumes ?? record.transcript?.volumes ?? [];
   const volumeCount = operator.volumeCount ?? (volumes.length || 1);
   const court = canonicalValue(record.case?.court);
-  const causeNumber = canonicalValue(record.case?.causeNumber);
+  const filing = filingIdentifier(record, jurisdiction);
+  const causeNumber = filing.value;
   // Captured and deliberately NOT rendered. No template references ^caption.caseStyle^, and that is
   // the ruling rather than an oversight: the caption block composes its parties from the party array
   // so that it is provably the recorded parties, which reporter-typed text could not be. This holds
@@ -207,7 +218,10 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     signatureDisposition,
     signatureDispositionBasis: operator.signatureDispositionBasis ?? null,
     variant,
-    caption: { court, causeNumber, caseStyle, label: operator.captionLabel ?? null },
+    certificationRoute: route,
+    reviewElection,
+    reviewLifecycle,
+    caption: { court, causeNumber, filingNumber:causeNumber, filingNumberLabel:filing.displayLabel, filingNumberSemantic:filing.semantic, caseStyle, label: operator.captionLabel ?? null },
     // witnessSworn is the reporter's attestation that an oath was administered, carried on the
     // canonical record with who/why/at through the correction log. It is lifted from the record and
     // never from workflow/opening-procedures.json: ADR-0021 permits that file to hold unattributed
@@ -216,7 +230,8 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     //
     // null is MISSING -- nobody has attested -- and is distinct from false, which is an attestation
     // that the witness did not swear. Only false refuses. See docs/opening-procedures/.
-    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), videotaped: canonicalValue(record.deposition?.videotaped), witnessSworn: canonicalValue(record.deposition?.witnessSworn) },
+    deposition: { witness, date: depositionDate, volumeCount, proceedingLocation, remote: canonicalValue(record.deposition?.remote), videotaped: canonicalValue(record.deposition?.videotaped), witnessSworn: openingFacts.oathAdministration?.selection === "OATH" ? true : openingFacts.oathAdministration?.selection === "AFFIRMATION" ? false : null, oathAdministration: openingFacts.oathAdministration },
+    openingRecord: openingFacts,
     reporter,
     appearances: counsel,
     counselReconciliation: {
@@ -242,6 +257,7 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
     fieldValues: {
       "caption.court": court,
       "caption.causeNumber": causeNumber,
+      "caption.filingNumber": causeNumber,
       "caption.plaintiffs": plaintiffs.length ? plaintiffs : null,
       "caption.defendants": defendants.length ? defendants : null,
       "deposition.witness": witness,
@@ -264,7 +280,14 @@ export function assembleInsertionInput({ record, intake = {}, operator = {}, pag
       "cert.serviceDate": canonicalValue(record.certification?.serviceDate) ?? operator.certification?.serviceDate ?? null,
       "cert.certificationDate": operator.certification?.certificationDate ?? canonicalValue(record.certification?.certificationDate) ?? null,
       "cert.furtherCertificationDate": operator.certification?.furtherCertificationDate ?? canonicalValue(record.certification?.furtherCertificationDate) ?? null,
+      "cert.administrationVerb": openingFacts.oathAdministration?.selection === "OATH" ? "sworn" : openingFacts.oathAdministration?.selection === "AFFIRMATION" ? "affirmed" : null,
+      "cert.reviewStatement": reviewElection?.status === "REQUESTED"
+        ? "Review of the transcript or recording was requested before the deposition was completed under Federal Rule of Civil Procedure 30(e)."
+        : reviewElection?.status === "NOT_REQUESTED"
+          ? "Review of the transcript or recording was not requested before the deposition was completed under Federal Rule of Civil Procedure 30(e)."
+          : null,
       "reporter.name": reporter.name,
+      "reporter.capacity": openingFacts.oathAdministration?.officer?.role ?? null,
       "reporter.csrNumber": reporter.csrNumber,
       "reporter.csrExpirationDate": reporter.csrExpirationDate,
       "reporter.firmRegistrationNumber": reporter.firmRegistrationNumber,

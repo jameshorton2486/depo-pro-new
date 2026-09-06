@@ -1,7 +1,9 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { pageRenderEqual } from "./workspace-page-render.mjs";
 import { guardAction } from "./unsaved-edit-guard.mjs";
+import { insertAtCaret as insertTextAtCaret } from "./caret-insertion.mjs";
 
 export type DocumentFragment={id:string;kind:"evidence"|"authored"|"generated";role:string;text:string;sourceWordId:string|null;sourceStart?:number;sourceEnd?:number;audioStart?:number|null;audioEnd?:number|null};
 export type DocumentLine={position:number;occupied:boolean;content:string;paragraphId:string|null;fragments:DocumentFragment[]};
@@ -15,27 +17,65 @@ function audioClock(seconds:number){const total=Math.max(0,Math.floor(seconds));
 // React renders physical lines already decided by the shared paginator. The temporary textarea
 // is a controlled editor for one canonical paragraph; after save the server model repaginates it.
 // It never decides permanent line or page boundaries.
-export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,profile,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onActivate,onChange,onSave,onCancel,onSplit,onJoinPrevious,onJoinNext,onPlayAt}:{page:DocumentPage;profile:LayoutProfile;selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onActivate:(paragraphId:string,wordId:string,shiftKey:boolean,lineKey:string,offset:number,play:boolean)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onSplit:(caret:number)=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlayAt:(seconds:number)=>void}){
+// memo has always been here and never once prevented a render: the container below handed every page
+// eight freshly built arrow handlers and a new Set, so the shallow comparison failed nine ways and
+// all 63 pages of a real deposition reconciled on every keystroke and every click -- 856ms of
+// blocked main thread, measured, for a click that only moved the selection.
+//
+// pageRenderEqual compares what the page actually draws. It is deliberately strict about the
+// handlers too: if the container regresses to unstable ones the screen gets slow again, rather than
+// drawing pages that hold a stale closure over the open edit.
+export const WorkspaceDocumentPage=memo(function WorkspaceDocumentPage({page,profile,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,activeEdit,onActivate,onChange,onSave,onCancel,onJoinPrevious,onJoinNext,onPlayAt}:{page:DocumentPage;profile:LayoutProfile;selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;activeEdit:ActiveEdit|null;onActivate:(paragraphId:string,wordId:string,shiftKey:boolean,lineKey:string,offset:number,play:boolean)=>void;onChange:(text:string,caret:number)=>void;onSave:()=>void;onCancel:()=>void;onJoinPrevious:()=>void;onJoinNext:()=>void;onPlayAt:(seconds:number)=>void}){
   const editor=useRef<HTMLTextAreaElement|null>(null);
   useEffect(()=>{if(!editor.current||!activeEdit)return;editor.current.focus();editor.current.setSelectionRange(activeEdit.caret,activeEdit.caret)},[activeEdit]);
   return <article className={`workspace-paper ${page.sectionKind??"testimony"}`} style={geometryStyle(profile)} data-layout-profile={`${profile.id}@${profile.version}`} data-page={page.pageNumber} data-page-role={page.role??"testimony"} aria-label={`${page.role??"Testimony"} page ${page.pageNumber}`}><div className="workspace-format-box" aria-hidden="true"/>
-    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,editing=activeEdit?.lineKey===lineKey,lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId===selectedParagraphId?"selected":""} ${editing?"direct-editing":""}`} key={line.position}>
+    {/* How many physical lines this paragraph already occupies here. The editor is sized to
+        exactly that, so it sits in the paragraph's own place instead of over the testimony below
+        it. Before this it was a fixed 108px box with a drop shadow -- anchored to the line, but
+        covering four or five lines of the surrounding record while the reporter typed, which is
+        the one thing a reporter correcting a deposition cannot afford to lose sight of. */}
+    <ol>{page.lines.map(line=>{const lineKey=`${page.pageNumber}:${line.position}`,
+      // An editor whose paragraph is no longer the selected one is not shown. A speaker correction
+      // clears the selection deliberately -- the paragraph is dealt with -- and the editor used to
+      // stay open on it, so the page showed an active-looking paragraph beside a panel that had
+      // nothing selected. That is the same contradiction the reporter reported from the other end.
+      //
+      // A DIRTY draft is kept visible whatever the selection does. Hiding unsaved typing to tidy up
+      // a contradiction would be a worse bug than the contradiction.
+      editing=activeEdit?.lineKey===lineKey&&(activeEdit.paragraphId===selectedParagraphId||activeEdit.draft!==activeEdit.baseText),lineAudioStart=line.fragments.find(fragment=>Number.isFinite(fragment.audioStart))?.audioStart,editedLines=editing?Math.max(1,page.lines.filter(item=>item.paragraphId===activeEdit.paragraphId).length):1;return <li className={`${line.occupied?"occupied":"blank"} ${line.paragraphId&&line.paragraphId===selectedParagraphId?"selected":""} ${line.paragraphId&&selectedParagraphIds.has(line.paragraphId)?"range-selected":""} ${editing?"direct-editing":""}`} key={line.position}>
       <span className="workspace-line-number">{line.position}</span>
       {lineAudioStart!==null&&lineAudioStart!==undefined&&<button type="button" className="workspace-line-time" aria-label={`Save the open paragraph and play audio from ${audioClock(lineAudioStart)}`} onClick={()=>onPlayAt(lineAudioStart)}>▶ {audioClock(lineAudioStart)}</button>}
       {editing?<textarea ref={editor} className="workspace-direct-editor" aria-label="Edit selected transcript paragraph" value={activeEdit.draft}
+        style={{height:`calc(${editedLines} * var(--line-height))`}}
         onChange={event=>onChange(event.target.value,event.target.selectionStart)} onBlur={onSave}
-        onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==="s"){event.preventDefault();onSave();return}if(event.key==="Enter"){event.preventDefault();onSplit(event.currentTarget.selectionStart);return}if(event.key==="Backspace"&&event.currentTarget.selectionStart===0&&event.currentTarget.selectionEnd===0){event.preventDefault();onJoinPrevious();return}if(event.key==="Delete"&&event.currentTarget.selectionStart===activeEdit.draft.length&&event.currentTarget.selectionEnd===activeEdit.draft.length){event.preventDefault();onJoinNext();return}if(event.key==="Escape"){event.preventDefault();onCancel()}}}/>
+        onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==="s"){event.preventDefault();onSave();return}if(event.key==="Enter"&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey){event.preventDefault();return}if(event.key==="Backspace"&&event.currentTarget.selectionStart===0&&event.currentTarget.selectionEnd===0){event.preventDefault();onJoinPrevious();return}if(event.key==="Delete"&&event.currentTarget.selectionStart===activeEdit.draft.length&&event.currentTarget.selectionEnd===activeEdit.draft.length){event.preventDefault();onJoinNext();return}if(event.key==="Escape"){event.preventDefault();onCancel()}}}/>
       :<code>{line.fragments.length?line.fragments.map((fragment,index)=>fragment.kind==="generated"
-        ? <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>
+        // The designation -- SPEAKER 4:, Q., THE WITNESS: -- selects the paragraph it belongs to.
+        //
+        // The reporter reported this as "the WHO SPOKE? buttons are disabled". They had clicked
+        // SPEAKER 4:, which is exactly where you aim when you want to change who spoke, and it was
+        // generated text with no handler: the click did nothing, and dragging across it left a grey
+        // browser text-selection that reads as a selection. Nothing was wrong with the controls.
+        // Nothing had been selected.
+        //
+        // Only the fragment carrying the designation. The generated single spaces between words are
+        // left as text, because a button per space is not a target, it is a hazard.
+        ? (line.paragraphId&&fragment.text.trim()&&page.editable!==false
+          ? <button type="button" className="workspace-page-label" data-evidence="false" key={`${fragment.id}:${index}`}
+              title="Select this paragraph"
+              onClick={event=>{event.stopPropagation();const first=line.fragments.find(item=>item.kind!=="generated");if(first)onActivate(line.paragraphId as string,first.id,false,lineKey,0,false)}}>{fragment.text}</button>
+          : <span className="workspace-generated" data-evidence="false" key={`${fragment.id}:${index}`}>{fragment.text}</span>)
         : <button type="button" className={`workspace-page-token ${fragment.kind} ${selectedWordId===fragment.id?"picked":""} ${activePlaybackWordId===fragment.id?"playing":""} ${lowConfidenceWordIds.has(fragment.id)?"low-confidence":""}`}
-            data-token-id={fragment.id} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
+            data-token-id={fragment.id} data-paragraph-id={line.paragraphId??undefined} data-evidence={fragment.kind==="evidence"} key={`${fragment.id}:${index}`}
             onClick={event=>{event.stopPropagation();if(page.editable===false||!line.paragraphId)return;onActivate(line.paragraphId,fragment.id,event.shiftKey,lineKey,fragment.sourceStart??0,event.altKey)}}>{fragment.text}</button>):line.content}</code>}
     </li>})}</ol>
     <footer>Page {page.pageNumber}</footer>
   </article>;
-});
+},pageRenderEqual);
 
-export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,onSelect,onSaveParagraph,onSplitParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onSplitParagraph:(paragraphId:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
+type QuickToolEditorActions={canInsertAtCaret:boolean;insertAtCaret:(text:string)=>void};
+
+export default function WorkspaceDocumentPages({pages,profile,paragraphs,selectedParagraphId,selectedParagraphIds,selectedWordId,activePlaybackWordId,lowConfidenceWordIds,paragraphRangeMode,quickTools,onSelect,onSaveParagraph,onJoinParagraph,onPlayParagraph,onPlayAt,onEditingChange}:{pages:DocumentPage[];profile:LayoutProfile;paragraphs:EditableParagraph[];selectedParagraphId:string|null;selectedParagraphIds:Set<string>;selectedWordId:string|null;activePlaybackWordId:string|null;lowConfidenceWordIds:Set<string>;paragraphRangeMode:boolean;quickTools:(actions:QuickToolEditorActions)=>ReactNode;onSelect:(paragraphId:string,wordId:string,shiftKey:boolean)=>void;onSaveParagraph:(paragraphId:string,before:string,after:string,caret:number)=>Promise<boolean>;onJoinParagraph:(paragraphId:string,direction:"previous"|"next")=>Promise<boolean>;onPlayParagraph:(paragraphId:string)=>void;onPlayAt:(seconds:number)=>void;onEditingChange:(editing:boolean)=>void}){
   const scroller=useRef<HTMLDivElement|null>(null),saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),activeEditRef=useRef<ActiveEdit|null>(null),savePromise=useRef<Promise<boolean>|null>(null),[currentPage,setCurrentPage]=useState(1),[storedEdit,setActiveEdit]=useState<ActiveEdit|null>(null);
   const total=pages.length,paragraphById=useMemo(()=>new Map(paragraphs.map(paragraph=>[paragraph.id,paragraph])),[paragraphs]);
   const savedCanonical=storedEdit?.status==="saved"?paragraphById.get(storedEdit.paragraphId)?.text:undefined;
@@ -81,10 +121,56 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
     setActiveEdit(null);
     onSelect(paragraphId,wordId,shiftKey);
     if(play){onPlayParagraph(paragraphId);return}
-    if(!shiftKey)openEdit(paragraphId,lineKey,offset);
+    if(!shiftKey&&!paragraphRangeMode)openEdit(paragraphId,lineKey,offset);
   }
   async function playAt(seconds:number){if(!(await save()))return;setActiveEdit(null);onPlayAt(seconds)}
-  async function structural(kind:"split"|"previous"|"next",caret=activeEdit?.caret??0){const edit=activeEdit;if(!edit||edit.status==="saving")return;if(edit.draft!==edit.baseText){await save();return}const ok=kind==="split"?await onSplitParagraph(edit.paragraphId,caret):await onJoinParagraph(edit.paragraphId,kind);if(ok)setActiveEdit(null)}
+  async function captureHighlightedRange(){
+    const root=scroller.current,selection=window.getSelection();
+    if(!root||!selection||selection.isCollapsed||selection.rangeCount===0)return;
+    const browserRange=selection.getRangeAt(0);
+    const tokens=[...root.querySelectorAll<HTMLElement>(".workspace-page-token[data-token-id][data-paragraph-id]")]
+      .filter(token=>browserRange.intersectsNode(token));
+    const first=tokens[0],last=tokens[tokens.length-1];
+    if(!first?.dataset.tokenId||!first.dataset.paragraphId||!last?.dataset.tokenId||!last.dataset.paragraphId)return;
+    if(!(await save()))return;
+    setActiveEdit(null);
+    onSelect(first.dataset.paragraphId,first.dataset.tokenId,false);
+    onSelect(last.dataset.paragraphId,last.dataset.tokenId,true);
+    selection.removeAllRanges();
+  }
+  useEffect(()=>{
+    const root=scroller.current;
+    if(!root)return;
+    const capture=()=>{void captureHighlightedRange()};
+    root.addEventListener("mouseup",capture);
+    return()=>root.removeEventListener("mouseup",capture);
+  });
+  // Joining only. Splitting is the tools panel's Split here, anchored to the selected word rather
+  // than to a caret offset -- bare Enter used to do it, and a structural change to a court record
+  // is not something a reflex during typing should cause.
+  async function structural(kind:"previous"|"next"){const edit=activeEdit;if(!edit||edit.status==="saving")return;if(edit.draft!==edit.baseText){await save();return}const ok=await onJoinParagraph(edit.paragraphId,kind);if(ok)setActiveEdit(null)}
+
+  // Stable handler identities, so pageRenderEqual can hold back the pages that did not change.
+  //
+  // They are refs rather than useCallback dependencies on purpose. Every one of these reads the
+  // CURRENT open edit, and a callback that listed activeEdit as a dependency would get a new
+  // identity on every keystroke -- which is exactly the thing being fixed. Reading through
+  // activeEditRef keeps the identity fixed and the value fresh; a stale closure here would save one
+  // paragraph's text over another's.
+  const structuralRef=useRef(structural),activateRef=useRef(activate),playAtRef=useRef(playAt);
+  // Assigned in an effect, not during render -- the same rule saveRef above already follows.
+  useEffect(()=>{structuralRef.current=structural;activateRef.current=activate;playAtRef.current=playAt});
+  const onPageActivate=useCallback((...args:[string,string,boolean,string,number,boolean])=>{void activateRef.current(...args)},[]);
+  const onPageChange=useCallback((draft:string,caret:number)=>setActiveEdit(current=>current?{...current,draft,caret,status:"editing"}:null),[]);
+  const onPageSave=useCallback(()=>{void saveRef.current()},[]);
+  const onPageCancel=useCallback(()=>setActiveEdit(null),[]);
+  const onPageJoinPrevious=useCallback(()=>{void structuralRef.current("previous")},[]);
+  const onPageJoinNext=useCallback(()=>{void structuralRef.current("next")},[]);
+  const onPagePlayAt=useCallback((seconds:number)=>{void playAtRef.current(seconds)},[]);
+  const insertAtCaret=useCallback((text:string)=>setActiveEdit(current=>{
+    if(!current||current.status==="saving"||!text)return current;
+    return {...current,...insertTextAtCaret(current.draft,current.caret,text),status:"editing"};
+  }),[]);
   return <section className="workspace-document" aria-label="Direct-edit final-document transcript">
     <nav className="workspace-page-nav" aria-label="Transcript page navigation">
       <button type="button" disabled={bounded<=1} onClick={()=>go(bounded-1)}>Previous page</button>
@@ -94,9 +180,14 @@ export default function WorkspaceDocumentPages({pages,profile,paragraphs,selecte
       {activeEdit&&<span className={`workspace-edit-status ${activeEdit.status}`} role="status">{activeEdit.status==="saving"?"Saving…":activeEdit.status==="saved"?"Saved ✓":activeEdit.status==="conflict"?"Conflict detected · local draft preserved":activeEdit.status==="failed"?"Save failed · local draft preserved":"Editing · autosave on"}</span>}
       <span className="workspace-geometry-note">Shared-model pages · one-paragraph editing</span>
     </nav>
-    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Press Enter at the cursor to split there; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
+    {/* This still told the reporter that the Enter key would split a paragraph, after Enter stopped
+        doing so. That is worse than saying nothing: it instructs somebody to press a key that now
+        does nothing, and they would reasonably conclude the application was broken. Caught by
+        looking at the screen, not by a test -- so the test below pins the absence. */}
+    <p className="workspace-direct-edit-help">Click any testimony word to edit its complete paragraph. Drag across multiple paragraphs to select them for the Quick Tools Delete action. Clicking another word, paragraph, or timestamp saves the open paragraph before moving. Ctrl+S saves; Escape cancels. Use Split here in the transcript tools to start a new paragraph at the selected word; Backspace at the beginning or Delete at the end joins paragraphs. Alt-click plays the paragraph.</p>
+    {quickTools({canInsertAtCaret:Boolean(activeEdit&&activeEdit.status!=="saving"),insertAtCaret})}
     <div className="workspace-page-flow" ref={scroller} onScroll={observeScroll}>
-      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={(...args)=>{void activate(...args)}} onChange={(draft,caret)=>setActiveEdit(activeEdit?{...activeEdit,draft,caret,status:"editing"}:null)} onSave={()=>{void save()}} onCancel={()=>setActiveEdit(null)} onSplit={caret=>{void structural("split",caret)}} onJoinPrevious={()=>{void structural("previous")}} onJoinNext={()=>{void structural("next")}} onPlayAt={seconds=>{void playAt(seconds)}}/>) }
+      {pages.map(page=><WorkspaceDocumentPage key={page.id} page={page} profile={profile} selectedParagraphId={selectedParagraphId} selectedParagraphIds={selectedParagraphIds} selectedWordId={selectedWordId} activePlaybackWordId={activePlaybackWordId} lowConfidenceWordIds={lowConfidenceWordIds} activeEdit={activeEdit} onActivate={onPageActivate} onChange={onPageChange} onSave={onPageSave} onCancel={onPageCancel} onJoinPrevious={onPageJoinPrevious} onJoinNext={onPageJoinNext} onPlayAt={onPagePlayAt}/>) }
     </div>
   </section>;
 }

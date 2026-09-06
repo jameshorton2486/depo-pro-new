@@ -23,6 +23,9 @@ const eslintConfig = defineConfig([
     // is CommonJS, so require() is the only import form available to it. Ignoring is the fix;
     // rewriting a .cjs to use ESM imports is not.
     "geometry-proof/**",
+    // Nested Claude worktrees contain their own generated .next/dist artifacts and are separate
+    // repositories. The root release check must lint this checkout, not recursively lint those.
+    ".claude/worktrees/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

@@ -32,8 +32,10 @@ test("administrative pages render from modeled lines but cannot become direct-ed
   assert.ok(pages.includes(':line.content'));
 });
 
-test("the API exposes complete model and DOCX from one assembly authority",()=>{
+test("the API exposes complete model, DOCX and PDF from one assembly authority",()=>{
   assert.ok(api.includes("getCompleteTranscriptModel"));
   assert.ok(api.includes("/api/transcript/complete-document-model"));
   assert.ok(api.includes("/api/transcript/complete-document-docx"));
+  assert.ok(api.includes("/api/transcript/complete-document-pdf"));
+  assert.ok(screen.includes("Generate Working PDF"));
 });

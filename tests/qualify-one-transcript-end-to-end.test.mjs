@@ -22,6 +22,7 @@ import path from "node:path";
 import test from "node:test";
 import { applyOverlay, emptyOverlay } from "../server/reporter-overlay.mjs";
 import { createCanonicalDepositionRecord } from "../server/canonical-deposition-record.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 import { buildCompleteTranscriptModel } from "../server/complete-transcript-model.mjs";
 import { createTranscriptDocxArtifact } from "../server/final-document-docx.mjs";
 import { computeReviewStateHash } from "../server/review-state-hash.mjs";
@@ -29,6 +30,18 @@ import { TEXAS_FREELANCE_DEPOSITION_V1 } from "../server/texas-freelance-deposit
 import { renderTranscript } from "../server/transcript-render.mjs";
 import { buildTranscriptPrintModel } from "../server/transcript-print-model.mjs";
 import { EVIDENCE, SCALE, SPEAKER_CANDIDATES, WORKING } from "./fixtures/long-deposition.mjs";
+
+// A fixture that renders a certificate has to carry what the certificate asserts. The caption
+// parties were already here for that reason; the oath is the same class of fact. Attesting it is
+// not scaffolding to get past validation -- an unattested record now refuses, correctly, because
+// the page states the witness was duly sworn.
+const attested = (input) => {
+  const rec = createCanonicalDepositionRecord(input);
+  rec.deposition.witnessSworn = { value: true, source: "REPORTER_ENTERED", state: "REPORTER_ADDED", confidence: null, citations: [] };
+  addCanonicalOath(rec);
+  return rec;
+};
+
 
 const python = process.env.DEPO_PRO_PYTHON ?? "python";
 
@@ -65,7 +78,7 @@ async function timedAsync(label, work) {
 }
 
 function canonicalRecord() {
-  return createCanonicalDepositionRecord({
+  return attested({
     jurisdictionType: "texas-state", court: "45TH JUDICIAL DISTRICT COURT, BEXAR COUNTY, TEXAS",
     causeNumber: "2026-CI-40881", caseStyle: "Alan Prentice v. Meridian Freight Company",
     witness: "Alan Prentice", depositionDate: "2026-08-31", remote: false, location: "San Antonio, Texas",
@@ -198,11 +211,29 @@ test("the chain is deterministic: identical input produces an identical model", 
   assert.equal(first.pages.length, second.pages.length);
 });
 
-test("reconstruction does not write to disk", () => {
+test("reconstruction does not write to disk", (t) => {
   // applyOverlay is documented pure -- no filesystem, no fetch -- and the harness depends on that
   // to run against a transcript of this size without producing artifacts. Asserted rather than
   // trusted: a future overlay that cached to disk would break the guarantee silently.
-  const before = fs.readdirSync(os.tmpdir()).length;
-  applyOverlay(WORKING.segments, emptyOverlay("DEP-QUALIFY-LONG"));
-  assert.equal(fs.readdirSync(os.tmpdir()).length, before, "reconstruction created something in the temp directory");
+  //
+  // Measured in a child process with its own temp directory and its own working directory, because
+  // the obvious instrument is wrong. This counted entries in the SHARED os.tmpdir() before and
+  // after, so any test running concurrently that created a temp directory changed the number --
+  // node --test runs files in parallel, and CI caught it at 27 !== 26 the first time another test
+  // in this suite happened to call mkdtempSync in the same instant. The claim was about one
+  // function and the measurement was about the whole machine.
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "depo-purity-"));
+  t.after(() => fs.rmSync(sandbox, { recursive:true, force:true }));
+  const temp = path.join(sandbox, "temp"), work = path.join(sandbox, "work");
+  fs.mkdirSync(temp); fs.mkdirSync(work);
+
+  const probe = spawnSync(process.execPath, ["--input-type=module", "-e", [
+    `const { applyOverlay, emptyOverlay } = await import(${JSON.stringify(new URL("../server/reporter-overlay.mjs", import.meta.url).href)});`,
+    `const { WORKING } = await import(${JSON.stringify(new URL("./fixtures/long-deposition.mjs", import.meta.url).href)});`,
+    `applyOverlay(WORKING.segments, emptyOverlay("DEP-QUALIFY-LONG"));`,
+  ].join(";\n")], { cwd:work, encoding:"utf8", windowsHide:true, env:{ ...process.env, TMPDIR:temp, TMP:temp, TEMP:temp } });
+
+  assert.equal(probe.status, 0, `the probe did not run: ${(probe.stderr || "").trim()}`);
+  assert.deepEqual(fs.readdirSync(temp), [], "reconstruction created something in the temp directory");
+  assert.deepEqual(fs.readdirSync(work), [], "reconstruction created something in the working directory");
 });

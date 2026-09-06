@@ -60,13 +60,13 @@ test("the endpoint records the attestation and returns the refreshed projection"
   assert.equal(record.deposition.witnessSworn.value, false, "and disk agrees with the screen");
 });
 
-test("who comes from the record, not from the request", async () => {
+test("the server records the provable channel, not the assigned reporter or request", async () => {
   const s = seed();
   await post({ depositionId: s.depositionId, sworn: true, why: "I administered the oath on the record.", who: "Somebody Else" });
   const [entry] = readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE });
-  assert.match(entry.who, /Riley Reporter/, "the attestor is the reporter on the canonical record");
+  assert.equal(entry.who, "DepoPro local opening screen (operator identity not authenticated)");
   assert.doesNotMatch(entry.who, /Somebody Else/, "a client-supplied attestor is ignored, because it would be forgeable");
-  assert.match(entry.who, /CSR 1234/, "and carries the credential it was made under");
+  assert.doesNotMatch(entry.who, /Riley Reporter|CSR 1234/, "assignment is not proof of who performed the request");
   assert.ok(entry.why.trim() && !Number.isNaN(Date.parse(entry.at)), "why and at are recorded");
 });
 
@@ -82,6 +82,6 @@ test("a deposition with no reporter on its record cannot attest", async () => {
   const response = await post({ depositionId: s.depositionId, sworn: true, why: "I administered the oath." });
   assert.equal(response.status, 400);
   const body = await response.json();
-  assert.match(body.error, /nobody to attribute/i, "and it says why, rather than failing silently");
+  assert.match(body.error, /no deposition officer/i, "and it says why, rather than failing silently");
   assert.equal(readDepositionCorrections(null, s.depositionId, { storageRoot: STORAGE }).length, 0);
 });

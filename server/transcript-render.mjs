@@ -11,7 +11,7 @@
 // decides what the reader sees.
 import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { joinStyled, styleWords } from "./transcript-style.mjs";
-import { buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
+import { ELEMENT, EXAMINATION_HEADINGS, LAYOUT, buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
@@ -82,14 +82,32 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       for (const extra of applied.inserted.get(id) ?? []) if(!applied.deleted.has(extra.id)) parts.push(applied.replaced.get(extra.id) ?? extra.text);
     }
     const rebuilt = parts.filter(Boolean).join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
-    return { ...segment, text:rebuilt || segment.text };
+    // `rebuilt || segment.text` RESURRECTED STRUCK TESTIMONY, and it is worth saying exactly how.
+    //
+    // Strike the only word of a paragraph and `rebuilt` is legitimately "" -- which is falsy, so the
+    // fallback restored the stored utterance text. The word was gone from `words` and present in
+    // `text`, and the printed page is built from the TEXT, so `SPEAKER 3: Alrighty.` still printed
+    // with its only word struck. One click, on a shipped control, and the strike did not reach the
+    // certified page.
+    //
+    // The fallback is still needed: two segments in Production Trial #1 and one in Heath Thomas
+    // carry text with no word ids at all, and for those there is nothing to rebuild from. So the
+    // question is not whether `rebuilt` is empty but whether there were ever words to rebuild it
+    // from. Struck-to-empty and nothing-to-build-from are different states and this is the
+    // difference between them.
+    const hadWords = (segment.asrWordIds ?? []).length > 0;
+    return { ...segment, text:hadWords ? rebuilt : (rebuilt || segment.text) };
   });
 
   const grouped = groupTranscriptSegments(withText);
-  const labelled = labelParagraphs(grouped, { labels, examinerIdentity });
+  // The overlay is the authority on where examination changes hands. applyOverlay returns the
+  // boundaries in transcript order; labelParagraphs advances the active examiner as it walks and
+  // hands back the resolved sequence -- including the implicit first examination, whose examiner
+  // it may have adopted here and which nothing outside could otherwise name.
+  const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations, colloquy:applied.colloquy });
 
   const seen = new Set();
-  const paragraphs = labelled.map((paragraph, index) => {
+  let paragraphs = labelled.map((paragraph, index) => {
     const resolved = [];
     for (const id of paragraph.asrWordIds || []) {
       const word = words.get(id);
@@ -133,6 +151,8 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       id:`paragraph:${paragraph.asrWordIds?.[0] ?? paragraph.segmentIds?.[0] ?? `empty:${index + 1}`}`, elementType:paragraph.elementType, label:paragraph.label, byLine:paragraph.byLine,
       layout:paragraph.layout, speakerIdentity:paragraph.speakerIdentity ?? null, transcriptRole:paragraph.transcriptRole ?? null,
       deepgramSpeaker:paragraph.deepgramSpeaker ?? null, unlabeledSpeaker:Boolean(paragraph.unlabeledSpeaker),
+      // The reporter's own determination, carried so the Workspace can offer to clear it.
+      examinerColloquy:Boolean(paragraph.examinerColloquy),
       // Carried, not parsed. speakerBuckets keys the speaker map by (job, speaker) and had to
       // recover the job by splitting segmentIds[0] on a colon -- a dependency on the shape of an
       // id string, where a format change would silently collapse every bucket back to speaker
@@ -151,10 +171,66 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       // the unfiltered list put it back: the screen looked right because it renders words[],
       // while every consumer of paragraph.text -- an exporter, correction-pass chunking, a
       // certified page -- got the struck word again.
-      start, end, text:joinStyled(styled.filter(word => !word.deleted)) || paragraph.text || "", words:styled,
+      start, end, text:resolved.length ? joinStyled(styled.filter(word => !word.deleted)) : paragraph.text || "", words:styled,
       segmentIds:paragraph.segmentIds ?? [], asrWordIds:paragraph.asrWordIds ?? [],
     };
   });
+
+  // The heading and the BY-line that announce an examination -- Phase D2.
+  //
+  // Reporter-derived structural content, not testimony. They carry no ASR word, no timing and no
+  // segment: a heading is something the record's structure says, not something a microphone heard,
+  // and giving one a borrowed timestamp would let a click seek audio to a line nobody spoke.
+  //
+  // Placed before the paragraph holding the boundary's anchor word. The anchor itself is never
+  // moved or rewritten -- the overlay stays the only authority on where an examination begins, and
+  // this reads that authority rather than recording a second copy of it.
+  //
+  // The implicit first examination has no stored boundary anchor. Its placement is nevertheless
+  // deterministic: it begins at the first rendered question asked by its resolved examiner. That
+  // lets the certified freelance-deposition form print EXAMINATION / BY [ATTORNEY] without
+  // inventing a synthetic overlay event or changing any spoken paragraph.
+  const structural = [];
+  for (const examination of examinationSequence) {
+    const heading = EXAMINATION_HEADINGS[examination.type];
+    if (!heading) continue;
+    const index = examination.implicit
+      ? paragraphs.findIndex(paragraph => paragraph.elementType === ELEMENT.QUESTION && paragraph.speakerIdentity === examination.examinerPersonId)
+      : paragraphs.findIndex(paragraph => (paragraph.asrWordIds ?? []).includes(examination.atWordId));
+    // Defence, and unreachable through renderTranscript today: applyOverlay resolves boundaries
+    // against segment order and drops any whose anchor no longer exists, so an unresolvable one
+    // never reaches this sequence. Kept because the alternative to a finding here is a heading
+    // silently going missing from a certified page.
+    if (index < 0) {
+      findings.push({ code:"EXAMINATION_ANCHOR_NOT_RENDERED", wordId:examination.atWordId,
+        message:`The ${examination.type} examination could not be located at a rendered question, so its heading was not placed.` });
+      continue;
+    }
+    const label = labels[examination.examinerPersonId] ?? null;
+    // No label, no by-line. buildSpeakerLabels already refuses to guess an honorific and falls back
+    // to the surname; an examiner it cannot name at all would print "BY :" on a certified page.
+    if (!label) findings.push({ code:"EXAMINATION_EXAMINER_UNLABELLED", speakerIdentity:examination.examinerPersonId,
+      message:`The ${examination.type} examination names ${examination.examinerPersonId}, who has no speaker label. The heading is placed; the BY-line is omitted rather than printed blank.` });
+    const shared = { speakerIdentity:null, transcriptRole:null, deepgramSpeaker:null, unlabeledSpeaker:false,
+      sourceJobIdentity:paragraphs[index].sourceJobIdentity, start:null, end:null, words:[], segmentIds:[], asrWordIds:[],
+      derived:true, examinationType:examination.type, examinerPersonId:examination.examinerPersonId };
+    const structuralAnchor = examination.atWordId ?? paragraphs[index].asrWordIds?.[0] ?? paragraphs[index].id;
+    const rows = [{ ...shared, id:`examination:${examination.type}:${structuralAnchor}`, elementType:ELEMENT.HEADING,
+      label:null, byLine:null, layout:LAYOUT[ELEMENT.HEADING], text:heading }];
+    if (label) rows.push({ ...shared, id:`examination:${examination.type}:${structuralAnchor}:by`, elementType:ELEMENT.BY_LINE,
+      label:null, byLine:null, layout:LAYOUT[ELEMENT.BY_LINE], text:`BY ${label}:` });
+    structural.push({ index, rows });
+  }
+  if (structural.length) {
+    const withStructure = [];
+    const byIndex = new Map(structural.map(item => [item.index, item.rows]));
+    paragraphs.forEach((paragraph, index) => {
+      const rows = byIndex.get(index);
+      if (rows) withStructure.push(...rows);
+      withStructure.push(paragraph);
+    });
+    paragraphs = withStructure;
+  }
 
   // Every evidence word that no segment claimed. Not an error on its own -- a rebuild in
   // progress can leave one -- but it means the reader is not being shown the whole record, and
@@ -213,6 +289,9 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
       // the number they care about is how many places still need another listen.
       flags:new Set(applied.flagged.values()).size,
       lowConfidenceUnresolved:paragraphs.flatMap(paragraph=>paragraph.words).filter(word=>word.lowConfidence).length },
+    // The one resolved sequence. The heading, the BY-line and the index entry all read this, so
+    // none of them recomputes who was examining from the boundaries a second time.
+    examinations:examinationSequence,
     diarized, paragraphs, findings,
   };
 }

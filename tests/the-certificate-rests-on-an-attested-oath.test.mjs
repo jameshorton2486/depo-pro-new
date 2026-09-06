@@ -19,6 +19,7 @@ import { buildTexasInsertionPageSet } from "../server/insertion-pages/build-page
 import { loadTemplateVariant } from "../server/insertion-pages/templates.mjs";
 import { validateInsertionInput } from "../server/insertion-pages/validate.mjs";
 import { readOpeningState, saveOpeningState } from "../server/opening-procedures.mjs";
+import { addCanonicalOath } from "./canonical-oath-fixture.mjs";
 
 let counter = 0;
 const nextId = () => `DEP-20260829-OB${String(++counter).padStart(3, "0")}`;
@@ -71,7 +72,10 @@ const withSworn = (value) => {
   rec.deposition.witnessSworn = { value, source: "REPORTER_ENTERED", state: value === null ? "MISSING" : "REPORTER_ADDED", confidence: null, citations: [] };
   return rec;
 };
-const oathFindings = (input) => validateInsertionInput(input).filter((f) => f.code === "CERT_WITNESS_NOT_SWORN");
+// Keyed on the field, not on a list of codes. Phase 2 added a second oath-basis code, and a helper
+// that named codes silently reported zero findings for the new one rather than failing -- which is
+// the shape of bug that makes a test look like it passed.
+const oathFindings = (input) => validateInsertionInput(input).filter((f) => f.target === "deposition.witnessSworn" || f.target === "deposition.oathAdministration" || f.target === "deposition.oathAdministration.selection");
 
 test("an attestation that the witness was not sworn blocks the certification page", async () => {
   const input = await assembled(withSworn(false));
@@ -84,14 +88,40 @@ test("an attestation that the witness was not sworn blocks the certification pag
   assert.ok(validateInsertionInput(input).some((f) => f.severity === "blocking"));
 });
 
-test("an attested oath, and an unattested record, both still generate", async () => {
-  for (const [label, rec] of [["true", withSworn(true)], ["MISSING", withSworn(null)], ["absent envelope", record()]]) {
+// Phase 1 read: "an attested oath, and an unattested record, both still generate". That was the
+// deliberate scoping decision -- MISSING was the common state, and an unattested certificate was
+// treated as a gap rather than a false statement. Phase 2 rejects that reading: the sworn sentence
+// is a literal in both templates, so an unattested certificate does not omit the claim, it makes
+// it. The case is rewritten rather than deleted, because the change it records is the point.
+test("an attested oath generates; an unattested record no longer does", async () => {
+  const attested = await assembled(addCanonicalOath(withSworn(true)));
+  assert.equal(oathFindings(attested).length, 0, "an attested oath raises no oath-basis finding");
+  const set = buildTexasInsertionPageSet(attested, { setId: "s", depositionId: "DEP", generatedAt: "2026-08-29T12:00:00.000Z" });
+  const text = set.pages.filter((p) => p.role.startsWith("certification")).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
+  assert.match(text, /was duly sworn/, "an attested oath still produces the sworn certificate");
+
+  for (const [label, rec] of [["MISSING", withSworn(null)], ["absent envelope", record()]]) {
     const input = await assembled(rec);
-    assert.equal(oathFindings(input).length, 0, `${label} must not raise the oath-basis finding`);
-    const set = buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP", generatedAt: "2026-08-29T12:00:00.000Z" });
-    const text = set.pages.filter((p) => p.role.startsWith("certification")).flatMap((p) => p.lines.map((l) => l.text)).join("\n");
-    assert.match(text, /was duly sworn/, `${label} still produces the sworn certificate under phase 1`);
+    const findings = oathFindings(input);
+    assert.equal(findings.length, 1, `${label} must raise the oath-basis finding`);
+    assert.equal(findings[0].code, "CERT_OATH_BASIS_UNRESOLVED", `${label} is unresolved, not a refusal to swear`);
+    assert.equal(findings[0].severity, "blocking");
+    assert.ok(validateInsertionInput(input).some((f) => f.severity === "blocking"), `${label} must stop the page`);
+    // The remedy has to be findable. A refusal that does not say where to go is a dead end.
+    assert.match(findings[0].message, /Scripts & Oaths/, `${label} must name where the attestation is made`);
   }
+});
+
+// FALSE is not MISSING. A verified affirmation is now supported by its separately approved Texas
+// template; an absent administration event remains unresolved and must still stop generation.
+test("a verified affirmation is accepted while a missing administration remains unresolved", async () => {
+  const affirmation=withSworn(false);
+  addCanonicalOath(affirmation);
+  affirmation.openingRecord.oathAdministrations[0].selection="AFFIRMATION";
+  const affirmed = oathFindings(await assembled(affirmation));
+  const unknown = oathFindings(await assembled(withSworn(null)));
+  assert.deepEqual(affirmed, []);
+  assert.equal(unknown[0].code, "CERT_OATH_BASIS_UNRESOLVED");
 });
 
 // The constraint the whole design rests on. If a dropdown ever writes the attestation, provenance is
@@ -143,8 +173,8 @@ test("an attestation without attribution is refused", (t) => {
 // Positive control. Without it, a run in which every case returns the same result -- including a
 // validator that silently stopped running -- would read as a passing suite. F-21.
 test("the harness detects a difference when one exists", async () => {
-  const a = await assembled(withSworn(true));
-  const b = await assembled(withSworn(true), { proceedingHeading: "ORAL AND VIDEOTAPED DEPOSITION OF" });
+  const a = await assembled(addCanonicalOath(withSworn(true)));
+  const b = await assembled(addCanonicalOath(withSworn(true)), { proceedingHeading: "ORAL AND VIDEOTAPED DEPOSITION OF" });
   const sha = (input) => buildTexasInsertionPageSet(input, { setId: "s", depositionId: "DEP", generatedAt: "2026-08-29T12:00:00.000Z" }).sha256;
   assert.notEqual(sha(a), sha(b), "changing a field the renderer reads must change the page set");
 });

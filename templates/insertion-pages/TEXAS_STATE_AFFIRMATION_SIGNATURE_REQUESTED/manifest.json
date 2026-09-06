@@ -1,0 +1,24 @@
+{
+  "templateId": "texas-state-affirmation-signature-requested",
+  "version": "1.0.0",
+  "available": true,
+  "reviewStatus": "reviewed",
+  "reviewedBy": "James Horton, product owner",
+  "reviewedAt": "2026-09-02",
+  "scope": "Approved affirmation adaptation of the existing Texas signature-requested page set; only the administration sentence differs",
+  "authority": {
+    "affirmation": ["Tex. R. Evid. 603", "Tex. Const. art. I, § 5"],
+    "certificate": ["Tex. R. Civ. P. 203.2"]
+  },
+  "templates": {
+    "fieldInventory": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/field-inventory.tmpl", "sha256": "c4dc5e6158192927c7a1f136a9d4b5a07e484ddc6acf74dabd1c39b5f665bbbe" },
+    "title": { "file": "../common/title.tmpl", "sha256": "20f82cb6050c8fdf7babf4f5891b937117a4b5497b2701dda3d8da464efbd5de" },
+    "appearances": { "file": "../common/appearances.tmpl", "sha256": "f05b1933925306924a164725b184e57d01a1747cec8fdfa4f2f4c192ee777fda" },
+    "index": { "file": "../common/index.tmpl", "sha256": "648e04ea36c210ecd31f3a36e0bfb1d3993a3699b02a3e46f0fbd5668a4219f7" },
+    "changes": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/changes.tmpl", "sha256": "ab768016863b43a9533b6d684fb27fc74e36fa7ddb8fdfa3f9f78a63e34d729d" },
+    "signature": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/signature.tmpl", "sha256": "0604f487dcbc09c516881896ca07350f9eb28b71e0721027b34171c3b0cba8d7" },
+    "certification1": { "file": "../common/texas-affirmation-requested-certification-1.tmpl", "sha256": "dde6c2caf023836640c105a8898024eda7f42aeeb125277fe7e245ced23b1899" },
+    "certification2": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/certification-2.tmpl", "sha256": "524999a47c5a1ad315a42ad9c006f17cba1cae4ddc5d47536f458ae8216b08e9" },
+    "certification3": { "file": "../TEXAS_STATE_SIGNATURE_REQUESTED/certification-3.tmpl", "sha256": "05d5281cb7cac5eba3963fd8bd3fd9e74610396d6f9ebcddc635b5b7e0f8e273" }
+  }
+}

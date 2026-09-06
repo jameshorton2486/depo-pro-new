@@ -158,6 +158,33 @@ export function centerColumn(text, width = LINE_WIDTH) {
   return Math.max(0, Math.floor((width - String(text ?? "").length) / 2));
 }
 
+// The heading that announces an examination, by type -- Phase D2.
+//
+// A freelance deposition's first examination is headed simply `EXAMINATION`; later examination
+// types retain their qualified names. This is structural text, not testimony, and is derived from
+// the same resolved examination sequence that drives Q./A. labels and the examination index.
+//
+// The three below are the reporter's stated forms. Nothing in the repository defined them, and
+// nothing in the specimens could -- every specimen is a single-examiner deposition, so a
+// cross-examination heading never appears in one.
+export const EXAMINATION_HEADINGS = Object.freeze({ DIRECT:"EXAMINATION", CROSS:"CROSS-EXAMINATION", REDIRECT:"REDIRECT EXAMINATION", RECROSS:"RECROSS-EXAMINATION" });
+
+// How an examination is named on the index. Same source as the headings above, so the page and the
+// index cannot describe one examination two ways.
+//
+// DIRECT is "Examination", not "Direct Examination", and that is settled on the source rather than
+// chosen. F-09 in docs/opening-procedures/ufm-opening-tier-findings.md measures UFM Figures 14 and
+// 15 as identical but for one line: the trial record heads DIRECT EXAMINATION, the freelance
+// deposition heads EXAMINATION. This application produces freelance depositions. The certified
+// specimen agrees -- thomas-regression encodes a real transcript's index entry as
+// { examiner: "Mr. Nunez" }, printed "Examination by Mr. Nunez", with no type.
+//
+// The other three are a Depo-Pro presentation policy, not a prescribed form. No source prescribes
+// them: every certified specimen in this project is a single-examiner deposition, so a
+// cross-examination index line has never appeared in one. They mirror the body headings above so a
+// reader meets the same words in both places.
+export const EXAMINATION_INDEX_LABELS = Object.freeze({ DIRECT:"Examination", CROSS:"Cross-Examination", REDIRECT:"Redirect Examination", RECROSS:"Recross-Examination" });
+
 const FIXED_LABELS = Object.freeze({ COURT_REPORTER:"THE REPORTER", VIDEOGRAPHER:"THE VIDEOGRAPHER", INTERPRETER:"THE INTERPRETER", WITNESS:"THE WITNESS" });
 const ATTORNEY_ROLES = new Set(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY"]);
 
@@ -204,9 +231,61 @@ export function buildSpeakerLabels(candidates = []) {
  * resumption. The specimen has 21 of these against a single standalone `BY MR. BENTLEY:` at the
  * start of the examination, so resumption after colloquy is the common case, not examiner
  * change -- there is only one examiner in that deposition and the by-line still appears 21 times.
+ *
+ * `examinations` is the ordered boundary list from the overlay -- Phase C of the examination
+ * model. Until it arrived, `examiner` was one identity for the whole transcript, so defending
+ * counsel's cross rendered as colloquy and the answers to it as THE WITNESS: rather than A.,
+ * 450 of 1,602 paragraphs on a realistic deposition. A boundary moves examination authority as
+ * this function walks; it does not touch `transcriptRole`, which keeps its participant meaning.
+ *
+ * An empty list leaves every branch below exactly as it was. That is not a happy accident of the
+ * implementation -- it is the contract that lets an existing single-examiner deposition render
+ * unchanged, and it is asserted rather than assumed.
+ *
+ * Returns `{ paragraphs, examinations }` -- Phase D1. `examinations` is the resolved sequence, and
+ * it is an OUTPUT of this walk rather than an input to it. That matters: the examiner is sometimes
+ * adopted here, from the first questioning attorney seen, and until now nobody outside could learn
+ * who that was. Q./A. knew and the index did not, so an index entry for the first examination had
+ * no name to print. Resolving it anywhere else would be a second authority computing the same fact
+ * from the same evidence, which is how two answers to one question get into a certified document.
+ *
+ * The first examination is implicit and carries no `atWordId`. It is derived from the examiner the
+ * transcript already knows, so an existing deposition needs no overlay operation and no migration
+ * to render exactly as it does today. A synthetic DIRECT boundary would be a stored fact standing
+ * in for a derivable one.
  */
-export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null } = {}) {
+export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [], colloquy = null } = {}) {
   let examiner = examinerIdentity;
+  // Indexed by the word each boundary begins at, because a paragraph is what gets labelled and a
+  // paragraph is a list of word ids. applyOverlay has already put them in transcript order and
+  // dropped any whose anchor no longer exists.
+  // The utterances the reporter has said are not questions -- §247. Empty or absent leaves every
+  // branch below exactly as it was, which is what lets an existing transcript render unchanged.
+  const colloquyWordIds = colloquy instanceof Set ? colloquy : new Set(colloquy ?? []);
+  const boundaryByWordId = new Map();
+  for (const boundary of examinations ?? []) if (boundary?.atWordId) boundaryByWordId.set(boundary.atWordId, boundary);
+  // The resolved sequence every downstream consumer reads: Q./A. context, the heading, the BY-line
+  // and the index entry all come from this one list.
+  const examinationSequence = [];
+  const openExamination = (rawExaminerPersonId, type, atWordId, implicit) => {
+    // An examination nobody can name is not recorded. The index would have to print "Examination
+    // by" somebody, and inventing that is the failure the boundary operation already refuses at
+    // validation. A transcript where no examiner is ever established has no examination to index.
+    //
+    // Trimmed, because this function takes its boundary list directly and the operation validator
+    // is not in that path. A whitespace id is truthy, so a falsy check alone recorded an
+    // examination whose examiner printed as nothing -- caught by a mutation that should have died
+    // and did not.
+    const examinerPersonId = String(rawExaminerPersonId ?? "").trim();
+    if (!examinerPersonId) return;
+    const previous = examinationSequence.at(-1);
+    // Keyed on examiner AND type. The examiner alone is not enough -- a recross by the same
+    // attorney who just crossed is a new examination with a new heading, and the labeller
+    // correctly treats it as no change to who is asking. Two different facts about one word.
+    if (previous && previous.examinerPersonId === examinerPersonId && previous.type === type) return;
+    examinationSequence.push({ examinerPersonId, type, atWordId, implicit });
+  };
+  if (examinerIdentity) openExamination(examinerIdentity, "DIRECT", null, true);
   // Attorney colloquy can interrupt a question without closing its Q/A relationship. Keep that
   // semantic state separately from the immediately preceding rendered element so an objection
   // does not turn the responsive testimony into generic witness colloquy.
@@ -214,7 +293,32 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
   // A resumption marker survives the responsive answer: the next question is still the
   // examiner's return from the intervening attorney colloquy.
   let resumptionByLinePending = false;
-  return paragraphs.map(paragraph => {
+  const labelled = paragraphs.map(paragraph => {
+    // Authority moves before the paragraph holding the anchor is labelled, because that paragraph
+    // is the new examiner's first question -- the reporter marks the word their examination begins
+    // at, not the word after it.
+    //
+    // A boundary naming whoever is already examining is a no-op rather than a reset. It says
+    // nothing new about the proceeding, and treating it as a change would clear the resumption
+    // state a single-examiner transcript depends on.
+    for (const wordId of paragraph?.asrWordIds ?? []) {
+      const boundary = boundaryByWordId.get(wordId);
+      if (!boundary) continue;
+      // A boundary naming nobody is not a boundary. This has to refuse before the assignment
+      // below, not merely be left out of the sequence: skipping only the record still moved
+      // `examiner` to the nameless value, which cleared examination authority and let the next
+      // questioning attorney be adopted as a second implicit DIRECT. The Q./A. rule and the index
+      // then disagreed about who was examining -- from a malformed boundary, silently.
+      const boundaryExaminer = String(boundary.examinerPersonId ?? "").trim();
+      if (!boundaryExaminer) continue;
+      openExamination(boundaryExaminer, boundary.type, boundary.atWordId, false);
+      if (boundaryExaminer === examiner) continue;
+      examiner = boundaryExaminer;
+      // A new examiner begins; they do not resume. An inline `(BY MS. RAMIREZ)` here would be the
+      // wrong mark for a handover -- the standalone heading and by-line that belong at one are
+      // Phase D -- and leaving the flag set would emit exactly that.
+      resumptionByLinePending = false;
+    }
     const role = String(paragraph?.transcriptRole ?? "").toUpperCase();
     const identity = paragraph?.speakerIdentity ?? null;
     const label = identity && labels[identity] ? labels[identity] : null;
@@ -229,6 +333,29 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS.WITNESS}:`, null);
     }
     if (identity && examiner && identity === examiner) {
+      // The examiner said something that is not a question, and the reporter has said so. §247.
+      //
+      // Three things happen together, and each is a separate way to get this wrong.
+      //
+      // It carries her own name, because she did say it. The speaker is not changed -- misattributing
+      // the utterance was the only way to reach colloquy before this operation existed, and it put
+      // another person's name on a line they never said.
+      //
+      // The open question stays open. Attorney colloquy already does not close one, and an aside by
+      // the examiner is no different: "Q. Do you remember the accident? / MS. WHITFIELD: Let me be
+      // more specific. / A. Yes." must keep its A.
+      //
+      // The resumption marker is left exactly as it was found -- neither consumed nor set. Not
+      // consumed, because `(BY MS. WHITFIELD)` announces her returning to questioning and belongs on
+      // the question, not on the aside before it; measured, it was landing on the aside. Not set,
+      // because her own aside is not an interruption by somebody else, and a by-line after it would
+      // announce a return from nowhere.
+      if ((paragraph?.asrWordIds ?? []).some(wordId => colloquyWordIds.has(wordId))) {
+        // Marked on the paragraph so the Workspace can offer to clear it. Without this the screen
+        // could tell the reporter a line reads as colloquy but not whether that is the model's
+        // doing or their own, and those have different remedies.
+        return { ...emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion), examinerColloquy:true };
+      }
       const byLine = resumptionByLinePending && label ? `(BY ${label})` : null;
       resumptionByLinePending = false;
       return emit(ELEMENT.QUESTION, "Q.", byLine, true);
@@ -237,6 +364,10 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       // First questioning attorney seen becomes the examiner, so a transcript with no examiner
       // set still renders as questions and answers rather than as undifferentiated colloquy.
       examiner = identity;
+      // The adoption the readiness check found invisible. Recorded at the moment it happens, so
+      // the sequence names the same person the Q./A. rule just started trusting -- a canonical
+      // participant id, never a diarization index.
+      openExamination(identity, "DIRECT", null, true);
       resumptionByLinePending = false;
       return emit(ELEMENT.QUESTION, "Q.", null, true);
     }
@@ -245,6 +376,20 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, pendingQuestion);
     }
     resumptionByLinePending = false;
+    // A ROLE ESTABLISHED WITHOUT A PERSON still has a designation, and the record should say it.
+    //
+    // Trial #1's videographer opens the deposition, states the date and time, and goes on and off
+    // the record -- unmistakably the videographer, and never once named, in the recording or in the
+    // Notice. Before this, that paragraph printed with no designation at all, because the label is
+    // looked up by canonical identity and there is nobody to look up.
+    //
+    // FIXED_LABELS already holds the answer and the WITNESS branch above already reaches it this
+    // way. The alternative -- inventing a nameless participant to hang the role on -- would put a
+    // person who does not exist into the record that feeds the certificate.
+    //
+    // Only the four fixed roles, and only when no identity is recorded. An attorney has no fixed
+    // label because an attorney is named; this must never manufacture one.
+    if (!identity && FIXED_LABELS[role]) return emit(ELEMENT.COLLOQUY, `${FIXED_LABELS[role]}:`, null, false);
     return emit(ELEMENT.COLLOQUY, label ? `${label}:` : null, null, false);
 
     function emit(elementType, token, byLine, nextPendingQuestion = false) {
@@ -252,4 +397,5 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return { ...paragraph, elementType, label:token, byLine, layout:LAYOUT[elementType], unlabeledSpeaker:!label && elementType === ELEMENT.COLLOQUY };
     }
   });
+  return { paragraphs:labelled, examinations:examinationSequence };
 }

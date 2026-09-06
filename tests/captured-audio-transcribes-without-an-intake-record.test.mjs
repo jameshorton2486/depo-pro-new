@@ -102,10 +102,10 @@ test("the transcribe route does not require an intake record, and the fallback s
   const source = fs.readFileSync(new URL("../server/local-api.mjs", import.meta.url), "utf8");
   const route = source.slice(source.indexOf('req.url === "/api/audio/transcribe"'));
   const handler = route.slice(0, route.indexOf("return json"));
-  assert.match(handler, /audit=readAudioAuditIfPresent\(root,input\.uploadId\)/);
+  assert.match(handler, /audit\s*=\s*readAudioAuditIfPresent\(root,\s*input\.uploadId\)/);
   assert.ok(!/audit=readAudioAudit\(root,input\.uploadId\)/.test(handler),
     "the transcribe route refuses live-captured audio again");
   // The one caller that genuinely needs the intake directory must refuse rather than dereference
   // a null audit, and must say which audio and why.
-  assert.match(source, /if \(!audit\) throw new Error\(`Deepgram could not decode/);
+  assert.match(source, /if \(!audit\)\s*throw new Error\(\s*`Deepgram could not decode/);
 });

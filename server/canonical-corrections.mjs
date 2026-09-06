@@ -92,6 +92,7 @@ export function validateCorrection(record, input) {
     recordType: "CANONICAL_FIELD_CORRECTION",
     depositionId: input.depositionId ?? null,
     path, from: input.from ?? null, to: input.to, who, why, at,
+    ...(input.valueSource?{valueSource:String(input.valueSource)}:{}),
   };
   return { ok:true, entry: { ...entry, id: correctionId(entry) } };
 }
@@ -114,8 +115,8 @@ export function applyCorrection(record, entry) {
   resolved.parent[resolved.key] = {
     ...resolved.field,
     value: entry.to ?? null,
-    source: "REPORTER_ENTERED",
-    state: present ? "REPORTER_ADDED" : "MISSING",
+    source: entry.valueSource==="SYSTEM_CAPTURED"?"SYSTEM_CAPTURED":"REPORTER_ENTERED",
+    state: present ? (entry.valueSource==="SYSTEM_CAPTURED"?"DERIVED":"REPORTER_ADDED") : "MISSING",
   };
   return copy;
 }
