@@ -186,6 +186,28 @@ export const EXAMINATION_HEADINGS = Object.freeze({ DIRECT:"EXAMINATION", CROSS:
 export const EXAMINATION_INDEX_LABELS = Object.freeze({ DIRECT:"Examination", CROSS:"Cross-Examination", REDIRECT:"Redirect Examination", RECROSS:"Recross-Examination" });
 
 const FIXED_LABELS = Object.freeze({ COURT_REPORTER:"THE REPORTER", VIDEOGRAPHER:"THE VIDEOGRAPHER", INTERPRETER:"THE INTERPRETER", WITNESS:"THE WITNESS" });
+/**
+ * How this transcript knows where its examination begins -- and whether it knows at all.
+ *
+ * ESTABLISHED       a boundary with an anchor and a named examiner exists. It may have come from
+ *                   the reporter, from a validated AI structural proposal, or from qualified
+ *                   examination data already on the record. The labeller does not care which; all
+ *                   three are facts the transcript holds, and provenance is the boundary's own.
+ *
+ * LEGACY_UNDERIVED  no such boundary exists, and Q./A. is being produced by the old rule that the
+ *                   first questioning attorney to speak is examining from that word onward. That
+ *                   rule is wrong often enough to matter -- it made counsel's appearance a question
+ *                   on Heath Thomas -- but it is what every deposition in the library was rendered
+ *                   with, so it is kept and named rather than removed.
+ *
+ * Naming the second state is the point. Q. looks identical on the page either way, and a certified
+ * record should not present a guess and a fact in the same typeface with nothing to tell them
+ * apart. Oath attestation is deliberately not consulted here: whether the witness was sworn and
+ * where examination begins are different facts, and for a deposition transcribed from an existing
+ * recording the oath was administered years before this reporter ever saw the file.
+ */
+export const EXAMINATION_CONTEXT = Object.freeze({ ESTABLISHED:"ESTABLISHED", LEGACY_UNDERIVED:"LEGACY_UNDERIVED" });
+
 const ATTORNEY_ROLES = new Set(["QUESTIONING_ATTORNEY", "DEFENDING_ATTORNEY"]);
 
 /**
@@ -254,16 +276,43 @@ export function buildSpeakerLabels(candidates = []) {
  * to render exactly as it does today. A synthetic DIRECT boundary would be a stored fact standing
  * in for a derivable one.
  */
-export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [], colloquy = null } = {}) {
-  let examiner = examinerIdentity;
+export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity = null, examinations = [], colloquy = null, deleted = null } = {}) {
   // Indexed by the word each boundary begins at, because a paragraph is what gets labelled and a
   // paragraph is a list of word ids. applyOverlay has already put them in transcript order and
   // dropped any whose anchor no longer exists.
   // The utterances the reporter has said are not questions -- §247. Empty or absent leaves every
   // branch below exactly as it was, which is what lets an existing transcript render unchanged.
   const colloquyWordIds = colloquy instanceof Set ? colloquy : new Set(colloquy ?? []);
+  // A boundary anchored on a struck word establishes nothing. The word does not print, so there is
+  // no place on the page where the examination could be said to begin, and a heading would be
+  // announcing a transition the reader cannot see. The operation is not orphaned -- the reporter
+  // may strike the word and then unstrike it -- it simply stops qualifying while the word is gone.
+  const deletedWordIds = deleted instanceof Set ? deleted : new Set(deleted ?? []);
   const boundaryByWordId = new Map();
-  for (const boundary of examinations ?? []) if (boundary?.atWordId) boundaryByWordId.set(boundary.atWordId, boundary);
+  for (const boundary of examinations ?? []) {
+    if (boundary?.atWordId && !deletedWordIds.has(boundary.atWordId)) boundaryByWordId.set(boundary.atWordId, boundary);
+  }
+
+  // WHETHER THIS TRANSCRIPT KNOWS WHERE ITS EXAMINATION BEGINS.
+  //
+  // A boundary is qualified when it has both an anchor and a named examiner. One or more of those
+  // and the transcript holds the fact; none and it does not, and the difference decides which of
+  // two rules below assigns Q.
+  //
+  // The two states are named rather than blended, because "we know where examination began" and
+  // "we are guessing from who spoke first" produce the same Q. on the page and are not the same
+  // claim about the record. `LEGACY_UNDERIVED` is surfaced as a finding by the renderer.
+  // Restricted to DIRECT, which is what "where does examination begin" means. A cross boundary
+  // establishes where CROSS begins and says nothing whatever about the direct examination that
+  // preceded it -- suppressing the implicit direct on the strength of one stripped Q./A. from the
+  // entire first examination of every transcript that marks only its handovers. Measured: 18 tests.
+  const qualifiedBoundary = [...boundaryByWordId.values()].some(boundary =>
+    String(boundary.examinerPersonId ?? "").trim() && String(boundary.type ?? "DIRECT").toUpperCase() === "DIRECT");
+  const examinationContext = qualifiedBoundary ? EXAMINATION_CONTEXT.ESTABLISHED : EXAMINATION_CONTEXT.LEGACY_UNDERIVED;
+  // Nobody is examining until a boundary says so. `examinerIdentity` names who conducts the
+  // examination, which is not the same fact as when it starts -- seeding from it made every
+  // preceding word of the deposition, including counsel's own appearance, a question.
+  let examiner = qualifiedBoundary ? null : examinerIdentity;
   // The resolved sequence every downstream consumer reads: Q./A. context, the heading, the BY-line
   // and the index entry all come from this one list.
   const examinationSequence = [];
@@ -295,7 +344,9 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
     }
     examinationSequence.push({ examinerPersonId, type, atWordId, implicit });
   };
-  if (examinerIdentity) openExamination(examinerIdentity, "DIRECT", null, true);
+  // Only where the transcript has no boundary of its own. With one, the examination opens when the
+  // walk reaches its anchor, and not a word earlier.
+  if (!qualifiedBoundary && examinerIdentity) openExamination(examinerIdentity, "DIRECT", null, true);
   // Attorney colloquy can interrupt a question without closing its Q/A relationship. Keep that
   // semantic state separately from the immediately preceding rendered element so an objection
   // does not turn the responsive testimony into generic witness colloquy.
@@ -370,9 +421,17 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       resumptionByLinePending = false;
       return emit(ELEMENT.QUESTION, "Q.", byLine, true);
     }
-    if (!examiner && ATTORNEY_ROLES.has(role) && role === "QUESTIONING_ATTORNEY" && identity) {
-      // First questioning attorney seen becomes the examiner, so a transcript with no examiner
-      // set still renders as questions and answers rather than as undifferentiated colloquy.
+    if (!qualifiedBoundary && !examiner && ATTORNEY_ROLES.has(role) && role === "QUESTIONING_ATTORNEY" && identity) {
+      // LEGACY ONLY. The first questioning attorney seen becomes the examiner, so a deposition
+      // recorded before boundaries existed still renders as questions and answers rather than as
+      // undifferentiated colloquy.
+      //
+      // This is the defective principle -- speaker is the examining attorney, therefore this
+      // utterance is a question -- kept for one reason: removing it would silently strip Q./A. from
+      // every transcript already in the library. It is fenced behind the absence of any qualified
+      // boundary and reported as LEGACY_UNDERIVED, so what it produces is never mistaken for a fact
+      // the record establishes. On Heath Thomas it made counsel's appearance ("Steven Nunez for
+      // Plaintiff") a question to a witness who had not yet been sworn.
       examiner = identity;
       // The adoption the readiness check found invisible. Recorded at the moment it happens, so
       // the sequence names the same person the Q./A. rule just started trusting -- a canonical
@@ -407,5 +466,5 @@ export function labelParagraphs(paragraphs = [], { labels = {}, examinerIdentity
       return { ...paragraph, elementType, label:token, byLine, layout:LAYOUT[elementType], unlabeledSpeaker:!label && elementType === ELEMENT.COLLOQUY };
     }
   });
-  return { paragraphs:labelled, examinations:examinationSequence };
+  return { paragraphs:labelled, examinations:examinationSequence, examinationContext };
 }

@@ -121,7 +121,9 @@ test("a single-examiner deposition raises no examination finding either", () => 
   // place a heading for it would report the anchor as unrenderable -- a finding on the reporter's
   // screen about a transcript that is perfectly correct.
   const findings = render(emptyOverlay("DEP-TEST")).findings.filter(finding => finding.code?.startsWith("EXAMINATION_"));
-  assert.deepEqual(findings, []);
+  // One finding, and it is not about a heading: this fixture holds no boundary, so its Q./A. is
+  // produced by the legacy rule and the record says so. Nothing here is unrenderable or unnamed.
+  assert.deepEqual(findings.map(finding => finding.code), ["EXAMINATION_CONTEXT_UNDERIVED"]);
 });
 
 test("a reload produces the identical document", () => {

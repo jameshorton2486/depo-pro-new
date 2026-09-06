@@ -149,8 +149,14 @@ test("a boundary naming whoever is already examining changes nothing", () => {
   // Anchored at the RESUMING paragraph, not the opening one. Anywhere else the reset is invisible
   // because there is no resumption state to lose, and the test would pass while proving nothing --
   // it did, until a mutation that deleted the guard survived it.
-  const withRedundant = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations:[at(resumed, "alvarez", "DIRECT")] }).paragraphs;
-  const without = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez" }).paragraphs;
+  // Both sides carry the opening DIRECT boundary, so the comparison isolates the redundant one.
+  // Without it the two sides would differ for an unrelated reason -- one establishes an examination
+  // and the other does not -- and the redundant boundary's effect would be invisible inside that.
+  const opened = at(q, "alvarez", "DIRECT");
+  const withRedundant = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations:[opened, at(resumed, "alvarez", "DIRECT")] }).paragraphs;
+  const without = labelParagraphs(paragraphs, { labels:LABELS, examinerIdentity:"alvarez", examinations:[opened] }).paragraphs;
+  assert.deepEqual(without.map(item => item.elementType),
+    ["QUESTION", "COLLOQUY", "ANSWER", "QUESTION"], "the baseline is testimony, not colloquy");
   assert.deepEqual(withRedundant.map(item => item.byLine), without.map(item => item.byLine),
     "including the resumption by-line, which a spurious reset would have swallowed");
   assert.deepEqual(withRedundant.map(item => item.elementType), without.map(item => item.elementType));

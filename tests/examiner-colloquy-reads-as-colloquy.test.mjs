@@ -135,8 +135,13 @@ test("it applies to whoever is examining at that point, in every examination", (
     const opening = say("alvarez", "QUESTIONING_ATTORNEY", "Where were you going?");
     const start = say("whitfield", "DEFENDING_ATTORNEY", "Did you see the vehicle?");
     const aside = say("whitfield", "DEFENDING_ATTORNEY", "Let me back up.");
+    // Alvarez's opening question needs a boundary of its own. Q. requires an established
+    // examination, and "alvarez is the examiner" is not one -- it says who, never when.
     const shaped = shape([opening, start, aside], [aside.wordId], {
-      examinerIdentity:"alvarez", examinations:[{ atWordId:start.wordId, examinerPersonId:"whitfield", type }],
+      examinerIdentity:"alvarez", examinations:[
+        { atWordId:opening.wordId, examinerPersonId:"alvarez", type:"DIRECT" },
+        { atWordId:start.wordId, examinerPersonId:"whitfield", type },
+      ],
     });
     assert.deepEqual(shaped, ["QUESTION:Q.", "QUESTION:Q.", "COLLOQUY:MS. WHITFIELD:"], type);
   }

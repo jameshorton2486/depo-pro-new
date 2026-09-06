@@ -9,7 +9,10 @@ const codes = result => result.findings.map(finding => finding.code);
 
 test("the fixture renders clean",()=>{
   const result = render();
-  assert.deepEqual(codes(result),[],`unexpected findings: ${JSON.stringify(result.findings)}`);
+  // EXAMINATION_CONTEXT_UNDERIVED is expected and is not a defect in the render: the fixture holds
+  // no examination boundary, so Q./A. comes from the legacy first-questioning-attorney rule. It is
+  // reported for exactly that reason, and a transcript that carried it silently would be the bug.
+  assert.deepEqual(codes(result),["EXAMINATION_CONTEXT_UNDERIVED"],`unexpected findings: ${JSON.stringify(result.findings)}`);
   assert.ok(result.paragraphs.length > 0);
 });
 

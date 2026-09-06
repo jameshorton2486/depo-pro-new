@@ -11,7 +11,7 @@
 // decides what the reader sees.
 import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { joinStyled, styleWords } from "./transcript-style.mjs";
-import { ELEMENT, EXAMINATION_HEADINGS, LAYOUT, buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
+import { ELEMENT, EXAMINATION_CONTEXT, EXAMINATION_HEADINGS, LAYOUT, buildSpeakerLabels, labelParagraphs } from "./transcript-labels.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeRenderedContentHash } from "./transcript-content-hash.mjs";
 
@@ -104,7 +104,18 @@ export function renderTranscript({ working, evidence = [], speakerCandidates = [
   // boundaries in transcript order; labelParagraphs advances the active examiner as it walks and
   // hands back the resolved sequence -- including the implicit first examination, whose examiner
   // it may have adopted here and which nothing outside could otherwise name.
-  const { paragraphs:labelled, examinations:examinationSequence } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations, colloquy:applied.colloquy });
+  const { paragraphs:labelled, examinations:examinationSequence, examinationContext } = labelParagraphs(grouped, { labels, examinerIdentity, examinations:applied.examinations, colloquy:applied.colloquy, deleted:applied.deleted });
+  // Q. is being produced by the old rule -- first questioning attorney to speak is examining from
+  // that word on -- because this transcript holds no boundary saying where examination begins.
+  //
+  // Reported rather than silently corrected. Removing the rule would strip Q./A. from every
+  // deposition already in the library; leaving it unreported would let a guess sit on a certified
+  // page in the same typeface as a fact. The remedy is one boundary, which the Workspace can set
+  // and the correction pass can propose, and this is what tells the reporter it is missing.
+  if (examinationContext === EXAMINATION_CONTEXT.LEGACY_UNDERIVED && labelled.some(item => item.elementType === ELEMENT.QUESTION)) {
+    findings.push({ code:"EXAMINATION_CONTEXT_UNDERIVED", examinerPersonId:examinationSequence[0]?.examinerPersonId ?? null,
+      message:"No examination boundary establishes where examination begins. Q. and A. are derived from the first questioning attorney to speak, which cannot distinguish an appearance or a stipulation from a question. Set the examination boundary to establish it." });
+  }
 
   const seen = new Set();
   let paragraphs = labelled.map((paragraph, index) => {
