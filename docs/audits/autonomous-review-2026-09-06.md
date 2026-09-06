@@ -1,5 +1,24 @@
 # Project review — 6 September 2026
 
+## Correction: the active local main was initially missed
+
+The initial review checked GitHub main and an older OneDrive source copy, but
+missed the running application's checkout at `C:\Users\james\Projects\depo-pro-new`.
+That checkout's main was `e59282c491affb343b458c844b20b8ee6845ab02`, with 22 commits
+absent from GitHub. Consequently, the earlier test counts and completion claims
+did not cover the active correction pipeline. Those claims must not be read as
+validation of the reporter's then-current application.
+
+The reconciliation preserves both histories in a merge: the local 22 commits and
+all GitHub review changes, including PRs #91, #66 and #92. No local feature commits
+are discarded and neither main is force-pushed. The combined tree is verified in
+isolation before the active checkout is fast-forwarded to the shared GitHub main.
+The active checkout remains the operational source; the OneDrive review checkout
+is temporary verification material, not a second development main.
+
+The earlier validation results below describe their stated revisions. The combined
+tree has its own release-gate and GitHub CI results in the reconciliation PR.
+
 ## Source and preservation
 
 Reviewed GitHub `jameshorton2486/depo-pro-new`, starting at main commit

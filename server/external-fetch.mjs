@@ -1,5 +1,8 @@
 const isRetryableStatus = status => status === 429 || (status >= 500 && status <= 599);
 
+// For finite JSON API responses only: the complete response is buffered under the
+// deadline and returned as a reconstructed Response. Do not use for streaming or
+// large downloads; those need a streaming consumer that owns its timeout lifetime.
 export async function fetchExternal(url, options, { label, attempts = 2, timeoutMs = 120000, fetchImpl = fetch, sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
