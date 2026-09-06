@@ -20,7 +20,7 @@ but its source was not overwritten or replaced with upstream files.
 | Dependencies | Updated vulnerable transitive browserslist, fast-uri, and fflate versions and associated browser data in the lockfile. No direct framework upgrades or database migrations. |
 | Tests and development | Reviewed test discovery and Windows CI, retaining their full checks. Signal-terminated test/development subprocesses can no longer be reported as successful through a null exit code. Added network and HTTP regression tests and extended backup tests. |
 | Documentation | Corrected stale claims that reporter persistence, editing, and finalization were unimplemented; documented Word dependencies and recovery behavior. |
-| GitHub | No issues were returned by the repository's all-state issue listing. Open PR #66 adds independent examination-anchor qualification tests and was left open; it was not treated as obsolete merely because it is older. |
+| GitHub | No issues were returned by the repository's all-state issue listing. PR #91 merged after both Windows CI configurations passed. PR #66 was refreshed against main, its nine examination-anchor tests were checked locally, and it merged after both fresh CI configurations passed. |
 
 ## Verification
 
@@ -45,8 +45,16 @@ time, not a guarantee against unknown vulnerabilities.
 
 ## Limits retained
 
-- The 11 optional native/live integration tests skipped. Licensed RX behavior,
-  microphones, and paid provider requests were not exercised in this review.
+- The deterministic baseline skipped 11 native RX tests. The completion pass ran
+  all 11 using installed RX 12 plug-ins, Pedalboard 0.9.24, numpy 2.5.2, and a
+  generated 310-second, 48 kHz, 24-bit WAV. All 11 test cases passed, including
+  writing and re-reading a qualification record. Microphones and paid provider
+  requests were not exercised.
+- Qualification results are distinct from test execution: De-hum passed the
+  synthetic signal-path qualification. De-click reproduced its known
+  chunk-invariance and alignment failures (maximum marker offset 6,467 frames,
+  nonconstant). Its existing `asrSafe: false` and review-only restrictions remain.
+  No claim of real-speech transcription accuracy follows from this synthetic test.
 - Real deposition records, credentials, protection markers, and final certified
   artifacts were not modified. No production deployment was performed.
 - Federal certificate variants remain blocked pending approved source material;
@@ -57,3 +65,11 @@ time, not a guarantee against unknown vulnerabilities.
   transactional filesystem snapshot. Stop recording/editing before backing up.
 - This review and the automated suite reduce regression risk; they do not establish
   that every hardware configuration, UI interaction, or certification case works.
+
+## Completion follow-up
+
+The native integration launcher now propagates a signal-terminated child as
+failure, matching the deterministic launcher. The two reviewed pull requests are
+merged; no issue or independent test work from this review remains deliberately
+open. The older source folder is still preserved separately from the reviewed
+Git checkout.
