@@ -274,12 +274,20 @@ function json(res, status, body, origin) {
 async function body(req, max = 25 * 1024 * 1024) {
   const parts = [];
   let size = 0;
-  for await (const chunk of req) {
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > max) throw new Error("Request is too large.");
+    if (size > max) {
+      req.resume();
+      throw Object.assign(new Error("Request is too large."), { status: 413, code: "REQUEST_TOO_LARGE" });
+    }
     parts.push(chunk);
   }
-  return JSON.parse(Buffer.concat(parts).toString("utf8") || "{}");
+  let input;
+  try { input = JSON.parse(Buffer.concat(parts).toString("utf8") || "{}"); }
+  catch { throw Object.assign(new Error("Request must contain valid JSON."), { status: 400, code: "INVALID_JSON" }); }
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw Object.assign(new Error("Request must contain a JSON object."), { status: 400, code: "INVALID_JSON" });
+  return input;
 }
 function contentBlock(file) {
   if (file.type === "application/pdf")
@@ -2730,7 +2738,7 @@ const server = http.createServer(async (req, res) => {
       };
       if (config?.anthropicApiKey) {
         try {
-          const response = await fetch(
+          const response = await fetchExternal(
             "https://api.anthropic.com/v1/messages",
             {
               method: "POST",
@@ -2745,6 +2753,7 @@ const server = http.createServer(async (req, res) => {
                 messages: [{ role: "user", content: "Reply OK" }],
               }),
             },
+            { label: "Anthropic credential check", attempts: 1, timeoutMs: 15000 },
           );
           const payload = await response.json();
           results.anthropic = response.ok
@@ -2770,9 +2779,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (config?.deepgramApiKey) {
         try {
-          const response = await fetch(
+          const response = await fetchExternal(
             "https://api.deepgram.com/v1/auth/token",
             { headers: { Authorization: `Token ${config.deepgramApiKey}` } },
+            { label: "Deepgram credential check", attempts: 1, timeoutMs: 15000 },
           );
           const payload = await response.json();
           results.deepgram = response.ok
@@ -2798,6 +2808,8 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res, 404, { error: "Not found." }, origin);
   } catch (error) {
+    if (["INVALID_JSON", "REQUEST_TOO_LARGE"].includes(error?.code))
+      return json(res, error.status, { error: error.message, code: error.code }, origin);
     if (error?.code === "WORKING_TRANSCRIPT_NOT_CREATED")
       return json(res, 404, { error: error.message, code: error.code }, origin);
     // A refused stale mutation is a conflict, not a server fault. Falling through to the

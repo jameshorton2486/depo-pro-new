@@ -7,13 +7,20 @@ import { depositionDirectory } from "./deposition-store.mjs";
 export const BACKUP_RECORD_TYPE = "DEPO_PRO_DEPOSITION_BACKUP_V1";
 
 function digestFile(file) {
-  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const hash = crypto.createHash("sha256"), buffer = Buffer.allocUnsafe(1024 * 1024);
+  const descriptor = fs.openSync(file, "r");
+  try {
+    let bytes;
+    while ((bytes = fs.readSync(descriptor, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, bytes));
+    return hash.digest("hex");
+  } finally { fs.closeSync(descriptor); }
 }
 
 function filesBelow(directory, current = directory) {
   const found = [];
   for (const entry of fs.readdirSync(current, { withFileTypes:true })) {
     const absolute = path.join(current, entry.name);
+    if (entry.isSymbolicLink()) throw new Error("Backup cannot verify symbolic links or junctions; use regular deposition files.");
     if (entry.isDirectory()) found.push(...filesBelow(directory, absolute));
     else if (entry.isFile()) found.push(path.relative(directory, absolute));
   }
@@ -55,13 +62,18 @@ export function createDepositionBackup(root, { depositionId, storageRoot, backup
   const destinationRoot = path.resolve(backupRoot);
   if (destinationRoot === source || destinationRoot.startsWith(`${source}${path.sep}`)) throw new Error("The backup destination cannot be inside the deposition being backed up.");
   fs.mkdirSync(destinationRoot, { recursive:true });
+  const physicalRelative = path.relative(fs.realpathSync(source), fs.realpathSync(destinationRoot));
+  if (physicalRelative === "" || (!path.isAbsolute(physicalRelative) && physicalRelative !== ".." && !physicalRelative.startsWith(`..${path.sep}`)))
+    throw new Error("The backup destination cannot be inside the deposition being backed up, including through a junction.");
   const stamp = now.toISOString().replace(/[:.]/g, "-"), name = `DepoPro-${depositionId}-${stamp}`;
   const destination = path.join(destinationRoot, name), temporary = path.join(destinationRoot, `.${name}.${crypto.randomUUID()}.tmp`);
   if (fs.existsSync(destination)) throw new Error("A backup with this identity already exists.");
   try {
+    // Reject linked content before copying, and compare both ends of the copy interval.
+    const beforeInventory = inventory(source);
     fs.cpSync(source, temporary, { recursive:true, errorOnExist:true, force:false });
     const sourceInventory = inventory(source), copiedInventory = inventory(temporary);
-    if (JSON.stringify(sourceInventory) !== JSON.stringify(copiedInventory)) throw new Error("The deposition changed while the backup was being created. Try again after recording and edits stop.");
+    if (JSON.stringify(beforeInventory) !== JSON.stringify(sourceInventory) || JSON.stringify(sourceInventory) !== JSON.stringify(copiedInventory)) throw new Error("The deposition changed while the backup was being created. Try again after recording and edits stop.");
     const manifest = { recordType:BACKUP_RECORD_TYPE, depositionId, createdAt:now.toISOString(), storagePath:relativeStoragePath.split(path.sep).join("/"), files:copiedInventory, inventorySha256:inventoryDigest(copiedInventory) };
     fs.writeFileSync(path.join(temporary, "backup-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { encoding:"utf8", flag:"wx" });
     fs.renameSync(temporary, destination);
@@ -77,6 +89,9 @@ export function restoreDepositionBackup(backupDirectory, { storageRoot }) {
   if (!(target.startsWith(`${targetRoot}${path.sep}`))) throw new Error("Backup restore target is outside configured storage.");
   if (fs.existsSync(target)) throw new Error("Restore blocked: a deposition already exists at the target location.");
   fs.mkdirSync(path.dirname(target), { recursive:true });
+  const physicalParent = path.relative(fs.realpathSync(targetRoot), fs.realpathSync(path.dirname(target)));
+  if (path.isAbsolute(physicalParent) || physicalParent === ".." || physicalParent.startsWith(`..${path.sep}`))
+    throw new Error("Backup restore target is outside configured storage through a junction.");
   const temporary = `${target}.${crypto.randomUUID()}.restore`;
   try {
     fs.cpSync(path.resolve(backupDirectory), temporary, { recursive:true });

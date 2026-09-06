@@ -31,10 +31,16 @@ export async function assertPortAvailable(port, host = APPLICATION_URL_HOST) {
   });
 }
 
-export async function waitForReady(url, { attempts = 60, intervalMs = 250, headers } = {}) {
+export async function waitForReady(url, { attempts = 60, intervalMs = 250, timeoutMs = 1000, headers } = {}) {
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try { const response = await fetch(url, { cache: "no-store", headers }); if (response.ok) return true; lastError = new Error(`HTTP ${response.status}`); }
+    try {
+      const response = await fetch(url, { cache: "no-store", headers, signal: AbortSignal.timeout(timeoutMs) });
+      // Readiness only needs the status; release the connection without downloading the page.
+      await response.body?.cancel();
+      if (response.ok) return true;
+      lastError = new Error(`HTTP ${response.status}`);
+    }
     catch (error) { lastError = error; }
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
@@ -50,7 +56,7 @@ async function main() {
   await assertPortAvailable(config.port); await assertPortAvailable(config.apiPort);
   const children = [
     spawn(runtime, ["server/local-api.mjs"], { cwd: root, env: { ...process.env, NODE_ENV: "production" }, stdio: "inherit", windowsHide: true }),
-    spawn(runtime, ["node_modules/vinext/dist/cli.js", "start", "--port", String(config.port)], { cwd: root, env: { ...process.env, NODE_ENV: "production" }, stdio: "inherit", windowsHide: true }),
+    spawn(runtime, ["node_modules/vinext/dist/cli.js", "start", "--hostname", APPLICATION_URL_HOST, "--port", String(config.port)], { cwd: root, env: { ...process.env, NODE_ENV: "production" }, stdio: "inherit", windowsHide: true }),
   ];
   let stopping = false;
   const stop = code => { if (stopping) return; stopping = true; for (const child of children) if (!child.killed) { if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); else child.kill(); } process.exit(code); };
