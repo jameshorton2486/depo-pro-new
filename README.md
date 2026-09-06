@@ -31,6 +31,13 @@ The deposition root can be changed explicitly with `DEPO_PRO_DEPOSITIONS_ROOT`. 
 
 ## Run locally
 
+The active Windows checkout is `C:\Users\james\Projects\depo-pro-new`. Its `main`
+and GitHub `origin/main` must contain the same work before a review is declared
+complete. Before treating a fresh clone as authoritative, check the active
+checkout's status and commits not yet pushed. Reconcile divergence with a reviewed
+merge; do not overwrite local commits or maintain a separate development main in
+an exported OneDrive source copy.
+
 ```powershell
 cd "C:\Users\james\projects\depo-pro-new"
 npm install
