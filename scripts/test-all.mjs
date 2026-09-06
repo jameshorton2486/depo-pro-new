@@ -8,4 +8,4 @@ const included=new Set(files),omitted=discovered.filter(file=>!included.has(file
 if(omitted.length){console.error(`Test discovery omitted ${omitted.length} file(s): ${omitted.join(", ")}`);process.exit(2)}
 if(!files.length){console.error("No test files found.");process.exit(2)}
 const child=spawn(process.execPath,["--test",...files],{stdio:"inherit",windowsHide:true});
-child.on("exit",code=>process.exit(code||0));child.on("error",error=>{console.error(error);process.exit(1)});
+child.on("exit",code=>process.exit(code??1));child.on("error",error=>{console.error(error);process.exit(1)});
