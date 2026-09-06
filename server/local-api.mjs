@@ -87,7 +87,8 @@ import {
 } from "./entity-pass.mjs";
 import { suggestSpeakerAttributions } from "./speaker-attribution-pass.mjs";
 import { runSpeakerRangePass } from "./speaker-range-pass.mjs";
-import { aiPassUndoState, applyAiCorrectionPass, listAiCorrectionPasses } from "./ai-correction.mjs";
+import { aiPassUndoState, listAiCorrectionPasses } from "./ai-correction.mjs";
+import { correctTranscript } from "./correct-transcript.mjs";
 import { existingReview, runAiReview } from "./ai-review.mjs";
 import {
   RANGE_ACCEPTANCE_REFUSED,
@@ -750,7 +751,9 @@ const server = http.createServer(async (req, res) => {
     // applied to a transcript nobody analysed.
     if (req.url === "/api/correction/ai-apply" && req.method === "POST") {
       const input = await body(req, 16 * 1024), config = loadSecrets();
-      return json(res, 200, await applyAiCorrectionPass(root, {
+      // One click, both layers: the deterministic format pass and then the AI passes. The route
+      // keeps calling one function, and that function is the only place the ordering lives.
+      return json(res, 200, await correctTranscript(root, {
         depositionId: input.depositionId,
         storageRoot: depositionStorageRoot,
         apiKey: config?.anthropicApiKey,

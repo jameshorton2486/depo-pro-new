@@ -191,7 +191,9 @@ export function listAiCorrectionPasses(root, { depositionId, storageRoot } = {})
 export function aiPassUndoState(root, { depositionId, storageRoot, listPasses = listAiCorrectionPasses, readOverlay } = {}) {
   let passes = [];
   try { passes = listPasses(root, { depositionId, storageRoot }) ?? []; } catch { passes = []; }
-  const pass = passes[0] ?? null;
+  // AI records only. The control is labelled "Undo AI Correction Pass" and a deterministic format
+  // record standing at the head of the list would make it offer to undo something it does not name.
+  const pass = passes.filter(isAiPass)[0] ?? null;
   if (!pass) return { pass: null, undoable: false, reason: "NO_AI_PASS" };
 
   let overlay = null;
@@ -206,6 +208,15 @@ export function aiPassUndoState(root, { depositionId, storageRoot, listPasses = 
   const same = JSON.stringify(tail) === JSON.stringify(pass.operations);
   return { pass, undoable: same, reason: same ? null : "EDITED_SINCE" };
 }
+
+/**
+ * Whether a pass record describes an AI pass.
+ *
+ * Records written before the deterministic pass existed carry no `recordType`, and they are AI
+ * passes -- there was nothing else. Reading absence as "AI" keeps those records working; reading it
+ * as "not AI" would silently un-undo every pass already on disk.
+ */
+const isAiPass = record => String(record?.recordType ?? "AI_CORRECTION_PASS") === "AI_CORRECTION_PASS";
 
 /** Persists the record of one applied pass. Written after the operations land, never before. */
 export function writeAiCorrectionPass(root, { depositionId, storageRoot, record } = {}) {
@@ -253,7 +264,12 @@ export async function applyAiCorrectionPass(root, {
   // Two states count as already corrected: the one a pass analysed, and the one it left behind.
   // The second is the case that actually happens -- the reporter looks at the corrected transcript
   // and presses the button again.
-  if (!force && listPasses(root, store).some(pass =>
+  //
+  // Restricted to AI records. The deterministic format pass writes into the same directory, and it
+  // runs FIRST in the one-click workflow -- so its `resultingReviewStateHash` is precisely the state
+  // this pass is about to analyse. Counting it here made one click run the deterministic pass and
+  // then tell the reporter their transcript was already corrected, with no AI pass having run at all.
+  if (!force && listPasses(root, store).filter(isAiPass).some(pass =>
     pass?.reviewStateHash === before || pass?.resultingReviewStateHash === before)) {
     return { status: AI_CORRECTION_STATUS.ALREADY_CORRECTED, applied: [], omitted: [], operationCount: 0, retryable: false,
       message: "This transcript has already been corrected in its current state. Nothing was changed." };

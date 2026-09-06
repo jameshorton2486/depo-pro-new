@@ -419,11 +419,14 @@ test("the reporter's control applies, and nothing applies on its own", () => {
 
   const transcribe = api.slice(api.indexOf('req.url === "/api/audio/transcribe"'));
   const routeBody = transcribe.slice(0, transcribe.indexOf('if (\n      req.url?.startsWith("/api/transcription/jobs?")'));
-  assert.equal(/applyAiCorrectionPass|runAiReview/.test(routeBody), false,
+  assert.equal(/applyAiCorrectionPass|correctTranscript|runAiReview/.test(routeBody), false,
     "finishing a transcription must not start a paid AI pass");
 
   assert.match(api, /req\.url === "\/api\/correction\/ai-apply" && req\.method === "POST"/);
-  assert.match(api, /await applyAiCorrectionPass\(root, \{/);
+  // The route delegates to the one-click orchestrator, which runs the deterministic format pass and
+  // then the AI passes. The ordering lives in that one function and not in the route, so there is
+  // one place where "what does Correct Transcript do" is answered.
+  assert.match(api, /await correctTranscript\(root, \{/);
   const applyRoute = api.slice(api.indexOf('req.url === "/api/correction/ai-apply" && req.method === "POST"'));
   assert.equal(/input\.(reviewStateHash|expectedReviewStateHash)/.test(applyRoute.slice(0, 900)), false,
     "the transcript state is derived on the server, never accepted from the request");
