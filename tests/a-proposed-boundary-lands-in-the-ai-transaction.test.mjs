@@ -78,6 +78,34 @@ test("a correction the reporter already made is what the model reads", () => {
   assert.equal(openingUtterances({ transcript: transcript(), evidence: EVIDENCE, overlay })[3].text, "Please your name");
 });
 
+test("it counts paragraphs, not diarization turns", () => {
+  // FOUND BY QUALIFICATION, on the real Heath Thomas recording. Deepgram splits one speaker's
+  // continuous statement into many turns -- the reporter's on-record caption alone is eight of
+  // them, and the deposition opens with twenty more turns of off-record audio checks. Counting
+  // turns, a 40-line excerpt stopped in the middle of the caption: it never reached the
+  // appearances, the oath, the handoff or the first question, so the pass could not answer at all
+  // and a paid call bought a guaranteed found:false.
+  //
+  // Counting the paragraphs the reader sees, the same opening reaches the first question at 27.
+  //
+  // Timed, because grouping is: two turns merge only when the second starts within three seconds
+  // of the first ending. An untimed fixture would never merge and would pass this test for the
+  // wrong reason.
+  const turns = [];
+  for (let n = 0; n < 12; n += 1) {
+    turns.push({ id: `long-${n}`, speakerIdentity: "reporter", transcriptRole: "COURT_REPORTER",
+      text: `part ${n}`, asrWordIds: [`job:long:${n}`], start: n, end: n + 0.5 });
+  }
+  const question = { id: "q", speakerIdentity: "nunez", transcriptRole: "QUESTIONING_ATTORNEY",
+    text: "State your name", asrWordIds: ["job:q:1"], start: 12, end: 13 };
+  const evidence = [{ words: [...turns.map((t, n) => ({ id: `job:long:${n}`, punctuatedWord: `part${n}` })),
+    { id: "job:q:1", punctuatedWord: "State" }] }];
+  const utterances = openingUtterances({ transcript: { segments: [...turns, question] }, evidence,
+    overlay: emptyOverlay("DEP-1"), limit: 3 });
+  assert.equal(utterances.length, 2, "twelve consecutive turns by one speaker are one paragraph");
+  assert.equal(utterances[1].wordId, "job:q:1", "and the excerpt reaches the question, not the twelfth fragment");
+});
+
 test("only the opening is sent", () => {
   assert.equal(openingUtterances({ transcript: transcript(), evidence: EVIDENCE, overlay: emptyOverlay("DEP-1"), limit: 2 }).length, 2);
 });

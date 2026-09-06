@@ -22,6 +22,7 @@ import {
   EXAMINATION_BOUNDARY_PROMPT_VERSION, EXAMINATION_BOUNDARY_SYSTEM,
   buildExaminationBoundaryPrompt, examinationBoundaryTool,
 } from "./examination-boundary-prompt.mjs";
+import { groupTranscriptSegments } from "../app/transcript-paragraphs.mjs";
 import { fetchExternal } from "./external-fetch.mjs";
 import { applyOverlay, emptyOverlay } from "./reporter-overlay.mjs";
 import { computeReviewStateHash } from "./review-state-hash.mjs";
@@ -29,8 +30,19 @@ import { computeReviewStateHash } from "./review-state-hash.mjs";
 /** The examination this pass may propose. It is asked about the first one and no other. */
 const PROPOSED_TYPE = "DIRECT";
 
-/** How many opening paragraphs the model reads. Enough to reach the handoff, not the testimony. */
-export const OPENING_UTTERANCE_LIMIT = 40;
+/**
+ * How many opening paragraphs the model reads.
+ *
+ * MEASURED, not guessed. On the Heath Thomas recording the first examination question is grouped
+ * paragraph 27: the deposition opens with roughly twenty turns of off-record audio checks before
+ * the reporter goes on the record, then the caption, the appearances, the oath and the handoff.
+ * 60 clears that by a wide margin and still sends only the opening.
+ *
+ * The unit is the paragraph the reader sees, not the diarization turn. Deepgram split that same
+ * opening into 57 raw segments -- the reporter's single on-record statement alone is eight of them
+ * -- so a limit counted in segments stopped mid-caption and the pass could not answer at all.
+ */
+export const OPENING_UTTERANCE_LIMIT = 60;
 
 /**
  * The opening of the deposition as the model reads it: one line per paragraph, anchored on the id
@@ -44,9 +56,13 @@ export function openingUtterances({ transcript, evidence = [], overlay = null, l
   const wordsById = new Map();
   for (const document of evidence ?? []) for (const word of document?.words ?? []) wordsById.set(word.id, word);
   const projection = applyOverlay(transcript?.segments ?? [], overlay ?? emptyOverlay(transcript?.depositionId));
+  // The paragraphs the reader sees, which is the same grouping the renderer labels. Diarization
+  // splits one speaker's continuous statement into many turns, so counting those would send the
+  // model a fraction of the opening and ask it about a transition it was never shown.
+  const paragraphs = groupTranscriptSegments(projection.segments ?? []);
 
   const utterances = [];
-  for (const segment of projection.segments ?? []) {
+  for (const segment of paragraphs) {
     const words = [];
     for (const id of segment.asrWordIds ?? []) {
       if (projection.deleted.has(id)) continue;
