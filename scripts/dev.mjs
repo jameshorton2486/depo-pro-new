@@ -41,5 +41,5 @@ process.on("SIGINT", () => stop());
 process.on("SIGTERM", () => stop());
 for (const child of processes) {
   child.on("error", error => { console.error(error); stop(1); });
-  child.on("exit", code => { if (!stopping) stop(code || 0); });
+  child.on("exit", code => { if (!stopping) stop(code ?? 1); });
 }
