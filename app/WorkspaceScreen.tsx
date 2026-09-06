@@ -6,6 +6,7 @@ import { LOCAL_API_BASE_URL as API } from "./api-client";
 import { DOCUMENT_STATUS, deriveDocumentStatus, documentControlLabel, generationNotice } from "./document-status.mjs";
 import CounselEditor from "./CounselEditor";
 import { splitWithSpeakerControl, splitWithSpeakerOperation } from "./split-with-speaker-control.mjs";
+import { TRANSCRIPT_MARKS, markInsertion } from "./transcript-marks.mjs";
 import { overlayHistoryRequest, overlayMutationRequest, rangeAcceptanceRequest } from "./overlay-mutation.mjs";
 import { emptyRangeListMessage, rangeProposalKey, rangeProposalSummary, remainingAfterAcceptance, remainingAfterRejection } from "./range-review.mjs";
 import { currentSpeakerDescription, deleteSelectedParagraphOperations, globalScopeOption, speakerScopeChoices, strikeParagraphOperations, proposalScopeDescription, reviewCategories, reviewStep, selectedParagraphSummary, speakerActions, speakerReviewLocations, structureActions } from "./transcript-tools.mjs";
@@ -609,6 +610,24 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
   },[playbackSource,skipSeconds,continuousRate]);
 
   const active = rendered?.paragraphs.find(paragraph => paragraph.id===selected?.paragraphId) ?? null;
+  // A dash or an ellipsis, placed where the reporter is actually pointing.
+  //
+  // Two paths, because the reporter has two hands on two different things. With a paragraph open
+  // for editing the caret is the position they mean, and that path is the original behaviour. With
+  // a word merely selected -- which is what the panel asks for, and what leaves a foot pedal free --
+  // the mark is inserted as an authored token AFTER that word. Never into it: writing punctuation
+  // into an evidentiary word is how a caret resting mid-word produced "kn...ow".
+  //
+  // No confirmation. Undo is the safety mechanism here as everywhere else, and a dialog between the
+  // reporter and a punctuation mark would cost more than the mistake it prevents.
+  const insertMark=useCallback(async(markId:string,atCaret:((text:string)=>void)|null)=>{
+    const mark=TRANSCRIPT_MARKS[markId as keyof typeof TRANSCRIPT_MARKS];
+    if(!mark)return false;
+    if(atCaret){atCaret(mark.text);return true}
+    const verdict=markInsertion({paragraph:active,selectedWordId:selected?.wordId??null,markId});
+    if(!verdict.ok){setError(verdict.message);return false}
+    return structuralTransaction(verdict.operations as Operation[]);
+  },[active,selected,structuralTransaction]);
   // Stable identities so the transcript pages below can be held back. Both read through a ref rather
   // than listing their function as a dependency: those functions are rebuilt every render, so a
   // dependency would hand every page a new handler again and defeat the comparator.
@@ -911,7 +930,10 @@ export default function WorkspaceScreen({ deposition, audioIndex = 0, onBack }:{
       <button type="button" className={paragraphRangeMode?"active":""} aria-pressed={paragraphRangeMode} title="Select a range of complete paragraphs" aria-label="Select a range of complete paragraphs" onClick={()=>{setParagraphRangeMode(value=>!value);setSelected(null);setEditing(null)}}>⇲<small>Range</small></button>
       <button type="button" title="Play selected paragraph" aria-label="Play selected paragraph" disabled={!active||multiVolume||!playbackSource} onClick={()=>playParagraph(active)}>▶<small>Play</small></button>
       <button type="button" title="Correct selected word" aria-label="Correct selected word" disabled={!selected||!active||busy||awaitingRecord||Boolean(range)} onClick={()=>{const word=active?.words.find(item=>item.id===selected?.wordId);if(word)setEditing({wordId:word.id,text:word.text})}}>Aa<small>Edit</small></button>
-      <button type="button" title="Insert an ellipsis at the paragraph editor cursor" aria-label="Insert ellipsis at cursor" disabled={!canInsertAtCaret||busy||awaitingRecord} onMouseDown={event=>event.preventDefault()} onClick={()=>insertAtCaret("...")}>…<small>Ellipsis</small></button>
+      {[TRANSCRIPT_MARKS.dash,TRANSCRIPT_MARKS.ellipsis].map(mark=>
+        <button key={mark.id} type="button" title={`${mark.description}, or at the cursor while a paragraph is open`} aria-label={mark.description}
+          disabled={(!canInsertAtCaret&&!selected)||busy||awaitingRecord} onMouseDown={event=>event.preventDefault()}
+          onClick={()=>void insertMark(mark.id,canInsertAtCaret?insertAtCaret:null)}>{mark.glyph}<small>{mark.label}</small></button>)}
       <button type="button" title="Split paragraph at selected word" aria-label="Split paragraph at selected word" disabled={!active||busy||awaitingRecord||!splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId} onClick={()=>{if(!active)return;const anchor=splitWithSpeakerControl({paragraph:active,selectedWordId:selected?.wordId??null}).beforeWordId;if(anchor)void structuralTransaction([{op:"split",beforeWordId:anchor}])}}>↵<small>Split</small></button>
       <button type="button" title="Join with previous paragraph" aria-label="Join with previous paragraph" disabled={!active||activeIndex<=0||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"previous")}>↑<small>Join</small></button>
       <button type="button" title="Join with next paragraph" aria-label="Join with next paragraph" disabled={!active||activeIndex<0||activeIndex>=(rendered?.paragraphs.length??0)-1||busy||awaitingRecord} onClick={()=>active&&void joinParagraph(active.id,"next")}>↓<small>Join</small></button>
